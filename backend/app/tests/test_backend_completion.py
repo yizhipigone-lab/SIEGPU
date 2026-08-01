@@ -30,6 +30,7 @@ def _proj(db):
 
 # ---------- 发票红冲 ----------
 def test_invoice_reverse_excludes_from_recon(db):
+    u = _user_p(db)
     p = _proj(db); cust = Customer(name="c"); db.add(cust); db.flush()
     c = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
                              amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
@@ -37,7 +38,7 @@ def test_invoice_reverse_excludes_from_recon(db):
     # 红冲前：对账含该发票
     row = [r for r in isvc.reconciliation(db) if r["contract_id"] == str(c.id)][0]
     assert row["invoiced"] > 0
-    isvc.reverse_invoice(db, invoice_id=inv.id, reversed_by=uuid.uuid4())
+    isvc.reverse_invoice(db, invoice_id=inv.id, reversed_by=u.id)
     # 红冲后：原票与红冲凭证均剔除 → invoiced 归零
     row2 = [r for r in isvc.reconciliation(db) if r["contract_id"] == str(c.id)][0]
     assert row2["invoiced"] == Decimal("0.00")

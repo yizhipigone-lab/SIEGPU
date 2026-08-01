@@ -14,7 +14,8 @@ http.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
-      if (location.pathname !== '/login') location.href = '/login'
+      // 组件外无法直接用 naive-ui message，改用 query 参数由登录页提示
+      if (location.pathname !== '/login') location.href = '/login?expired=1'
     }
     return Promise.reject(err)
   }

@@ -58,7 +58,7 @@ def advance_stage(stage_id: UUID, payload: StageAdvance, db: Session = Depends(g
 @router.post("/{order_id}/light-on")
 def light_on(order_id: UUID, payload: LightOnRequest, db: Session = Depends(get_db),
              user: User = Depends(get_current_user)):
-    o, asset = svc.light_on(db, order_id=order_id, actual_date=payload.actual_date)
+    o, asset = svc.light_on(db, order_id=order_id, actual_date=payload.actual_date, operator_id=user.id)
     db.commit()
     return {"order_id": str(o.id), "status": o.status, "asset_id": str(asset.id),
             "monthly_depreciation": asset.monthly_depreciation}

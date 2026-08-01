@@ -10,14 +10,19 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.models.acceptance import AcceptanceRecord
 from app.models.billing import Invoice
 from app.models.project import Contract
+from app.models.service_confirmation import ServiceConfirmation
 
 router = APIRouter()
 
 ALLOWED_EXT = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif'}
 MAX_SIZE = 20 * 1024 * 1024  # 20MB
-ENTITY_MAP = {'contracts': Contract, 'invoices': Invoice}
+ENTITY_MAP = {
+    'contracts': Contract, 'invoices': Invoice,
+    'acceptances': AcceptanceRecord, 'confirmations': ServiceConfirmation,
+}
 
 
 @router.post('/{entity}/{eid}/upload')

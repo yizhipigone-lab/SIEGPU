@@ -38,6 +38,8 @@ def create_order(db: Session, *, project_id, equipment_model_id, quantity, unit_
     for i, st in enumerate(STAGES, 1):
         db.add(DeliveryStage(order_id=o.id, stage=st, seq=i, status="未开始"))
     db.flush()
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, project_id)
     return o
 
 
@@ -72,7 +74,7 @@ def advance_stage(db: Session, *, stage_id, status, actual_date=None) -> Deliver
     return st
 
 
-def light_on(db: Session, *, order_id, actual_date: date):
+def light_on(db: Session, *, order_id, actual_date: date, operator_id=None):
     """点亮：同事务把'点亮'阶段置完成、订单置已点亮、生成资产（W20）。幂等：订单状态守卫。"""
     o = db.execute(select(Order).where(Order.id == order_id).with_for_update()).scalar_one_or_none()
     if not o:
@@ -97,4 +99,9 @@ def light_on(db: Session, *, order_id, actual_date: date):
     db.add(asset)
     o.status = "已点亮"
     db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=operator_id, action="LIGHT_ON", target_type="order",
+               target_id=o.id, after_json={"quantity": o.quantity, "date": str(actual_date)})
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, o.project_id)
     return o, asset

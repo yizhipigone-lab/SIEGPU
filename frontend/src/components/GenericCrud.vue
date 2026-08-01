@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NDataTable, NDescriptions, NDescriptionsItem, NDrawer, NDrawerContent, NEmpty,
+  NButton, NDataTable, NDatePicker, NDescriptions, NDescriptionsItem, NDrawer, NDrawerContent, NEmpty,
   NForm, NFormItem, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace,
-  NTabPane, NTabs, NTag, NUpload, useMessage,
+  NTabPane, NTabs, NTag, NTooltip, NUpload, useMessage,
 } from 'naive-ui'
-import { Eye, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Eye, Pencil, Plus, Trash2, Workflow } from 'lucide-vue-next'
 import * as R from '../composables/useResource'
-import { money, statusTagType } from '../utils/format'
+import { money, statusTagType, tsToYmd, ymdToTs } from '../utils/format'
+import { errMsg } from '../utils/errMsg'
 import { api } from '../api/client'
 import type { CrudConfig, DetailAction } from '../config/modules'
 
 const props = defineProps<{ config: CrudConfig }>()
 const msg = useMessage()
+const route = useRoute()
+const router = useRouter()
 const items = ref<any[]>([])
 const loading = ref(false)
 const showModal = ref(false)
@@ -20,10 +24,28 @@ const editing = ref<any | null>(null)
 const form = reactive<Record<string, any>>({})
 const searchTerm = ref('')
 
+// 远程下拉选项缓存：fieldKey → options
+const remoteOpts = reactive<Record<string, { label: string; value: string }[]>>({})
+async function loadRemoteOptions() {
+  for (const f of props.config.fields) {
+    if (!f.remoteOptions) continue
+    const { endpoint, label, value, tags } = f.remoteOptions
+    const endpoints = Array.isArray(endpoint) ? endpoint : [endpoint]
+    try {
+      const resps = await Promise.all(endpoints.map((ep) => api.get(ep)))
+      remoteOpts[f.key] = resps.flatMap((r, i) =>
+        (r.data.items || r.data || []).map((it: any) => ({
+          label: `${tags?.[i] ? `[${tags[i]}] ` : ''}${it[label]}`, value: it[value],
+        })))
+    } catch { remoteOpts[f.key] = [] }
+  }
+}
+
 // 详情抽屉
 const showDetail = ref(false)
 const detailRow = ref<any | null>(null)
 const tabData = ref<Record<string, any[]>>({})
+const stages = ref<any[]>([])
 
 // 业务操作弹窗
 const showActionModal = ref(false)
@@ -41,8 +63,8 @@ async function refresh() {
   } catch { msg.error('加载失败') }
   finally { loading.value = false }
 }
-onMounted(refresh)
-watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = ''; refresh() })
+onMounted(() => { refresh(); loadRemoteOptions() })
+watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = ''; refresh(); loadRemoteOptions() })
 
 // 搜索过滤
 const filteredItems = computed(() => {
@@ -53,7 +75,13 @@ const filteredItems = computed(() => {
   )
 })
 
-function openCreate() { editing.value = null; blankForm(); showModal.value = true }
+function openCreate() {
+  editing.value = null; blankForm()
+  // 工作台跳转带 ?project_id= 时预填项目字段
+  const qpid = route.query.project_id as string
+  if (qpid && props.config.fields.some((f) => f.key === 'project_id')) form.project_id = qpid
+  showModal.value = true
+}
 function openEdit(row: any) {
   editing.value = row
   props.config.fields.forEach((f) => { form[f.key] = row[f.key] ?? (f.type === 'number' ? null : '') })
@@ -63,6 +91,9 @@ async function openDetail(row: any) {
   detailRow.value = row
   showDetail.value = true
   tabData.value = {}
+  stages.value = []
+  // 交付阶段（stageFlow 模块：拉详情里的 stages）
+  if (props.config.stageFlow) await loadStages(row.id)
   // 拉关联子表
   if (props.config.detailTabs?.length) {
     for (const tab of props.config.detailTabs) {
@@ -74,14 +105,33 @@ async function openDetail(row: any) {
     }
   }
 }
+async function loadStages(orderId: string) {
+  try {
+    const { data } = await api.get(`${props.config.apiPath}/${orderId}`)
+    stages.value = data.stages || []
+  } catch { stages.value = [] }
+}
+async function advanceStage(stage: any, status: '进行中' | '已完成') {
+  try {
+    await api.patch(`${props.config.apiPath}/delivery-stages/${stage.id}`, {
+      status, actual_date: new Date().toISOString().slice(0, 10),
+    })
+    msg.success(status === '已完成' ? `阶段「${stage.stage}」已完成` : `阶段「${stage.stage}」已开始`)
+    if (detailRow.value) await loadStages(detailRow.value.id)
+  } catch (e: any) { msg.error(e.response?.data?.detail?.message || '推进失败') }
+}
 async function submit() {
+  // 必填前端校验（缺必填给中文提示）
+  const missing = props.config.fields
+    .filter((f) => f.required && (form[f.key] === null || form[f.key] === undefined || form[f.key] === ''))
+    .map((f) => f.label)
+  if (missing.length) { msg.warning(`请填写必填项：${missing.join('、')}`); return }
   try {
     if (editing.value) await R.updateRes(props.config.apiPath, editing.value.id, { ...form })
     else await R.createRes(props.config.apiPath, { ...form })
     showModal.value = false; msg.success('已保存'); await refresh()
   } catch (e: any) {
-    const det = e.response?.data?.detail
-    msg.error(typeof det === 'string' ? det : det?.message || '保存失败')
+    msg.error(errMsg(e))
   }
 }
 async function del(row: any) {
@@ -133,7 +183,7 @@ async function submitAction() {
     const updated = items.value.find((i: any) => i.id === detailRow.value?.id)
     if (updated) detailRow.value = updated
   } catch (e: any) {
-    msg.error(e.response?.data?.detail?.message || e.response?.data?.detail || '操作失败')
+    msg.error(errMsg(e))
   }
 }
 
@@ -177,6 +227,10 @@ const tableColumns = computed(() => {
   base.push({
     title: '操作', key: '__op', width: 140, align: 'center',
     render: (row: any) => h(NSpace, { size: 4, justify: 'center' }, () => [
+      ...(props.config.workspaceLink ? [
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => router.push(`/projects/${row.id}/workspace`), title: '工作台' },
+          { icon: () => h(NIcon, null, { default: () => h(Workflow, { size: 14 }) }) }),
+      ] : []),
       h(NButton, { size: 'tiny', quaternary: true, onClick: () => openDetail(row), title: '详情' },
         { icon: () => h(NIcon, null, { default: () => h(Eye, { size: 14 }) }) }),
       h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row), title: '编辑' },
@@ -214,17 +268,20 @@ const tableColumns = computed(() => {
     <div class="card table-wrap">
       <n-data-table :columns="tableColumns" :data="filteredItems" :loading="loading"
         :pagination="{ pageSize: 10 }" :bordered="false" size="small" striped>
-        <template #empty><n-empty description="暂无数据" style="padding:32px 0" /></template>
+        <template #empty><n-empty :description="config.creatable !== false ? '暂无数据，点击右上角「新增」创建第一条' : '暂无数据'" style="padding:32px 0" /></template>
       </n-data-table>
     </div>
 
     <!-- 新增/编辑 -->
     <n-modal v-model:show="showModal" preset="card" :title="editing ? '编辑' : '新增'" style="width:520px;max-width:94vw">
       <n-form label-placement="left" :label-width="140">
-        <n-form-item v-for="f in config.fields" :key="f.key" :label="f.label">
-          <n-select v-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" />
+        <n-form-item v-for="f in config.fields" :key="f.key" :label="f.label" :required="f.required">
+          <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
+          <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" />
           <n-input-number v-else-if="f.type === 'number'" v-model:value="form[f.key]" style="width:100%" />
-          <n-input v-else v-model:value="form[f.key]" :placeholder="f.type === 'date' ? 'YYYY-MM-DD' : ''" />
+          <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
+            :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />
+          <n-input v-else v-model:value="form[f.key]" />
         </n-form-item>
       </n-form>
       <template #footer><n-space justify="end"><n-button @click="showModal = false">取消</n-button><n-button type="primary" @click="submit">保存</n-button></n-space></template>
@@ -236,7 +293,7 @@ const tableColumns = computed(() => {
         <n-descriptions v-if="detailRow" label-placement="left" bordered :column="1" size="small">
           <n-descriptions-item v-for="f in allFields" :key="f.key" :label="f.label">
             <span v-if="numKeys.has(f.key)" class="num">{{ money(detailRow[f.key]) }}</span>
-            <n-tag v-else-if="tagKeys.has(f.key)" size="small" :type="statusTagType(detailRow[f.key]) as any" bordered="false">{{ detailRow[f.key] ?? '-' }}</n-tag>
+            <n-tag v-else-if="tagKeys.has(f.key)" size="small" :type="statusTagType(detailRow[f.key]) as any" :bordered="false">{{ detailRow[f.key] ?? '-' }}</n-tag>
             <span v-else>{{ detailRow[f.key] ?? '-' }}</span>
           </n-descriptions-item>
         </n-descriptions>
@@ -245,7 +302,7 @@ const tableColumns = computed(() => {
         <div v-if="config.fileUpload && detailRow" style="margin-top:20px">
           <div class="muted" style="margin-bottom:8px;font-weight:600">附件管理</div>
           <div v-if="detailRow.file_path" style="margin-bottom:8px">
-            <n-tag size="small" type="success" bordered="false">{{ String(detailRow.file_path).slice(0, 30) }}</n-tag>
+            <n-tag size="small" type="success" :bordered="false">{{ String(detailRow.file_path).slice(0, 30) }}</n-tag>
             <n-button size="small" quaternary @click="downloadFile" style="margin-left:8px">下载/预览</n-button>
           </div>
           <div v-else class="muted tiny" style="margin-bottom:8px">暂无附件</div>
@@ -259,8 +316,30 @@ const tableColumns = computed(() => {
         <div v-if="visibleActions.length" style="margin-top:20px">
           <div class="muted" style="margin-bottom:8px;font-weight:600">业务操作</div>
           <n-space>
-            <n-button v-for="act in visibleActions" :key="act.label" type="primary" @click="triggerAction(act)">{{ act.label }}</n-button>
+            <template v-for="act in visibleActions" :key="act.label">
+              <n-tooltip v-if="act.tooltip">
+                <template #trigger>
+                  <n-button type="primary" @click="triggerAction(act)">{{ act.label }}</n-button>
+                </template>
+                {{ act.tooltip }}
+              </n-tooltip>
+              <n-button v-else type="primary" @click="triggerAction(act)">{{ act.label }}</n-button>
+            </template>
           </n-space>
+        </div>
+
+        <!-- 交付阶段推进 -->
+        <div v-if="config.stageFlow && stages.length" style="margin-top:20px">
+          <div class="muted" style="margin-bottom:8px;font-weight:600">交付阶段</div>
+          <div v-for="st in stages" :key="st.id" class="stage-row">
+            <span class="stage-seq">{{ st.seq }}</span>
+            <span class="stage-name">{{ st.stage }}</span>
+            <n-tag size="tiny" :bordered="false"
+              :type="st.status === '已完成' ? 'success' : st.status === '进行中' ? 'info' : 'default'">{{ st.status }}</n-tag>
+            <span class="muted tiny">{{ st.actual_date || st.planned_date || '' }}</span>
+            <n-button v-if="st.status === '未开始'" size="tiny" quaternary type="info" @click="advanceStage(st, '进行中')">开始</n-button>
+            <n-button v-if="st.status !== '已完成'" size="tiny" quaternary type="success" @click="advanceStage(st, '已完成')">完成</n-button>
+          </div>
         </div>
 
         <!-- 关联子表 -->
@@ -279,7 +358,9 @@ const tableColumns = computed(() => {
     <n-modal v-model:show="showActionModal" preset="card" :title="activeAction?.label || '操作'" style="width:340px">
       <n-form label-placement="left" :label-width="120">
         <n-form-item v-for="f in activeAction?.fields || []" :key="f.key" :label="f.label">
-          <n-input v-model:value="actionForm[f.key]" placeholder="YYYY-MM-DD" />
+          <n-date-picker v-if="f.type === 'date'" type="date" style="width:100%"
+            :value="ymdToTs(actionForm[f.key])" @update:value="(ts: number | null) => actionForm[f.key] = tsToYmd(ts)" />
+          <n-input v-else v-model:value="actionForm[f.key]" />
         </n-form-item>
       </n-form>
       <template #footer><n-space justify="end"><n-button @click="showActionModal = false">取消</n-button><n-button type="primary" @click="submitAction">确认</n-button></n-space></template>
@@ -289,6 +370,10 @@ const tableColumns = computed(() => {
 
 <style scoped>
 .crud-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.stage-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--c-border, #e5e7eb); }
+.stage-row:last-child { border-bottom: none; }
+.stage-seq { width: 18px; height: 18px; border-radius: 50%; background: var(--c-primary, #2563EB); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; }
+.stage-name { flex: 1; font-size: 13px; }
 .table-wrap { padding: 4px; overflow: hidden; }
 :deep(.n-data-table .n-data-table-th) { font-weight: 600; }
 :deep(.num) { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

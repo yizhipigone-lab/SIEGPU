@@ -26,6 +26,7 @@ class InvoiceOut(BaseModel):
     due_date: date | None
     paid_date: date | None
     status: str
+    matched_amount: Decimal = Decimal("0")  # v3.2: 已核销累计金额
     model_config = {"from_attributes": True}
 
 

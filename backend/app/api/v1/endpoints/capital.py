@@ -46,6 +46,11 @@ def summary(db: Session = Depends(get_db), user: User = Depends(get_current_user
     return svc.pool_summary(db)
 
 
+@router.get("/pool-by-project")
+def pool_by_project(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return {"items": svc.pool_by_project(db)}
+
+
 @router.get("/allocatable")
 def allocatable(
     project_id: UUID = Query(...),
@@ -88,6 +93,18 @@ def reverse(
         db.rollback()
         raise BusinessError("DUPLICATE", "该流水已红冲", 409)
     return {"reversal_id": str(rev.id), "reversal_of": str(rev.reversal_of_id)}
+
+
+@router.get("/allocations")
+def list_allocations(project_id: UUID | None = Query(None),
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = svc.list_allocations(db, project_id=project_id)
+    return {"items": [{ "id": str(a.id), "from_project_id": str(a.from_project_id),
+        "to_project_id": str(a.to_project_id), "amount": a.amount,
+        "allocation_date": a.allocation_date.isoformat() if a.allocation_date else None,
+        "status": a.status, "reason": a.reason, "expected_return_date":
+        a.expected_return_date.isoformat() if a.expected_return_date else None,
+    } for a in rows]}
 
 
 @router.post("/allocations/{allocation_id}/return")

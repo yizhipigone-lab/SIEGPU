@@ -8,7 +8,7 @@ test('截图关键页面', async ({ page }) => {
   await page.screenshot({ path: 'screenshots/login.png' })
 
   await page.getByPlaceholder('请输入账号').fill('cfo')
-  await page.getByPlaceholder('请输入密码').fill('cfo123')
+  await page.getByPlaceholder('请输入密码').fill('sie123')
   await page.getByRole('button', { name: /登.*录/ }).click()
   await page.waitForURL('/')
 

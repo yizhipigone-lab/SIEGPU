@@ -7,6 +7,22 @@ export function money(v: unknown): string {
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** 时间戳 → YYYY-MM-DD（本地时区）。naive-ui NDatePicker 的 value 只接受时间戳，提交前需转字符串。 */
+export function tsToYmd(ts: number | null | undefined): string {
+  if (ts === null || ts === undefined) return ''
+  const d = new Date(ts)
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+/** YYYY-MM-DD → 时间戳（供 NDatePicker :value 绑定）；空值/非法值返回 null。 */
+export function ymdToTs(s: string | null | undefined): number | null {
+  if (!s) return null
+  const ts = new Date(`${s}T00:00:00`).getTime()
+  return Number.isNaN(ts) ? null : ts
+}
+
 /** 状态/枚举值 → NTag 类型（语义色）。 */
 export function statusTagType(v: string): string {
   const m: Record<string, string> = {

@@ -3,7 +3,7 @@ import * as fs from 'fs'
 
 test('模块来回切换不丢数据', async ({ page }) => {
   const log: string[] = []
-  await page.goto('http://localhost:9000/login', { waitUntil: 'networkidle' })
+  await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
   await page.fill('input[placeholder="请输入账号"]', 'cfo')
   await page.fill('input[placeholder="请输入密码"]', 'sie123')
   await page.click('button:has-text("登")')
@@ -13,7 +13,7 @@ test('模块来回切换不丢数据', async ({ page }) => {
   for (const path of ['/master/contracts', '/master/projects', '/master/contracts',
                        '/master/orders', '/master/assets', '/master/contracts',
                        '/master/suppliers', '/master/contracts']) {
-    await page.goto('http://localhost:9000' + path, { waitUntil: 'domcontentloaded' })
+    await page.goto('http://localhost:8080' + path, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(500)
     const rows = await page.locator('table tbody tr').count()
     const text = await page.locator('h3').first().innerText().catch(() => '?')

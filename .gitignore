@@ -37,3 +37,6 @@ pgdata/
 
 # ── Claude Code 会话记录 ──
 .superpowers/
+
+# ── Playwright MCP 临时产物 ──
+.playwright-mcp/

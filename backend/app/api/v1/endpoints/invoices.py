@@ -47,3 +47,21 @@ def reverse(invoice_id: UUID, db: Session = Depends(get_db), user: User = Depend
     inv, rev = svc.reverse_invoice(db, invoice_id=invoice_id, reversed_by=user.id)
     db.commit()
     return {"invoice_id": str(inv.id), "status": inv.status, "reversal_id": str(rev.id)}
+
+
+# —— v3.1 发票池 + 核销 ——
+
+@router.get("/pool")
+def invoice_pool(direction: str | None = None, status: str | None = None,
+                 contract_id: UUID | None = None, db: Session = Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    rows = svc.pool_query(db, direction=direction, status=status, contract_id=contract_id)
+    return {"items": [InvoiceOut.model_validate(i).model_dump(mode="json") for i in rows], "total": len(rows)}
+
+
+@router.post("/{invoice_id}/reconcile/{txn_id}")
+def reconcile_inv(invoice_id: UUID, txn_id: UUID,
+                  db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    inv = svc.reconcile_invoice(db, invoice_id=invoice_id, txn_id=txn_id, reconciled_by=user.id)
+    db.commit()
+    return InvoiceOut.model_validate(inv).model_dump(mode="json")

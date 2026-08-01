@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test'
 
 // 铁证：5 个账号都在真实浏览器里登录成功（密码统一 sie123）
+// 首页用户区展示的是中文角色名（frontend/src/utils/role.ts ROLE_CN）
 const ACCOUNTS: [string, string][] = [
-  ['admin', 'ADMIN'],
-  ['cfo', 'FINANCE_DIRECTOR'],
-  ['buyer', 'PROCUREMENT'],
-  ['delivery', 'DELIVERY'],
-  ['finance', 'FINANCE_STAFF'],
+  ['admin', '管理员'],
+  ['cfo', '财务总监'],
+  ['buyer', '采购对接人'],
+  ['delivery', '项目交付负责人'],
+  ['finance', '财务专员'],
 ]
 
 for (const [u, role] of ACCOUNTS) {

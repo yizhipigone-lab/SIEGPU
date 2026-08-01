@@ -24,6 +24,9 @@ def create_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    p = project_service.create_project(db, **payload.model_dump())
+    p = project_service.create_project(db, **{k: v for k, v in payload.model_dump().items() if k != "template_id"})
+    # v3.2: 自动创建向导式工作流（支持模板选择）
+    from app.services import workflow_service as wf
+    wf.create_workflow(db, project_id=p.id, template_id=payload.template_id)
     db.commit()
     return ProjectOut.model_validate(p)

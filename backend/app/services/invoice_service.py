@@ -49,10 +49,11 @@ def mark_paid(db: Session, invoice_id, paid_date) -> Invoice:
     inv = db.get(Invoice, invoice_id)
     if not inv or inv.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "发票不存在", 404)
-    if inv.status in ("已收票", "已付款"):
+    if inv.status in ("已收票", "已回款", "已付款", "已核销"):
         raise BusinessError("DUPLICATE", "发票已标记收款/付款", 409)
     inv.paid_date = paid_date
-    inv.status = "已收票" if inv.direction == "RECEIVABLE" else "已付款"
+    # v3.1 发票池状态：销售→已回款，采购→已付款
+    inv.status = "已回款" if inv.direction == "RECEIVABLE" else "已付款"
     db.flush()
     return inv
 
@@ -107,4 +108,79 @@ def reverse_invoice(db: Session, *, invoice_id, reversed_by, note: str = "红冲
     )
     db.add(rev)
     db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=reversed_by, action="REVERSE", target_type="invoice",
+               target_id=inv.id, after_json={"reversal_id": str(rev.id), "amount": str(inv.amount)})
     return inv, rev
+
+
+# —— v3.1 发票池 + 核销 ——
+
+def pool_query(db: Session, *, direction: str | None = None,
+               status: str | None = None, contract_id=None,
+               skip=0, limit=100) -> list[Invoice]:
+    """发票池统一查询。"""
+    stmt = select(Invoice).where(Invoice.deleted_at.is_(None))
+    if direction:
+        stmt = stmt.where(Invoice.direction == direction)
+    if status:
+        stmt = stmt.where(Invoice.status == status)
+    if contract_id:
+        stmt = stmt.where(Invoice.contract_id == contract_id)
+    stmt = stmt.order_by(Invoice.created_at.desc()).offset(skip).limit(limit)
+    return db.execute(stmt).scalars().all()
+
+
+def reconcile_invoice(db: Session, *, invoice_id, txn_id,
+                      reconciled_by) -> Invoice:
+    """逐笔核销：将一笔发票与一笔资金流水匹配勾销。
+
+    支持部分核销——多次调用逐步累加直到覆盖发票全额。
+    全部匹配后自动置 reconciled_at。
+    """
+    from app.models.capital import CapitalTransaction
+
+    inv = db.get(Invoice, invoice_id)
+    if not inv or inv.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "发票不存在", 404)
+    if inv.status == "已红冲":
+        raise BusinessError("BAD_REQUEST", "已红冲发票不可核销", 400)
+    if inv.status == "已核销":
+        raise BusinessError("DUPLICATE", "发票已核销", 409)
+
+    txn = db.get(CapitalTransaction, txn_id)
+    if not txn or txn.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "资金流水不存在", 404)
+
+    # 方向校验：销售发票→收款流水(IN)，采购发票→付款流水(OUT)
+    if inv.direction == "RECEIVABLE" and txn.direction != "IN":
+        raise BusinessError("VALIDATION_ERROR", "销售发票只能核销收款流水(IN)", 422)
+    if inv.direction == "PAYABLE" and txn.direction != "OUT":
+        raise BusinessError("VALIDATION_ERROR", "采购发票只能核销付款流水(OUT)", 422)
+    if txn.invoice_id and txn.invoice_id != inv.id:
+        raise BusinessError("DUPLICATE", "该流水已关联其他发票", 409)
+
+    # 回填关联
+    txn.invoice_id = inv.id
+    inv.capital_transaction_id = txn_id
+
+    # 检查是否全部匹配：Σ已关联流水金额 >= 发票金额
+    matched = db.execute(
+        select(func.coalesce(func.sum(CapitalTransaction.amount), 0)).where(
+            CapitalTransaction.invoice_id == inv.id, CapitalTransaction.deleted_at.is_(None))
+    ).scalar() or Decimal(0)
+
+    if matched >= inv.amount:
+        inv.status = "已核销"
+        inv.reconciled_at = func.now()
+        inv.reconciled_by = reconciled_by
+
+    db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=reconciled_by, action="RECONCILE", target_type="invoice",
+               target_id=inv.id, after_json={"amount": str(inv.amount), "matched": str(matched)})
+    from app.services import workflow_service as _wf
+    c = db.get(Contract, inv.contract_id)
+    if c:
+        _wf.after_action(db, c.project_id)
+    return inv

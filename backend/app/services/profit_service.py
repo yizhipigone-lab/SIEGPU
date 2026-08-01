@@ -155,29 +155,111 @@ def calculate_model(p: ProfitInput) -> dict:
 
 
 def calculate_for_project(db: Session, project_id: str) -> dict:
-    """从项目已有数据自动提取参数并计算。"""
+    """从项目已有数据自动提取参数并计算（v3.1：读 LeasingProcess + Contract 实际值）。"""
+    from app.core.exceptions import BusinessError
+    from app.models.leasing import LeasingProcess
+
     proj = db.get(Project, project_id)
     if not proj:
-        return {"error": "项目不存在"}
-    # 从项目的合同中提取参数
+        raise BusinessError("NOT_FOUND", "项目不存在", 404)
+
     contracts = db.execute(select(Contract).where(Contract.project_id == project_id)).scalars().all()
     sales = [c for c in contracts if c.type == "SALES"]
     purchase = [c for c in contracts if c.type == "PURCHASE"]
     if not sales or not purchase:
-        return {"error": "项目缺少销售或采购合同"}
+        raise BusinessError("BAD_REQUEST", "项目缺少销售或采购合同", 400)
 
     s = sales[0]
     pur = purchase[0]
-    purchase_incl = float(pur.amount) * 1.13  # 不含税→含税估算
+
+    # v3.1：读 LeasingProcess 实际融资参数
+    lp = db.execute(
+        select(LeasingProcess).where(
+            LeasingProcess.project_id == project_id,
+            LeasingProcess.status == "已放款",
+        ).order_by(LeasingProcess.disbursement_date.desc())
+    ).scalars().first()
+
+    purchase_ex = float(pur.amount)
+    purchase_incl = purchase_ex * float(1 + pur.tax_rate)
+    tax_rate = float(s.tax_rate) if s.tax_rate else 0.13  # 合同税率，默认13%
+
+    if lp:
+        annual_rate = lp.annual_rate if lp.annual_rate is not None else Decimal("0.04")
+        lease_term = lp.term_periods or 60
+        payment_freq = lp.payment_freq or "月"
+        repayment_method = lp.repayment_method or "等额本息"
+    else:
+        annual_rate = Decimal("0.04")
+        lease_term = 60
+        payment_freq = "月"
+        repayment_method = "等额本息"
+
     inputs = ProfitInput(
-        purchase_ex_tax=float(pur.amount),
-        purchase_incl_tax=purchase_incl,
-        monthly_rent=float(s.monthly_rent or 0),
-        term_months=60,
-        annual_rate=Decimal("0.04"),
-        lease_term=60,
-        payment_freq="月",
-        repayment_method="等额本息",
-        monthly_opex=Decimal("4116000"),  # 默认运营成本
+        purchase_ex_tax=Decimal(str(purchase_ex)),
+        purchase_incl_tax=Decimal(str(purchase_incl)),
+        monthly_rent=s.monthly_rent or Decimal("0"),
+        term_months=lease_term,
+        annual_rate=Decimal(str(annual_rate)),
+        lease_term=lease_term,
+        payment_freq=payment_freq,
+        repayment_method=repayment_method,
+        monthly_opex=Decimal("0"),  # 从实际支出汇总或外部参数
+        tax_rate=Decimal(str(tax_rate)),
+        equity_ratio=Decimal("0.10"),
     )
-    return calculate_model(inputs)
+    result = calculate_model(inputs)
+    # 挂项目名便于前端展示
+    result["project_name"] = proj.name
+    result["project_code"] = proj.code
+    return result
+
+
+def save_scenario(db: Session, *, project_id, name, params_json, result_json,
+                  is_actual=False, created_by=None):
+    """保存盈利测算场景。"""
+    from app.models.profit_scenario import ProfitScenario
+    from datetime import datetime
+    scenario = ProfitScenario(
+        project_id=project_id, name=name,
+        params_json=params_json, result_json=result_json,
+        is_actual=is_actual, calculated_at=datetime.utcnow(),
+        created_by=created_by,
+    )
+    db.add(scenario)
+    db.flush()
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, project_id)
+    return scenario
+
+
+def list_scenarios(db: Session, *, project_id, skip=0, limit=50):
+    from app.models.profit_scenario import ProfitScenario
+    stmt = select(ProfitScenario).where(
+        ProfitScenario.project_id == project_id,
+        ProfitScenario.deleted_at.is_(None),
+    ).order_by(ProfitScenario.created_at.desc()).offset(skip).limit(limit)
+    return db.execute(stmt).scalars().all()
+
+
+def compare_scenarios(db: Session, *, project_id) -> dict:
+    """测算 vs 实际对比：取最新的 is_actual=False 场景和 is_actual=True 场景。"""
+    scenarios = list_scenarios(db, project_id=project_id, limit=100)
+    estimated = next((s for s in scenarios if not s.is_actual), None)
+    actual = next((s for s in scenarios if s.is_actual), None)
+    if not estimated or not actual:
+        return {"estimated": None, "actual": None, "diffs": []}
+    est_summary = estimated.result_json.get("summary", {})
+    act_summary = actual.result_json.get("summary", {})
+    diffs = []
+    for key in ["total_revenue_ex_tax", "total_opex", "total_depreciation",
+                "total_lease_interest", "total_profit", "irr_annual_pct", "npv_5pct"]:
+        ev = est_summary.get(key)
+        av = act_summary.get(key)
+        if ev is not None and av is not None and ev != av:
+            try:
+                delta = round(float(av) - float(ev), 2)
+            except (TypeError, ValueError):
+                delta = None
+            diffs.append({"key": key, "estimated": ev, "actual": av, "delta": delta})
+    return {"estimated": estimated.result_json, "actual": actual.result_json, "diffs": diffs}

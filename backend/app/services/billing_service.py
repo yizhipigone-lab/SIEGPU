@@ -38,6 +38,16 @@ def generate_billing(db: Session, *, order_id, contract_id, period_index: int, b
     else:
         days = days_in_month(billing_date)
 
+    # v3.1: duplicated period check (unique index now on sales_order_id+period_index)
+    existing = db.execute(
+        select(Billing).where(
+            Billing.order_id == order_id, Billing.period_index == period_index,
+            Billing.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise BusinessError("DUPLICATE", f"订单 {order_id} 第 {period_index} 期已计费", 409)
+
     b = Billing(
         project_id=o.project_id, contract_id=contract_id, order_id=order_id,
         period_index=period_index, period_label=f"{billing_date.year}-{billing_date.month:02d}",
@@ -46,6 +56,8 @@ def generate_billing(db: Session, *, order_id, contract_id, period_index: int, b
     )
     db.add(b)
     db.flush()
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, o.project_id)
     return b
 
 
