@@ -1,12 +1,12 @@
 import { test } from '@playwright/test'
 import * as fs from 'fs'
 test('合同详情抽屉 + 上传', async ({ page }) => {
-  await page.goto('http://localhost:9000/login', { waitUntil: 'networkidle' })
+  await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
   await page.fill('input[placeholder="请输入账号"]', 'cfo')
   await page.fill('input[placeholder="请输入密码"]', 'sie123')
   await page.click('button:has-text("登")')
   await page.waitForTimeout(1500)
-  await page.goto('http://localhost:9000/master/contracts', { waitUntil: 'domcontentloaded' })
+  await page.goto('http://localhost:8080/master/contracts', { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1000)
   // 点眼睛图标（详情）
   const eyeBtn = page.locator('button[title="详情"]').first()

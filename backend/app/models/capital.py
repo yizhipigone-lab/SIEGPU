@@ -30,6 +30,8 @@ class CapitalTransaction(UUIDPK, TimestampMixin, Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("capital_transactions.id"), nullable=True)
     is_reversal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_replaced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    replaced_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 

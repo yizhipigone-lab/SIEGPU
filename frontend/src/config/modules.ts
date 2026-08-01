@@ -1,10 +1,20 @@
 export type FieldType = 'text' | 'number' | 'select' | 'date'
 
+/** 远程下拉：从 endpoint 拉取选项。endpoint 传数组时合并多个来源，tags 用作来源前缀（如 [客户]/[供应商]）。 */
+export interface RemoteOptions {
+  endpoint: string | string[]
+  label: string
+  value: string
+  tags?: string[]
+}
+
 export interface FieldConfig {
   key: string
   label: string
   type?: FieldType
   options?: { label: string; value: string }[]
+  required?: boolean          // 红星 + 提交前前端校验
+  remoteOptions?: RemoteOptions // 远程下拉（消灭 UUID 手填）
 }
 
 export interface CrudConfig {
@@ -21,6 +31,8 @@ export interface CrudConfig {
   importable?: boolean     // 支持 Excel 导入
   detailActions?: DetailAction[]
   detailTabs?: DetailTab[]
+  stageFlow?: boolean       // 详情抽屉展示交付阶段列表 + 推进按钮（GET {apiPath}/{id}.stages，PATCH {apiPath}/delivery-stages/{stageId}）
+  workspaceLink?: boolean   // 行操作列加「工作台」入口，跳 /projects/{id}/workspace（项目模块用）
 }
 
 export interface DetailAction {
@@ -29,8 +41,9 @@ export interface DetailAction {
   action: string
   method?: 'POST' | 'PATCH'
   showWhen?: (row: any) => boolean
-  fields?: { key: string; label: string }[]
+  fields?: { key: string; label: string; type?: 'date' }[]
   successMsg?: string
+  tooltip?: string           // 按钮释义（NTooltip）
 }
 
 export interface DetailTab {
@@ -110,6 +123,7 @@ export const MODULES: Record<string, CrudConfig> = {
     columns: ['name', 'code', 'status', 'total_investment'],
     labels: { name: '项目', code: '编号', status: '状态', total_investment: '总投资' },
     tagKeys: ['status'], numKeys: ['total_investment'],
+    workspaceLink: true,
     detailTabs: [
       { label: '合同', endpoint: '/contracts', paramKey: 'project_id', columns: ['contract_no', 'type', 'amount', 'status'], labels: { contract_no: '合同号', type: '类型', amount: '金额', status: '状态' } },
       { label: '订单', endpoint: '/orders', paramKey: 'project_id', columns: ['quantity', 'total_amount', 'status'], labels: { quantity: '数量', total_amount: '总额', status: '状态' } },
@@ -119,6 +133,7 @@ export const MODULES: Record<string, CrudConfig> = {
     fields: [
       { key: 'name', label: '项目名称' },
       { key: 'code', label: '项目编号' },
+      { key: 'template_id', label: '流程模板', remoteOptions: { endpoint: '/workflows/templates', label: 'name', value: 'id' } },
       { key: 'total_investment', label: '总投资额', type: 'number' },
       { key: 'start_date', label: '开始日期', type: 'date' },
     ],
@@ -130,10 +145,10 @@ export const MODULES: Record<string, CrudConfig> = {
     tagKeys: ['type', 'direction', 'status'], numKeys: ['amount'],
     fileUpload: true, uploadEntity: 'contracts',
     fields: [
-      { key: 'project_id', label: '项目 ID' },
-      { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE },
-      { key: 'party_id', label: '对方 ID(客户/供应商)' },
-      { key: 'amount', label: '合同金额(不含税)', type: 'number' },
+      { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
+      { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE, required: true },
+      { key: 'party_id', label: '对方(客户/供应商)', required: true, remoteOptions: { endpoint: ['/customers', '/suppliers'], label: 'name', value: 'id', tags: ['客户', '供应商'] } },
+      { key: 'amount', label: '合同金额(不含税)', type: 'number', required: true },
       { key: 'monthly_rent', label: '月租(含税,销售)', type: 'number' },
       { key: 'contract_no', label: '合同号' },
     ],
@@ -143,17 +158,19 @@ export const MODULES: Record<string, CrudConfig> = {
     columns: ['quantity', 'unit_price', 'total_amount', 'status'],
     labels: { quantity: '数量', unit_price: '单价', total_amount: '总额', status: '状态' },
     tagKeys: ['status'], numKeys: ['unit_price', 'total_amount'],
+    stageFlow: true,
     detailActions: [
       { label: '点亮上线', endpoint: '/orders', action: '/light-on',
-        fields: [{ key: 'actual_date', label: '点亮日（YYYY-MM-DD）' }],
+        fields: [{ key: 'actual_date', label: '点亮日', type: 'date' }],
         showWhen: (r: any) => r.status !== '已点亮',
+        tooltip: '设备正式投产上线，点亮日=计费起点，将自动生成固定资产与折旧',
         successMsg: '点亮成功：已生成资产 + 月折旧' },
     ],
     fields: [
-      { key: 'project_id', label: '项目 ID' },
-      { key: 'equipment_model_id', label: '设备型号 ID' },
-      { key: 'quantity', label: '数量', type: 'number' },
-      { key: 'unit_price', label: '单价', type: 'number' },
+      { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
+      { key: 'equipment_model_id', label: '设备型号', required: true, remoteOptions: { endpoint: '/equipment-models', label: 'name', value: 'id' } },
+      { key: 'quantity', label: '数量', type: 'number', required: true },
+      { key: 'unit_price', label: '单价', type: 'number', required: true },
     ],
   },
   assets: {

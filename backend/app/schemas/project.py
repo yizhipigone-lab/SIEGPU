@@ -11,6 +11,7 @@ class ProjectCreate(BaseModel):
     customer_id: UUID | None = None
     total_investment: Decimal | None = None
     start_date: date | None = None
+    template_id: UUID | None = None  # v3.2: 向导式工作流模板
 
 
 class ProjectOut(BaseModel):

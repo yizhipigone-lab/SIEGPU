@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test'
 test('UI 导航：资金池页 + 主数据页', async ({ page }) => {
   await page.goto('/login')
   await page.getByPlaceholder('请输入账号').fill('cfo')
-  await page.getByPlaceholder('请输入密码').fill('cfo123')
+  await page.getByPlaceholder('请输入密码').fill('sie123')
   await page.getByRole('button', { name: /登.*录/ }).click()
   await expect(page).toHaveURL(/\/$/)
 
@@ -12,6 +12,16 @@ test('UI 导航：资金池页 + 主数据页', async ({ page }) => {
   await page.goto('/capital')
   await expect(page.getByText('资金池余额')).toBeVisible()
   await expect(page.getByText('资金流水')).toBeVisible()
+
+  // 侧栏菜单：项目总览（首页之后）
+  await page.locator('.n-menu-item-content', { hasText: '项目总览' }).click()
+  await expect(page).toHaveURL(/\/portfolio$/)
+  await expect(page.getByText('项目组合总览')).toBeVisible()
+
+  // 侧栏菜单：项目对比（利润测算之后）
+  await page.locator('.n-menu-item-content', { hasText: '项目对比' }).click()
+  await expect(page).toHaveURL(/\/comparison$/)
+  await expect(page.getByRole('columnheader', { name: '回款率' })).toBeVisible()
 
   // 主数据通用 CRUD 页
   await page.goto('/master/suppliers')

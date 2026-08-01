@@ -1,11 +1,12 @@
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.endpoints import (
-    auth, assets, billings, capital, contracts, dashboard, excel, files, health, invoices, leasing, master, ocr, orders,
-    projects, repayments, reports,
+    acceptances, auth, assets, billings, capital, confirmations, contracts, dashboard, excel, files, funding, health,
+    invoices, leasing, master, ocr, orders, projects, repayments, reports, sales_orders, workflows,
 )
 
 app = FastAPI(title="SIEGPU ERP", version="2.0")
@@ -26,6 +27,46 @@ async def _integrity_handler(request: Request, exc: IntegrityError):
     return JSONResponse(
         status_code=409,
         content={"code": "INTEGRITY_ERROR", "message": "数据约束冲突（唯一/检查/外键）"},
+    )
+
+
+# 常见字段名中文映射（与前端 utils/errMsg.ts 保持一致）
+_FIELD_CN = {
+    "project_id": "项目", "contract_id": "合同", "order_id": "订单", "sales_order_id": "销售订单",
+    "party_id": "往来单位", "supplier_id": "供应商", "customer_id": "客户", "equipment_model_id": "设备型号",
+    "amount": "金额", "quantity": "数量", "price": "单价", "unit_price": "单价",
+    "name": "名称", "code": "编号", "date": "日期", "transaction_date": "交易日期",
+    "invoice_no": "发票号", "status": "状态", "note": "摘要", "remark": "备注",
+}
+
+# 常见 pydantic 错误信息中文映射（按前缀匹配），映射不到则保留原文
+_MSG_CN = {
+    "Field required": "必填",
+    "Input should be a valid integer": "应为整数",
+    "Input should be a valid number": "应为数字",
+    "Input should be a valid string": "应为字符串",
+    "Input should be a valid date": "应为有效日期",
+}
+
+
+def _cn_msg(msg: str) -> str:
+    for en, cn in _MSG_CN.items():
+        if msg.startswith(en):
+            return cn
+    return msg or "参数错误"
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_handler(request: Request, exc: RequestValidationError):
+    # ★4：422 结构对齐 BusinessError（detail.code/message），字段名+中文 msg 拼成可读文案
+    parts = []
+    for err in exc.errors():
+        loc = err.get("loc") or ()
+        field = str(loc[-1]) if loc else ""
+        parts.append(f"{_FIELD_CN.get(field, field)}: {_cn_msg(err.get('msg', ''))}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": {"code": "VALIDATION", "message": "；".join(parts) or "参数校验失败", "details": {}}},
     )
 
 
@@ -54,3 +95,9 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(excel.router, prefix="/api/excel", tags=["excel"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(ocr.router, prefix="/api/ocr", tags=["ocr"])
+# v3.1 新增
+app.include_router(sales_orders.router, tags=["sales-orders"])
+app.include_router(acceptances.router, tags=["acceptances"])
+app.include_router(confirmations.router, tags=["confirmations"])
+app.include_router(funding.router, tags=["funding"])
+app.include_router(workflows.router, tags=["workflows"])

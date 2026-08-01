@@ -52,6 +52,8 @@ def create_process(db: Session, *, project_id, supplier_id, total_amount, annual
     for i, name in enumerate(STANDARD_NODES, 1):
         db.add(LeasingNode(process_id=proc.id, node_name=name, seq=i, status="未开始"))
     db.flush()
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, project_id)
     return proc
 
 
@@ -112,6 +114,18 @@ def disburse(db: Session, *, process_id, actual_disbursement_amount: Decimal,
     )
     db.add(txn)
 
+    # 1.5) 资金置换：扫描项目中未置换的流贷/自有付款自动归还（v3.1）
+    from app.services import audit_service as _audit
+    from app.services import funding_service as fs
+    replacements = fs.execute_replacement(
+        db, project_id=proc.project_id, leasing_process_id=proc.id,
+        disbursement_amount=actual_disbursement_amount,
+        disbursement_date=disbursement_date, created_by=disbursed_by,
+    )
+    for fr in replacements:
+        _audit.log(db, user_id=disbursed_by, action="SUPERSEDE", target_type="funding_replacement",
+                   target_id=fr.id, after_json={"amount": str(fr.amount), "source": fr.source_type_replaced})
+
     # 2) 生成还款计划（复用 utils/repayment_plan）
     rows = generate_plan(
         principal=actual_disbursement_amount, annual_rate=proc.annual_rate,
@@ -130,4 +144,8 @@ def disburse(db: Session, *, process_id, actual_disbursement_amount: Decimal,
     proc.status = "已放款"
     proc.plan_generated = True
     db.flush()
+    _audit.log(db, user_id=disbursed_by, action="DISBURSE", target_type="leasing_process",
+               target_id=proc.id, after_json={"amount": str(actual_disbursement_amount), "periods": len(rows)})
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, proc.project_id)
     return proc, txn, len(rows)

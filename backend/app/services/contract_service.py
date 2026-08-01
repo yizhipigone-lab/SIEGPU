@@ -32,6 +32,8 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
     )
     db.add(c)
     db.flush()
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, project_id)
     return c
 
 

@@ -45,10 +45,10 @@ def test_billing_full_month_period2(db):
 
 def test_billing_dup_period_blocked(db):
     c, o = _setup_lit_sales(db)
-    from sqlalchemy.exc import IntegrityError
+    from app.core.exceptions import BusinessError
     bsvc.generate_billing(db, order_id=o.id, contract_id=c.id, period_index=1,
                           billing_date=date(2026, 9, 30), created_by=uuid.uuid4())
-    with pytest.raises(IntegrityError):  # (order_id, period_index) 唯一
+    with pytest.raises(BusinessError, match="已计费"):  # v3.1: service层去重
         bsvc.generate_billing(db, order_id=o.id, contract_id=c.id, period_index=1,
                               billing_date=date(2026, 9, 30), created_by=uuid.uuid4())
 

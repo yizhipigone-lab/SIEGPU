@@ -1,10 +1,13 @@
 -- ===========================================================================
--- SIEGPU 算力租赁 ERP — 数据库 schema（v2.0，含审计/复审修订）
+-- SIEGPU 算力租赁 ERP — 数据库 schema（v3.1，全链路补齐）
 -- Target: PostgreSQL 16
 -- 约定：id UUID PK；created_at/updated_at TIMESTAMPTZ（触发器维护）；deleted_at 软删除；
 --       rate 字段存小数（CHECK 0..1）；金额 DECIMAL(18,2)；direction 资金 IN/OUT、票据 RECEIVABLE/PAYABLE
--- 修订对应：NF1 调配幂等键分腿 / NF2 去 chk_reversal 子查询 / NF3 池余额靠反向记录抵消 /
---          NF4 对账 CTE 聚合（应用层）/ NF5 可调余额=净头寸正部（应用层）/ NF6 billings 唯一键含 order_id
+-- 修订：v3.1 — 新增5表(sales_orders/acceptance_records/funding_replacements/profit_scenarios/service_confirmations)
+--            扩展 capital_transactions(+is_replaced+replaced_amount, CHECK+归还流贷/归还自有)
+--            扩展 invoices(+billing_id+purchase_order_id+reconciled_*, CHECK+待收票/已回款/已核销)
+--            扩展 billings(+sales_order_id+confirmation_status, order_id→nullable, 唯一索引重建)
+--            扩展 audit_logs(CHECK+ACCEPT_APPROVE/RECONCILE等)
 -- ===========================================================================
 
 -- updated_at 自动维护
@@ -131,6 +134,28 @@ CREATE TRIGGER trg_contracts_updated BEFORE UPDATE ON contracts FOR EACH ROW EXE
 CREATE INDEX idx_contracts_project ON contracts(project_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_contracts_type ON contracts(type) WHERE deleted_at IS NULL;
 
+-- ============================ 销售订单（v3.1 新增） ============================
+
+CREATE TABLE sales_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    contract_id UUID NOT NULL REFERENCES contracts(id),
+    equipment_model_id UUID NOT NULL REFERENCES equipment_models(id),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    monthly_rent_per_unit DECIMAL(18,2) NOT NULL CHECK (monthly_rent_per_unit >= 0),
+    total_monthly_rent DECIMAL(18,2) NOT NULL CHECK (total_monthly_rent >= 0),
+    start_date DATE,
+    end_date DATE,
+    status VARCHAR(20) NOT NULL DEFAULT '待交付' CHECK (status IN ('待交付','执行中','已终止','已完成')),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE TRIGGER trg_sales_orders_updated BEFORE UPDATE ON sales_orders FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_sales_orders_project ON sales_orders(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_sales_orders_contract ON sales_orders(contract_id) WHERE deleted_at IS NULL;
+
 -- ============================ 金租流程域 ============================
 
 CREATE TABLE leasing_processes (
@@ -177,11 +202,11 @@ CREATE INDEX idx_leasing_nodes_process ON leasing_nodes(process_id) WHERE delete
 
 -- ============================ 资金域 ============================
 
--- capital_transactions：invoice_id 的 FK 因与 invoices 互引用，稍后用 ALTER 添加（NF2：无 chk_reversal 子查询）
+-- capital_transactions：v3.1 source_type CHECK 扩展 + is_replaced/replaced_amount
 CREATE TABLE capital_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id),
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('自有资金','银行流贷','金租融资','租金收入','调配','调配归还','还款')),
+    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('自有资金','银行流贷','金租融资','租金收入','调配','调配归还','还款','归还流贷','归还自有')),
     direction VARCHAR(4) NOT NULL CHECK (direction IN ('IN','OUT')),
     amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
     transaction_date DATE NOT NULL,
@@ -193,6 +218,8 @@ CREATE TABLE capital_transactions (
     idempotency_key VARCHAR(128),
     reversal_of_id UUID REFERENCES capital_transactions(id),
     is_reversal BOOLEAN NOT NULL DEFAULT FALSE,
+    is_replaced BOOLEAN NOT NULL DEFAULT FALSE,
+    replaced_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (replaced_amount >= 0),
     note TEXT,
     created_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -204,7 +231,28 @@ CREATE INDEX idx_ct_project ON capital_transactions(project_id);
 CREATE INDEX idx_ct_date ON capital_transactions(transaction_date);
 CREATE INDEX idx_ct_source ON capital_transactions(source_type);
 CREATE INDEX idx_ct_invoice ON capital_transactions(invoice_id);
+CREATE INDEX idx_ct_replaced ON capital_transactions(project_id, is_replaced) WHERE deleted_at IS NULL AND direction = 'OUT';
 CREATE TRIGGER trg_ct_updated BEFORE UPDATE ON capital_transactions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 资金置换记录（v3.1 新增）
+CREATE TABLE funding_replacements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    leasing_process_id UUID REFERENCES leasing_processes(id),
+    original_txn_id UUID NOT NULL REFERENCES capital_transactions(id),
+    replacement_txn_id UUID NOT NULL REFERENCES capital_transactions(id),
+    amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
+    source_type_replaced VARCHAR(20) NOT NULL CHECK (source_type_replaced IN ('银行流贷','自有资金')),
+    replacement_date DATE NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT '已置换' CHECK (status IN ('已置换','已撤销')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_fr_pair ON funding_replacements(original_txn_id, replacement_txn_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_fr_project ON funding_replacements(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_fr_leasing ON funding_replacements(leasing_process_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_funding_replacements_updated BEFORE UPDATE ON funding_replacements FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE invoices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -218,8 +266,13 @@ CREATE TABLE invoices (
     issue_date DATE,
     due_date DATE,
     paid_date DATE,
-    status VARCHAR(20) NOT NULL DEFAULT '待开' CHECK (status IN ('待开','已开','已收票','已付款','已红冲')),
+    status VARCHAR(20) NOT NULL DEFAULT '待开' CHECK (status IN ('待开','已开','待收票','已收票','已回款','已付款','已核销','已红冲')),
+    billing_id UUID,                       -- FK 见下方 ALTER TABLE
+    purchase_order_id UUID,                   -- FK 见末尾
     capital_transaction_id UUID REFERENCES capital_transactions(id),
+    reconciled_at DATE,
+    reconciled_by UUID REFERENCES users(id),
+    reconciliation_note TEXT,
     reversal_of_id UUID REFERENCES invoices(id),
     file_path VARCHAR(500),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -229,11 +282,10 @@ CREATE TABLE invoices (
 );
 CREATE INDEX idx_inv_contract ON invoices(contract_id);
 CREATE INDEX idx_inv_direction ON invoices(direction);
+CREATE INDEX idx_inv_billing ON invoices(billing_id) WHERE billing_id IS NOT NULL;
 CREATE TRIGGER trg_invoices_updated BEFORE UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- 解决 capital_transactions <-> invoices 互引用
-ALTER TABLE capital_transactions
-    ADD CONSTRAINT fk_ct_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id);
+-- 互引用 FK 在所有表创建完毕后添加
 
 CREATE TABLE capital_allocations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -293,12 +345,40 @@ CREATE TABLE delivery_stages (
 CREATE INDEX idx_ds_order ON delivery_stages(order_id);
 CREATE TRIGGER trg_ds_updated BEFORE UPDATE ON delivery_stages FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- billings：计费/收入确认。唯一键 (order_id, period_index)（NF6）
+-- 验收记录（v3.1 新增）
+CREATE TABLE acceptance_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    acceptance_type VARCHAR(20) NOT NULL CHECK (acceptance_type IN ('采购验收','销售验收')),
+    order_id UUID REFERENCES orders(id),
+    sales_order_id UUID REFERENCES sales_orders(id),
+    status VARCHAR(20) NOT NULL DEFAULT '待验收' CHECK (status IN ('待验收','验收中','已通过','已驳回')),
+    inspector VARCHAR(100),
+    acceptance_date DATE,
+    quantity_accepted INTEGER NOT NULL DEFAULT 0 CHECK (quantity_accepted >= 0),
+    quantity_rejected INTEGER NOT NULL DEFAULT 0 CHECK (quantity_rejected >= 0),
+    rejection_reason TEXT,
+    file_path VARCHAR(500),
+    attachments JSONB,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ,
+    CHECK (
+        (acceptance_type = '采购验收' AND order_id IS NOT NULL) OR
+        (acceptance_type = '销售验收' AND sales_order_id IS NOT NULL)
+    )
+);
+CREATE TRIGGER trg_acceptance_records_updated BEFORE UPDATE ON acceptance_records FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_acc_project ON acceptance_records(project_id) WHERE deleted_at IS NULL;
+
+-- billings：v3.1 order_id→nullable、+sales_order_id +confirmation_status、唯一索引重建
 CREATE TABLE billings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
     contract_id UUID NOT NULL REFERENCES contracts(id),
-    order_id UUID NOT NULL REFERENCES orders(id),
+    order_id UUID REFERENCES orders(id),
+    sales_order_id UUID REFERENCES sales_orders(id),
     period_index INTEGER NOT NULL CHECK (period_index > 0),
     period_label VARCHAR(20) NOT NULL,
     billing_date DATE NOT NULL,
@@ -308,6 +388,7 @@ CREATE TABLE billings (
     tax_amount DECIMAL(18,2) NOT NULL CHECK (tax_amount >= 0),
     tax_rate NUMERIC(10,8) NOT NULL DEFAULT 0.13 CHECK (tax_rate BETWEEN 0 AND 1),
     status VARCHAR(20) NOT NULL DEFAULT '未开' CHECK (status IN ('未开','已开','已收款','已红冲')),
+    confirmation_status VARCHAR(20) CHECK (confirmation_status IS NULL OR confirmation_status IN ('待确认','已确认','有争议')),
     invoice_id UUID REFERENCES invoices(id),
     capital_transaction_id UUID REFERENCES capital_transactions(id),
     idempotency_key VARCHAR(128),
@@ -317,10 +398,30 @@ CREATE TABLE billings (
     deleted_at TIMESTAMPTZ,
     CHECK (amount = ROUND(amount_ex_tax + tax_amount, 2))
 );
-CREATE UNIQUE INDEX uq_billing_period ON billings(order_id, period_index) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_billing_period ON billings(sales_order_id, period_index) WHERE deleted_at IS NULL AND sales_order_id IS NOT NULL;
 CREATE UNIQUE INDEX uq_billing_idem ON billings(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX idx_billing_contract ON billings(contract_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_billing_order ON billings(order_id) WHERE deleted_at IS NULL AND order_id IS NOT NULL;
 CREATE TRIGGER trg_billings_updated BEFORE UPDATE ON billings FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 客户算力服务确认单（v3.1 新增）
+CREATE TABLE service_confirmations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    billing_id UUID NOT NULL UNIQUE REFERENCES billings(id),
+    sales_order_id UUID NOT NULL REFERENCES sales_orders(id),
+    period_label VARCHAR(20) NOT NULL,
+    file_path VARCHAR(500),
+    confirmed_by_customer VARCHAR(100),
+    confirmed_at DATE,
+    status VARCHAR(20) NOT NULL DEFAULT '待确认' CHECK (status IN ('待确认','已确认','有争议')),
+    dispute_reason TEXT,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE TRIGGER trg_service_confirmations_updated BEFORE UPDATE ON service_confirmations FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_sc_sales_order ON service_confirmations(sales_order_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE repayments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -366,13 +467,31 @@ CREATE TABLE assets (
 CREATE INDEX idx_assets_project ON assets(project_id) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_assets_updated BEFORE UPDATE ON assets FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ============================ 盈利测算（v3.1 新增） ============================
+
+CREATE TABLE profit_scenarios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    name VARCHAR(200) NOT NULL,
+    params_json JSONB NOT NULL,
+    result_json JSONB NOT NULL,
+    is_actual BOOLEAN NOT NULL DEFAULT FALSE,
+    calculated_at TIMESTAMPTZ,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_ps_project ON profit_scenarios(project_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_profit_scenarios_updated BEFORE UPDATE ON profit_scenarios FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- ============================ 审计与幂等（基础设施） ============================
 
--- audit_logs：append-only（应用 DB role 仅 INSERT/SELECT，REVOKE UPDATE/DELETE/TRUNCATE）
+-- audit_logs：v3.1 action CHECK 扩展（ACCEPT_APPROVE/RECONCILE等）
 CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY,
     user_id UUID REFERENCES users(id),
-    action VARCHAR(20) NOT NULL CHECK (action IN ('CREATE','UPDATE','DELETE','REVERSE','LOGIN','APPROVE_OVERCONTRACT','SUPERSEDE')),
+    action VARCHAR(20) NOT NULL CHECK (action IN ('CREATE','UPDATE','DELETE','REVERSE','LOGIN','APPROVE_OVERCONTRACT','SUPERSEDE','ACCEPT_APPROVE','RECONCILE','RECONCILE_REVOKE','SUPERSEDE_REVOKE','CONFIRM_UPLOAD','DISBURSE','CAPITAL_TXN','LIGHT_ON','ALLOCATE','ALLOCATE_RETURN')),
     entity_type VARCHAR(50) NOT NULL,
     entity_id UUID,
     before_json JSONB,
@@ -395,10 +514,59 @@ CREATE TABLE idempotency_keys (
 );
 CREATE INDEX idx_idem_created ON idempotency_keys(created_at);
 
--- ============================ 完成：19 张表 ============================
--- users, suppliers, customers, equipment_models, banks,
--- projects, contracts,
--- leasing_processes, leasing_nodes,
+-- ============================ 互引用 FK（所有表创建完毕后添加） ============================
+ALTER TABLE capital_transactions
+    ADD CONSTRAINT fk_ct_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id);
+ALTER TABLE invoices
+    ADD CONSTRAINT fk_inv_billing FOREIGN KEY (billing_id) REFERENCES billings(id) DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE invoices
+    ADD CONSTRAINT fk_inv_purchase_order FOREIGN KEY (purchase_order_id) REFERENCES orders(id);
+
+-- ============================ 向导式工作台（v3.2 新增） ============================
+
+CREATE TABLE workflow_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    steps JSONB NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE TRIGGER trg_workflow_templates_updated BEFORE UPDATE ON workflow_templates FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE project_workflows (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL UNIQUE REFERENCES projects(id),
+    template_id UUID REFERENCES workflow_templates(id),
+    steps JSONB NOT NULL,
+    current_step INTEGER NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT '进行中' CHECK (status IN ('进行中','已完成','已暂停')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_pw_project ON project_workflows(project_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_project_workflows_updated BEFORE UPDATE ON project_workflows FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE step_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_workflow_id UUID NOT NULL REFERENCES project_workflows(id),
+    step_seq INTEGER NOT NULL,
+    step_name VARCHAR(100) NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('complete','skip','manual_complete','infer')),
+    operator_id UUID REFERENCES users(id),
+    operated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    note TEXT
+);
+CREATE INDEX idx_sal_workflow ON step_audit_logs(project_workflow_id);
+
+-- ============================ 完成：27 张表 ============================
+-- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
+-- projects, contracts, leasing_processes, leasing_nodes,
 -- capital_transactions, invoices, capital_allocations,
 -- orders, delivery_stages, billings, repayments, assets,
 -- audit_logs, idempotency_keys
+-- [v3.1 +5表] sales_orders, acceptance_records, funding_replacements,
+-- profit_scenarios, service_confirmations

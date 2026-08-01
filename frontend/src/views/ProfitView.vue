@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
-  NButton, NCard, NDataTable, NFormItem, NInputNumber, NSelect, NSpace, NStatistic, useMessage,
+  NButton, NCard, NCheckbox, NDataTable, NFormItem, NInput, NInputNumber, NModal, NSelect,
+  NSpace, NStatistic, useMessage,
 } from 'naive-ui'
 import { api } from '../api/client'
 import { money } from '../utils/format'
+import { errMsg } from '../utils/errMsg'
 import EChart from '../components/EChart.vue'
 
 interface MonthlyRow {
@@ -64,23 +66,51 @@ async function refresh() {
   try {
     const { data } = await api.get('/projects')
     projects.value = data.items
-  } catch {}
+  } catch { msg.error('项目列表加载失败') }
 }
 onMounted(refresh)
 
-async function runCalc(fn: () => Promise<ProfitResult>, failMsg: string) {
+async function runCalc(fn: () => Promise<ProfitResult>) {
   loading.value = true
   try {
     result.value = await fn()
-  } catch (e: any) { msg.error(e.response?.data?.detail?.message || failMsg) }
+  } catch (e: any) { msg.error(errMsg(e)) }
   finally { loading.value = false }
 }
 
 function calcManual() {
-  runCalc(() => api.post('/reports/profit/calculate', form.value).then(r => r.data), '计算失败')
+  runCalc(() => api.post('/reports/profit/calculate', form.value).then(r => r.data))
 }
 function calcProject(pid: string) {
-  runCalc(() => api.get(`/reports/profit/${pid}`).then(r => r.data), '计算失败')
+  lastProjectId.value = pid
+  runCalc(() => api.get(`/reports/profit/${pid}`).then(r => r.data))
+}
+
+// 保存为场景 / 设为实际
+const lastProjectId = ref('')
+const showSave = ref(false)
+const saveForm = ref({ project_id: '' as string, name: '', is_actual: false })
+
+function openSave(isActual: boolean) {
+  if (!result.value) { msg.warning('请先计算利润'); return }
+  saveForm.value = {
+    project_id: lastProjectId.value || '', name: isActual ? '实际参数' : '', is_actual: isActual,
+  }
+  showSave.value = true
+}
+
+async function doSaveScenario() {
+  const f = saveForm.value
+  if (!f.project_id) { msg.warning('请选择项目'); return }
+  if (!f.name.trim()) { msg.warning('请填场景名称'); return }
+  try {
+    await api.post('/reports/profit/scenarios', {
+      project_id: f.project_id, name: f.name.trim(),
+      params_json: { ...form.value }, is_actual: f.is_actual,
+    })
+    msg.success(f.is_actual ? '已保存并设为实际场景' : '场景已保存')
+    showSave.value = false
+  } catch (e: any) { msg.error(errMsg(e)) }
 }
 
 const chartOption = computed(() => {
@@ -101,15 +131,15 @@ const chartOption = computed(() => {
 })
 
 const tableCols = [
-  { title: '月', key: 'month', width: 50, align: 'center' },
-  { title: '租金', key: 'rent', align: 'right', render: (r: MonthlyRow) => money(r.rent) },
-  { title: '运营', key: 'opex', align: 'right', render: (r: MonthlyRow) => money(r.opex) },
-  { title: '折旧', key: 'depreciation', align: 'right', render: (r: MonthlyRow) => money(r.depreciation) },
-  { title: '还本', key: 'lease_principal', align: 'right', render: (r: MonthlyRow) => money(r.lease_principal) },
-  { title: '付息', key: 'lease_interest', align: 'right', render: (r: MonthlyRow) => money(r.lease_interest) },
-  { title: '税前利润', key: 'pre_tax_profit', align: 'right', render: (r: MonthlyRow) => money(r.pre_tax_profit) },
-  { title: '净现金流', key: 'net_cashflow', align: 'right', render: (r: MonthlyRow) => money(r.net_cashflow) },
-  { title: '累计', key: 'cumulative', align: 'right', render: (r: MonthlyRow) => money(r.cumulative) },
+  { title: '月', key: 'month', width: 50, align: 'center' as const },
+  { title: '租金', key: 'rent', align: 'right' as const, render: (r: MonthlyRow) => money(r.rent) },
+  { title: '运营', key: 'opex', align: 'right' as const, render: (r: MonthlyRow) => money(r.opex) },
+  { title: '折旧', key: 'depreciation', align: 'right' as const, render: (r: MonthlyRow) => money(r.depreciation) },
+  { title: '还本', key: 'lease_principal', align: 'right' as const, render: (r: MonthlyRow) => money(r.lease_principal) },
+  { title: '付息', key: 'lease_interest', align: 'right' as const, render: (r: MonthlyRow) => money(r.lease_interest) },
+  { title: '税前利润', key: 'pre_tax_profit', align: 'right' as const, render: (r: MonthlyRow) => money(r.pre_tax_profit) },
+  { title: '净现金流', key: 'net_cashflow', align: 'right' as const, render: (r: MonthlyRow) => money(r.net_cashflow) },
+  { title: '累计', key: 'cumulative', align: 'right' as const, render: (r: MonthlyRow) => money(r.cumulative) },
 ]
 
 interface Kpi { label: string; value: string; color?: string; num?: boolean }
@@ -148,6 +178,10 @@ const kpis = computed<Kpi[]>(() => {
             <n-form-item label="残值率" :show-feedback="false"><n-input-number v-model:value="form.residual_rate" :step="0.05" :show-button="false" style="width:80px" /></n-form-item>
           </n-space>
           <n-button type="primary" block :loading="loading" @click="calcManual">计算利润</n-button>
+          <n-space v-if="result" :size="8">
+            <n-button secondary block @click="openSave(false)">保存为场景</n-button>
+            <n-button secondary type="success" block @click="openSave(true)">设为实际</n-button>
+          </n-space>
         </n-space>
       </n-card>
 
@@ -174,6 +208,26 @@ const kpis = computed<Kpi[]>(() => {
           :pagination="{ pageSize: 12 }" :max-height="400" />
       </n-card>
     </template>
+
+    <!-- 保存场景 -->
+    <n-modal v-model:show="showSave" preset="card" :title="saveForm.is_actual ? '设为实际场景' : '保存为场景'" style="width:420px">
+      <n-space vertical :size="12">
+        <n-form-item label="归属项目">
+          <n-select v-model:value="saveForm.project_id" :options="projects.map((p) => ({ label: p.name, value: p.id }))" placeholder="选项目" filterable />
+        </n-form-item>
+        <n-form-item label="场景名称">
+          <n-input v-model:value="saveForm.name" placeholder="如：V1 报价版 / 签约实际" />
+        </n-form-item>
+        <n-checkbox v-model:checked="saveForm.is_actual">设为实际（作为该项目实际口径对比基准）</n-checkbox>
+        <div class="muted tiny">将按当前测算参数重新计算并保存结果。</div>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showSave = false">取消</n-button>
+          <n-button type="primary" @click="doSaveScenario">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 

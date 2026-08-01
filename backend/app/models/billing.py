@@ -2,9 +2,9 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, Text, func, select, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, column_property, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPK
 
@@ -34,6 +34,8 @@ class Billing(UUIDPK, TimestampMixin, Base):
     invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     capital_transaction_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("capital_transactions.id"), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sales_order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sales_orders.id"), nullable=True)
+    confirmation_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 待确认 / 已确认 / 有争议
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("billings.id"), nullable=True)
 
 
@@ -52,5 +54,24 @@ class Invoice(UUIDPK, TimestampMixin, Base):
     paid_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="待开", nullable=False)
     capital_transaction_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("capital_transactions.id"), nullable=True)
+    billing_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("billings.id"), nullable=True)
+    purchase_order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
+    reconciled_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    reconciled_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reconciliation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+# v3.2: 已核销累计金额 = 关联核销流水金额合计（查询期计算，不落库列；InvoiceOut.matched_amount 由它填充）
+from app.models.capital import CapitalTransaction  # noqa: E402
+
+Invoice.matched_amount = column_property(
+    select(func.coalesce(func.sum(CapitalTransaction.amount), 0))
+    .where(
+        CapitalTransaction.invoice_id == Invoice.id,
+        CapitalTransaction.deleted_at.is_(None),
+    )
+    .correlate_except(CapitalTransaction)
+    .scalar_subquery()
+)

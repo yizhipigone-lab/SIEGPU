@@ -32,10 +32,17 @@ def list_transactions(db: Session, project_id=None, direction=None, limit=100):
 
 
 def _dir_sums(db: Session, project_id=None):
-    """返回 (ΣIN, ΣOUT)，已自动过滤软删除（do_orm_execute 事件）。"""
+    """返回 (ΣIN, ΣOUT)，已自动过滤软删除（do_orm_execute 事件）。
+    排除置换归还流水（归还流贷/归还自有 IN）：它们是原付款的冲销凭证，
+    若计入会导致同笔现金双计虚增净头寸。"""
     stmt = select(CapitalTransaction.direction, func.coalesce(func.sum(CapitalTransaction.amount), 0))
     if project_id:
         stmt = stmt.where(CapitalTransaction.project_id == project_id)
+    # 排除置换归还 IN（source_type IN ('归还流贷','归还自有') 且 direction='IN'）
+    stmt = stmt.where(
+        ~((CapitalTransaction.source_type.in_(['归还流贷', '归还自有'])) &
+          (CapitalTransaction.direction == 'IN'))
+    )
     stmt = stmt.group_by(CapitalTransaction.direction)
     inn = out = Decimal(0)
     for d, s in db.execute(stmt).all():
@@ -56,6 +63,55 @@ def project_allocatable(db: Session, project_id) -> Decimal:
     """NF5：可调余额 = 净头寸正部（调配一调出即原子移走现金，net_position 已隐含）。"""
     np = project_net_position(db, project_id)
     return np if np > 0 else Decimal(0)
+
+
+def pool_by_project(db: Session) -> list[dict]:
+    """分项目资金视图：净头寸 / 可调余额 / 在途调配 / 近30天收支。"""
+    from datetime import date, timedelta
+    projects = db.execute(select(Project).where(Project.deleted_at.is_(None))).scalars().all()
+    recent = date.today() - timedelta(days=30)
+    rows = []
+    for p in projects:
+        np = project_net_position(db, p.id)
+        allocatable = float(np) if np > 0 else 0
+        # 在途调配（借出未还）
+        in_transit_q = db.execute(
+            select(func.coalesce(func.sum(CapitalAllocation.amount), 0)).where(
+                CapitalAllocation.from_project_id == p.id,
+                CapitalAllocation.status.in_(["已调配", "逾期"]),
+                CapitalAllocation.deleted_at.is_(None),
+            )
+        ).scalar() or 0
+        # 近30天收支
+        recent_in = db.execute(
+            select(func.coalesce(func.sum(CapitalTransaction.amount), 0)).where(
+                CapitalTransaction.project_id == p.id, CapitalTransaction.direction == "IN",
+                CapitalTransaction.transaction_date >= recent, CapitalTransaction.deleted_at.is_(None),
+            )
+        ).scalar() or 0
+        recent_out = db.execute(
+            select(func.coalesce(func.sum(CapitalTransaction.amount), 0)).where(
+                CapitalTransaction.project_id == p.id, CapitalTransaction.direction == "OUT",
+                CapitalTransaction.transaction_date >= recent, CapitalTransaction.deleted_at.is_(None),
+            )
+        ).scalar() or 0
+        rows.append({
+            "project_id": str(p.id), "project_name": p.name,
+            "net_position": float(np), "allocatable": allocatable,
+            "in_transit": float(in_transit_q), "recent_30d_in": float(recent_in),
+            "recent_30d_out": float(recent_out),
+        })
+    return rows
+
+
+def list_allocations(db: Session, project_id=None):
+    stmt = select(CapitalAllocation).order_by(CapitalAllocation.created_at.desc())
+    if project_id:
+        stmt = stmt.where(
+            (CapitalAllocation.from_project_id == project_id) |
+            (CapitalAllocation.to_project_id == project_id)
+        )
+    return db.execute(stmt).scalars().all()
 
 
 def pool_summary(db: Session) -> dict:
@@ -116,6 +172,13 @@ def record_transaction(db: Session, *, created_by, **kw) -> CapitalTransaction:
     txn = CapitalTransaction(created_by=created_by, **kw)
     db.add(txn)
     db.flush()  # 触发唯一约束等；commit 由 endpoint 负责
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=created_by, action="CAPITAL_TXN", target_type="capital_transaction",
+               target_id=txn.id, after_json={"source_type": kw.get("source_type", ""),
+               "direction": kw.get("direction", ""), "amount": str(txn.amount)})
+    from app.services import workflow_service as _wf
+    if kw.get("project_id"):
+        _wf.after_action(db, kw["project_id"])
     return txn
 
 
@@ -165,6 +228,9 @@ def allocate(
     )
     db.add(alloc)
     db.flush()
+    from app.services import audit_service as _audit2
+    _audit2.log(db, user_id=approved_by, action="ALLOCATE", target_type="capital_allocation",
+                target_id=alloc.id, after_json={"from": str(from_project_id), "to": str(to_project_id), "amount": str(amount)})
     return alloc
 
 
@@ -202,6 +268,9 @@ def reverse_transaction(db: Session, *, txn_id, reversed_by, note: str | None = 
     )
     db.add(rev)
     db.flush()
+    from app.services import audit_service as _audit4
+    _audit4.log(db, user_id=reversed_by, action="REVERSE", target_type="capital_transaction",
+                target_id=orig.id, after_json={"reversal_id": str(rev.id), "amount": str(orig.amount)})
     return rev
 
 
@@ -228,4 +297,7 @@ def return_allocation(db: Session, *, allocation_id, returned_by, return_date) -
     alloc.status = "已归还"
     alloc.actual_return_date = return_date
     db.flush()
+    from app.services import audit_service as _audit3
+    _audit3.log(db, user_id=returned_by, action="ALLOCATE_RETURN", target_type="capital_allocation",
+                target_id=alloc.id, after_json={"amount": str(alloc.amount), "return_date": str(return_date)})
     return alloc

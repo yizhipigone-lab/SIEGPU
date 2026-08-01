@@ -74,4 +74,38 @@ def compute_alerts(db: Session) -> list[dict]:
         alerts.append({"level": "高危", "code": "POOL_INSUFFICIENT",
                        "message": f"资金池余额 {balance} < 未来30天应付 {payable}"})
 
+    # 6. 交付阶段卡住（>7天未推进）
+    from app.models.delivery import DeliveryStage
+    cutoff = today - timedelta(days=7)
+    for ds in db.execute(
+        select(DeliveryStage).where(
+            DeliveryStage.status == "进行中", DeliveryStage.updated_at < cutoff)
+    ).scalars():
+        alerts.append({"level": "警告", "code": "DELIVERY_STUCK",
+                       "message": f"交付阶段「{ds.stage}」停滞超过 7 天", "ref_id": str(ds.order_id)})
+
+    # 7. 合同到期（<30天）
+    from app.models.project import Contract
+    horizon = today + timedelta(days=30)
+    for ct in db.execute(
+        select(Contract).where(Contract.end_date.is_not(None), Contract.end_date <= horizon,
+                               Contract.end_date >= today, Contract.status == "执行中")
+    ).scalars():
+        days_left = (ct.end_date - today).days
+        alerts.append({"level": "提示", "code": "CONTRACT_EXPIRING",
+                       "message": f"合同 {ct.contract_no} 将于 {days_left} 天后到期", "ref_id": str(ct.id)})
+
+    # 8. 工作流停滞（>14天未动）
+    from app.models.project_workflow import ProjectWorkflow
+    from app.models.project import Project as Pj
+    cutoff14 = today - timedelta(days=14)
+    for w in db.execute(
+        select(ProjectWorkflow).where(
+            ProjectWorkflow.status == "进行中", ProjectWorkflow.updated_at < cutoff14)
+    ).scalars():
+        proj = db.get(Pj, w.project_id)
+        pname = proj.name if proj else str(w.project_id)
+        alerts.append({"level": "警告", "code": "WORKFLOW_STUCK",
+                       "message": f"项目「{pname}」工作流停滞超过 14 天", "ref_id": str(w.project_id)})
+
     return alerts

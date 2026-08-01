@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NForm, NFormItem, NInput, NIcon, useMessage } from 'naive-ui'
 import { Lock, User } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
-const isDev = import.meta.env.DEV
+// 开发模式默认显示种子账号；生产需显式设置 VITE_SHOW_DEMO_HINT=true 才显示
+const showDemoHint = import.meta.env.DEV || import.meta.env.VITE_SHOW_DEMO_HINT === 'true'
+
+onMounted(() => {
+  if (route.query.expired) message.warning('登录已过期，请重新登录')
+})
 
 async function onSubmit() {
   if (!username.value || !password.value) { message.warning('请输入账号和密码'); return }
@@ -19,8 +25,12 @@ async function onSubmit() {
   try {
     await auth.login(username.value, password.value)
     router.push('/')
-  } catch {
-    message.error('登录失败：用户名或密码错误')
+  } catch (e: any) {
+    if (e?.response?.status === 401) {
+      message.error('登录失败：用户名或密码错误')
+    } else {
+      message.error('服务异常，请稍后重试')
+    }
   } finally {
     loading.value = false
   }
@@ -54,7 +64,7 @@ async function onSubmit() {
         </n-button>
       </n-form>
 
-      <p v-if="isDev" class="hint">开发种子账号（密码均为 sie123）：admin · cfo · buyer · delivery · finance</p>
+      <p v-if="showDemoHint" class="hint">开发种子账号（密码均为 sie123）：admin · cfo · buyer · delivery · finance</p>
     </div>
     <div class="foot">© 2026 SIEGPU · 内部系统</div>
   </div>

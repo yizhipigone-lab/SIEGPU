@@ -6,7 +6,7 @@ test('登录 → 建项目 → 记流水 → 对账（资金池净头寸）', as
 
   // 1) 登录拿 token
   const loginRes = await request.post(`${api}/auth/login`, {
-    form: { username: 'cfo', password: 'cfo123' },
+    form: { username: 'cfo', password: 'sie123' },
   })
   expect(loginRes.ok()).toBeTruthy()
   const { access_token } = await loginRes.json()

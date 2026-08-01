@@ -4,12 +4,13 @@ import * as fs from 'fs'
 const results: string[] = []
 
 test('逐页审计', async ({ page }) => {
+  test.setTimeout(120_000)
   const errs: string[] = []
   page.on('console', m => { if (m.type() === 'error') errs.push(m.text()) })
   page.on('pageerror', e => errs.push(e.message))
 
   // 登录
-  await page.goto('http://localhost:9000/login').catch(() => {})
+  await page.goto('http://localhost:8080/login').catch(() => {})
   await page.waitForTimeout(1000)
   await page.fill('input[placeholder="请输入账号"]', 'cfo').catch(() => {})
   await page.fill('input[placeholder="请输入密码"]', 'sie123').catch(() => {})
@@ -25,7 +26,7 @@ test('逐页审计', async ({ page }) => {
   ]
   for (const [name, path] of pages) {
     try {
-      await page.goto('http://localhost:9000' + path, { waitUntil: 'domcontentloaded', timeout: 8000 })
+      await page.goto('http://localhost:8080' + path, { waitUntil: 'domcontentloaded', timeout: 8000 })
       await page.waitForTimeout(800)
       const rows = await page.locator('table tbody tr').count()
       const bodyText = (await page.locator('body').innerText().catch(() => '')).slice(0, 300).replace(/\n/g, ' ')
