@@ -1,0 +1,59 @@
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-body);
+  color: var(--c-text);
+  background: var(--c-bg);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: var(--font-heading);
+  color: var(--c-text);
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+h3 { font-size: 18px; }
+h4 { font-size: 15px; }
+
+a { color: var(--c-primary); text-decoration: none; }
+a:hover { color: var(--c-primary-hover); }
+
+/* 金额/数字等宽对齐（tabular） */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* 卡片基底 */
+.card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-card);
+}
+
+/* 通用工具 */
+.muted { color: var(--c-text-2); }
+.tiny { font-size: 12px; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 8px; border: 2px solid var(--c-bg); }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 焦点可见（a11y） */
+:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
+
+/* 动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

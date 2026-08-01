@@ -1,0 +1,43 @@
+:root {
+  /* surfaces / text */
+  --c-bg: #F5F7FA;
+  --c-surface: #FFFFFF;
+  --c-surface-2: #F8FAFC;
+  --c-text: #0F172A;
+  --c-text-2: #64748B;
+  --c-text-3: #94A3B8;
+  --c-border: #E2E8F0;
+  --c-border-strong: #CBD5E1;
+
+  /* brand (deep gold) */
+  --c-primary: #B45309;
+  --c-primary-hover: #92400E;
+  --c-primary-pressed: #7C2D12;
+  --c-primary-soft: #FEF3C7;
+
+  /* status */
+  --c-success: #16A34A;
+  --c-warning: #EA580C;
+  --c-danger: #DC2626;
+  --c-info: #2563EB;
+
+  /* sidebar (dark) */
+  --c-sidebar-bg: #1E2933;
+  --c-sidebar-bg-2: #172029;
+  --c-sidebar-text: #CBD5E1;
+  --c-sidebar-text-active: #FFFFFF;
+  --c-sidebar-hover: #334155;
+  --c-sidebar-active: #2C3A47;
+
+  /* radius / shadow */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --sh-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --sh-pop: 0 4px 16px rgba(15, 23, 42, 0.12);
+
+  /* fonts */
+  --font-heading: 'Sora', 'Noto Sans SC', system-ui, sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+}

@@ -1,0 +1,39 @@
+# ── 客户财务数据（含商业敏感信息，绝不入库）──
+/*.xlsx
+docs/xlsx-dump.txt
+
+# ── 环境 / 密钥 ──
+.env
+.env.local
+*.pem
+*.key
+*.p12
+
+# ── Office 临时锁文件 ──
+~$*
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# ── Node / 前端构建 ──
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ── E2E 调试产物 / 截图 ──
+e2e/screenshots/
+e2e/test-results/
+e2e/playwright-report/
+e2e/*.txt
+
+# ── 运行时数据 ──
+uploads/
+pgdata/
+
+# ── Claude Code 会话记录 ──
+.superpowers/
