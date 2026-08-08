@@ -3,6 +3,8 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr tesseract-ocr-chi-sim \
+    libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

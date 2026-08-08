@@ -6,6 +6,7 @@ import {
 } from 'naive-ui'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
+import EmptyState from '../components/EmptyState.vue'
 
 interface SalesOrder {
   id: string; project_id: string; contract_id: string
@@ -113,7 +114,11 @@ onMounted(load)
       <h2 style="margin:0">销售订单</h2>
       <n-button type="primary" @click="openCreate">新增销售订单</n-button>
     </div>
-    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false" />
+    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false">
+      <template #empty>
+        <EmptyState description="还没有销售订单，点击右上角「新增销售订单」记录客户的采购需求" />
+      </template>
+    </n-dataTable>
 
     <n-modal v-model:show="showCreate" preset="card" title="新增销售订单" style="width:520px;max-width:94vw">
       <n-space vertical :size="12">
@@ -127,9 +132,9 @@ onMounted(load)
           <n-select v-model:value="form.equipment_model_id" :options="equipOpts()" placeholder="选设备型号" filterable />
         </n-form-item>
         <n-space>
-          <n-form-item label="数量"><n-input-number v-model:value="form.quantity" :min="1" style="width:120px" /></n-form-item>
-          <n-form-item label="月租/台(含税)"><n-input-number v-model:value="form.monthly_rent_per_unit" :show-button="false" style="width:150px" /></n-form-item>
-          <n-form-item label="总月租"><n-input-number v-model:value="form.total_monthly_rent" :show-button="false" style="width:150px" /></n-form-item>
+          <n-form-item label="数量(台)"><n-input-number v-model:value="form.quantity" :min="1" style="width:120px" /></n-form-item>
+          <n-form-item label="月租/台(含税,元/月)"><n-input-number v-model:value="form.monthly_rent_per_unit" :show-button="false" style="width:150px" /></n-form-item>
+          <n-form-item label="总月租(元/月)"><n-input-number v-model:value="form.total_monthly_rent" :show-button="false" style="width:150px" /></n-form-item>
         </n-space>
         <n-space>
           <n-form-item label="起租日"><n-input v-model:value="form.start_date" placeholder="YYYY-MM-DD" style="width:140px" /></n-form-item>

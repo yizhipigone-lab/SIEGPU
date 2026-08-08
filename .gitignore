@@ -37,6 +37,12 @@ pgdata/
 
 # ── Claude Code 会话记录 ──
 .superpowers/
+.claude/
 
 # ── Playwright MCP 临时产物 ──
 .playwright-mcp/
+
+# ── 会话验证产物（根级截图 / 示例 PDF，非源码）──
+/*.png
+/*.pdf
+/test-results/

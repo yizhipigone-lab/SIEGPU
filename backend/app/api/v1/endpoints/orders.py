@@ -30,9 +30,14 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), user: User
     o = svc.create_order(db, **payload.model_dump())
     db.commit()
     _, stages = svc.get_order_with_stages(db, o.id)
+    # 自检迭代修正：补齐 is_batch/batch_name/batch_status/flow_type 4 字段。
+    # list_orders 用 model_validate 已吐真值，此处手工构造曾遗漏→批次订单响应 is_batch=False（说谎）。
     return OrderDetail(
         id=o.id, project_id=o.project_id, equipment_model_id=o.equipment_model_id, contract_id=o.contract_id,
         quantity=o.quantity, unit_price=o.unit_price, total_amount=o.total_amount, status=o.status,
+        is_batch=o.is_batch, batch_name=o.batch_name, batch_status=o.batch_status, flow_type=o.flow_type,
+        disbursement_threshold_pct=o.disbursement_threshold_pct,
+        disbursement_todo_process_id=o.disbursement_todo_process_id,
         stages=[DeliveryStageOut.model_validate(s) for s in stages],
     )
 
@@ -43,6 +48,9 @@ def get_order(order_id: UUID, db: Session = Depends(get_db), user: User = Depend
     return OrderDetail(
         id=o.id, project_id=o.project_id, equipment_model_id=o.equipment_model_id, contract_id=o.contract_id,
         quantity=o.quantity, unit_price=o.unit_price, total_amount=o.total_amount, status=o.status,
+        is_batch=o.is_batch, batch_name=o.batch_name, batch_status=o.batch_status, flow_type=o.flow_type,
+        disbursement_threshold_pct=o.disbursement_threshold_pct,
+        disbursement_todo_process_id=o.disbursement_todo_process_id,
         stages=[DeliveryStageOut.model_validate(s) for s in stages],
     )
 

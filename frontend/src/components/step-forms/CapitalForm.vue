@@ -5,6 +5,7 @@ import {
 } from 'naive-ui'
 import { http } from '../../api/client'
 import { errMsg } from '../../utils/errMsg'
+import { tsToYmd } from '../../utils/format'
 
 // 资金入金（capital_in）/ 出金（capital_out）共用表单，方向来自 step.prefill.direction
 const props = defineProps<{ projectId: string; prefill: Record<string, any> }>()
@@ -16,14 +17,6 @@ const isIn = computed(() => (props.prefill.direction || 'IN') === 'IN')
 
 const SOURCE_TYPES = ['自有资金', '银行流贷', '金租融资', '租金收入', '调配', '调配归还', '还款']
   .map((v) => ({ label: v, value: v }))
-
-// NDatePicker 绑定时间戳，提交时转 YYYY-MM-DD
-function toDateStr(ts: number | null): string | null {
-  if (!ts) return null
-  const d = new Date(ts)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 
 const form = ref({
   source_type: props.prefill.source_type || '自有资金',
@@ -42,7 +35,7 @@ async function submit() {
       source_type: form.value.source_type,
       direction: isIn.value ? 'IN' : 'OUT',
       amount: form.value.amount,
-      transaction_date: toDateStr(form.value.transaction_date),
+      transaction_date: tsToYmd(form.value.transaction_date) || null,
       note: form.value.note || null,
     })
     msg.success(isIn.value ? '入金已登记' : '出金已登记')

@@ -13,6 +13,8 @@ class SupplierCreate(BaseModel):
     contact_phone: str | None = None
     bank_account: str | None = None
     notes: str | None = None
+    is_leasing_org: bool = False
+    leasing_coop_modes: list[str] | None = None  # 合作模式：直租/回租
 
 
 class SupplierOut(BaseModel):
@@ -21,6 +23,8 @@ class SupplierOut(BaseModel):
     type: str
     contact_person: str | None
     contact_phone: str | None
+    is_leasing_org: bool = False
+    leasing_coop_modes: list[str] | None = None
     model_config = {"from_attributes": True}
 
 
@@ -51,6 +55,8 @@ class EquipmentModelCreate(BaseModel):
     gpu_count: int | None = Field(None, gt=0)
     memory: str | None = None
     unit_price_reference: Decimal | None = Field(None, ge=0)
+    resource_attr: Literal["自购资产", "金租资产", "转售资源"] | None = None
+    billing_modes: dict | None = None
 
 
 class EquipmentModelOut(BaseModel):
@@ -61,6 +67,8 @@ class EquipmentModelOut(BaseModel):
     gpu_count: int | None
     memory: str | None
     unit_price_reference: Decimal | None
+    resource_attr: str | None = None
+    billing_modes: dict | None = None
     model_config = {"from_attributes": True}
 
 

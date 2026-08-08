@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -8,6 +9,7 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.invoice import InvoiceCreate, InvoiceOut, MarkPaid
 from app.services import invoice_service as svc
+from app.services import pdf_service
 
 router = APIRouter()
 
@@ -47,6 +49,16 @@ def reverse(invoice_id: UUID, db: Session = Depends(get_db), user: User = Depend
     inv, rev = svc.reverse_invoice(db, invoice_id=invoice_id, reversed_by=user.id)
     db.commit()
     return {"invoice_id": str(inv.id), "status": inv.status, "reversal_id": str(rev.id)}
+
+
+@router.get("/{invoice_id}/pdf")
+def invoice_pdf(invoice_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """F4：发票/账单 PDF 实时生成（不落库，浏览器直接下载）。"""
+    buf = pdf_service.render_invoice_pdf(db, invoice_id)
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="invoice-{invoice_id}.pdf"'},
+    )
 
 
 # —— v3.1 发票池 + 核销 ——

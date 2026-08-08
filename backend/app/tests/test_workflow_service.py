@@ -181,3 +181,43 @@ def test_profit_save_scenario_advances_step18(db):
     psvc.save_scenario(db, project_id=p.id, name="实际", params_json={}, result_json={},
                        is_actual=True)
     assert _step(wf, 18)["status"] == "done"
+
+
+# ---------- 一期 W3-4：设备粒度模板 completion_check ----------
+
+def test_table_classes_includes_device_tables():
+    assert "devices" in wfsvc._TABLE_CLASSES and "device_stages" in wfsvc._TABLE_CLASSES
+    assert wfsvc._TABLE_CLASSES["devices"].__tablename__ == "devices"
+    assert wfsvc._TABLE_CLASSES["device_stages"].__tablename__ == "device_stages"
+    # device_stages 经 device_id→Device 间接关联 project_id
+    assert wfsvc._FK_TO_PROJECT["device_stages"][1].__tablename__ == "devices"
+
+
+def _device_flow_step(seq):
+    return next(s for s in wfsvc._device_flow_steps() if s["seq"] == seq)
+
+
+def test_device_flow_step5_devices_completion(db):
+    p = _proj(db); eq = _eq(db)
+    step5 = _device_flow_step(5)  # 设备导入 → devices
+    assert not wfsvc.check_completion(db, p.id, step5)
+    from app.services import device_service as dsvc
+    dsvc.create_device(db, project_id=p.id, equipment_model_id=eq.id)
+    assert wfsvc.check_completion(db, p.id, step5)
+
+
+def test_device_flow_step6_device_stages_completion_and_cross_project(db):
+    from app.models.device import Device, DeviceStage
+    p1 = _proj(db); p2 = _proj(db); eq = _eq(db)
+    step6 = _device_flow_step(6)  # 设备到货 → device_stages stage=到货 status=已完成 min_count=1
+    # p1 一台设备「到货」已完成
+    d1 = Device(project_id=p1.id, equipment_model_id=eq.id, sn="GPU-t-1", status="到货")
+    db.add(d1); db.flush()
+    db.add(DeviceStage(device_id=d1.id, stage="到货", seq=3, status="已完成")); db.flush()
+    assert wfsvc.check_completion(db, p1.id, step6)         # p1 满足
+    assert not wfsvc.check_completion(db, p2.id, step6)     # p2 无设备 → 不满足（防跨项目误判 D6）
+    # p2 加设备但节点非「到货已完成」→ 仍不满足
+    d2 = Device(project_id=p2.id, equipment_model_id=eq.id, sn="GPU-t-2", status="订货")
+    db.add(d2); db.flush()
+    db.add(DeviceStage(device_id=d2.id, stage="订货", seq=1, status="进行中")); db.flush()
+    assert not wfsvc.check_completion(db, p2.id, step6)

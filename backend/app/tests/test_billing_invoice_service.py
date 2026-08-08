@@ -80,3 +80,16 @@ def test_reconciliation_gaps(db):
     rows2 = isvc.reconciliation(db)
     row2 = [r for r in rows2 if r["contract_id"] == str(c.id)][0]
     assert row2["received"] == Decimal("53333.33")
+
+
+# ---------- 一期 W3-4：设备粒度订单禁走旧 generate_billing ----------
+
+def test_generate_billing_blocked_for_device_order(db):
+    from app.services import device_service as dsvc
+    c, o = _setup_lit_sales(db)  # 普通订单已点亮（合法旧路径）
+    # 挂设备→变 device 路径，旧 order 维度计费应被防双计闸拒绝
+    d = dsvc.create_device(db, project_id=o.project_id, equipment_model_id=o.equipment_model_id)
+    dsvc.add_to_batch(db, device_id=d.id, batch_id=o.id)
+    with pytest.raises(BusinessError):
+        bsvc.generate_billing(db, order_id=o.id, contract_id=c.id, period_index=1,
+                              billing_date=date(2026, 9, 30), created_by=uuid.uuid4())

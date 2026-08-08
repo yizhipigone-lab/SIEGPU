@@ -27,6 +27,9 @@ def get_asset_or_404(db: Session, aid) -> Asset:
 
 def depreciation_schedule(db: Session, aid) -> list[dict]:
     a = get_asset_or_404(db, aid)
+    # W5-6：未激活资产卡（operation_status=已转固未运营）折旧字段为 None，无明细可算
+    if (a.start_date is None or a.end_date is None or a.depreciable_value is None):
+        raise BusinessError("BAD_REQUEST", "资产尚未进入运营（未点亮验收），无折旧明细", 400)
     months = (a.end_date.year - a.start_date.year) * 12 + (a.end_date.month - a.start_date.month)
     sched = monthly_schedule(a.depreciable_value, months=months)
     return [

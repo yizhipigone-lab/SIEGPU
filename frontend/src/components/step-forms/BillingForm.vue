@@ -5,6 +5,7 @@ import {
 } from 'naive-ui'
 import { http } from '../../api/client'
 import { errMsg } from '../../utils/errMsg'
+import { tsToYmd } from '../../utils/format'
 
 // 生成计费（billing_confirm）：选订单 + 销售合同 + 期数 + 计费日
 const props = defineProps<{ projectId: string; prefill: Record<string, any> }>()
@@ -15,14 +16,6 @@ const submitting = ref(false)
 
 const orders = ref<any[]>([])
 const contracts = ref<any[]>([])
-
-// NDatePicker 绑定时间戳，提交时转 YYYY-MM-DD
-function toDateStr(ts: number | null): string | null {
-  if (!ts) return null
-  const d = new Date(ts)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 
 const form = ref({
   order_id: null as string | null,
@@ -63,7 +56,7 @@ async function submit() {
       order_id: form.value.order_id,
       contract_id: form.value.contract_id,
       period_index: form.value.period_index,
-      billing_date: toDateStr(form.value.billing_date),
+      billing_date: tsToYmd(form.value.billing_date) || null,
     })
     msg.success('计费已生成')
     emit('success')
@@ -85,7 +78,7 @@ async function submit() {
     <n-form-item label="销售合同" required>
       <n-select v-model:value="form.contract_id" :options="contractOptions" placeholder="选择销售合同" />
     </n-form-item>
-    <n-form-item label="期数" required>
+    <n-form-item label="期数(期)" required>
       <n-input-number v-model:value="form.period_index" :min="1" style="width:100%" />
     </n-form-item>
     <n-form-item label="计费日期" required>

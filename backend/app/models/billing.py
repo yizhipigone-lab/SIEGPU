@@ -12,16 +12,18 @@ from app.models.base import Base, TimestampMixin, UUIDPK
 class Billing(UUIDPK, TimestampMixin, Base):
     __tablename__ = "billings"
     __table_args__ = (
-        # NF6：计费粒度=订单×期，软删后允许同订单同期重开（部分唯一索引，与 schema.sql 一致）
-        Index("uq_billing_period", "order_id", "period_index", unique=True,
-              postgresql_where=text("deleted_at IS NULL")),
+        # W5-6 H-1：计费唯一索引迁 device 维度（schema.sql/alembic 0007 一致；旧 order_id 维已弃）。
+        # device_id IS NULL 的 legacy 订单维 billings 不被此索引挡（service 层 dup-check 兜底）。
+        Index("uq_billing_period", "device_id", "period_index", unique=True,
+              postgresql_where=text("deleted_at IS NULL AND device_id IS NOT NULL")),
         Index("uq_billing_idem", "idempotency_key", unique=True,
               postgresql_where=text("idempotency_key IS NOT NULL")),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
     contract_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("contracts.id"), nullable=False)
-    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
+    # W5-6：按台计费 billings 可无 purchase order（导入设备无订单）；v3.1 起 schema.sql 已 nullable，ORM 对齐
+    order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
     period_index: Mapped[int] = mapped_column(Integer, nullable=False)
     period_label: Mapped[str] = mapped_column(String(20), nullable=False)
     billing_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -37,6 +39,7 @@ class Billing(UUIDPK, TimestampMixin, Base):
     sales_order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sales_orders.id"), nullable=True)
     confirmation_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 待确认 / 已确认 / 有争议
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("billings.id"), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("devices.id"), nullable=True)  # 一期 W1-2：按台计费
 
 
 class Invoice(UUIDPK, TimestampMixin, Base):

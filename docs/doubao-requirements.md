@@ -1,0 +1,550 @@
+- generic [ref=e2]:
+  - generic [ref=e5]:
+    - generic [ref=e7]:
+      - heading "SIEGPU ERP系统需求说明书" [level=1] [ref=e8]
+      - generic [ref=e9]: 2026 年 8 月 4 日•内容由 AI 生成，不能完全保障真实
+    - generic [ref=e21]:
+      - generic [ref=e23]:
+        - generic [ref=e32]: 帮我形成 SIEGPU ERP 完整系统项目需求说明书
+        - button [ref=e41] [cursor=pointer]
+      - generic [ref=e47]:
+        - generic [ref=e50]:
+          - generic [ref=e51]: 已完成思考
+          - generic [ref=e71]:
+            - heading "SIEGPU ERP 系统项目需求说明书" [level=1] [ref=e73]
+            - generic [ref=e75]:
+              - strong [ref=e76]: 文档版本
+              - text: ：V1.0
+              - strong [ref=e77]: 适用范围
+              - text: ：算力业务全链路业财一体化管理
+              - strong [ref=e78]: 对接系统
+              - text: ：Oracle EBS（总账、应收、应付、固定资产、采购、资金模块）
+            - separator [ref=e79]
+            - heading "第一章 项目概述" [level=2] [ref=e81]
+            - heading "1.1 项目背景" [level=3] [ref=e83]
+            - generic [ref=e84]: 随着公司算力租赁、算力转售、算力自营业务规模快速扩张，业务链路覆盖硬件采购、批次交付、资产运营、融资管理、客户销售、财务核算全环节，现有分散化管理模式存在以下核心痛点：
+            - list [ref=e87]:
+              - listitem [ref=e88]: 业财数据脱节，业务操作与财务核算不同步，收入确认、成本归集口径不一致；
+              - listitem [ref=e89]: 算力资产批次交付链路长、节点多，交付进度、资产状态、保险管控难以全程跟踪；
+              - listitem [ref=e90]: 项目维度收入、成本、融资费用无法精准归集，毛利核算颗粒度不足，经营决策缺少数据支撑；
+              - listitem [ref=e91]: 收入核算模式（总额法 / 净额法 / 经营租赁）依赖人工判断，合规性风险高，审计追溯难度大；
+              - listitem [ref=e92]: 金租、银行贷款等融资业务全流程管理分散，放款还款跟踪、资金成本测算效率低。
+            - generic [ref=e94]:
+              - text: 为实现算力业务全流程数字化管控、业财一体化合规核算与精细化经营管理，启动
+              - strong [ref=e95]: SIEGPU ERP 系统
+              - text: 建设，打造算力业务专属业财一体化运营平台，并与公司现有 Oracle EBS 财务系统深度对接，实现数据同源、流程联动、核算自动。
+            - heading "1.2 建设目标" [level=3] [ref=e97]
+            - list [ref=e99]:
+              - listitem [ref=e100]:
+                - strong [ref=e101]: 全流程闭环管控
+                - text: ：以「项目编号」为唯一主线，贯穿采购、批次交付、资产、销售、收付款、融资全业务链路，实现端到端数字化管理。
+              - listitem [ref=e102]:
+                - strong [ref=e103]: 业财一体化核算
+                - text: ：内置智能收入判定引擎，自动匹配总额法 / 净额法 / 经营租赁核算规则；业务单据审核后自动同步 Oracle EBS 生成财务凭证，保障核算合规性与数据一致性。
+              - listitem [ref=e104]:
+                - strong [ref=e105]: 精细化毛利管理
+                - text: ：按项目、合同维度精准归集收入、采购成本、融资成本、运营成本、税费，自动计算合同毛利与项目全周期毛利，支撑经营决策。
+              - listitem [ref=e106]:
+                - strong [ref=e107]: 融资资金全生命周期管理
+                - text: ：覆盖金融租赁、银行贷款从申请尽调、审批签约到分批放款、按期还款的全流程，配套资金成本测算工具，提升资金管理效率。
+              - listitem [ref=e108]:
+                - strong [ref=e109]: 合规审计可追溯
+                - text: ：全流程操作留痕，业务勾稽关系清晰，收入判定依据、数据变更记录、接口同步日志完整留存，满足内外部审计与监管要求。
+            - heading "1.3 系统定位" [level=3] [ref=e111]
+            - generic [ref=e112]: SIEGPU ERP 是面向算力业务的前端业务运营与业财一体化中台，承载所有算力业务的日常操作、过程管控与数据统计；Oracle EBS 作为后台财务总账系统，承接核算凭证与科目余额；两者通过标准 API 双向打通，实现业务发起、财务核算、数据对账的全链路自动化。
+            - separator [ref=e114]
+            - heading "第二章 业务范围与核心模式" [level=2] [ref=e116]
+            - heading "2.1 覆盖业务场景" [level=3] [ref=e118]
+            - generic [ref=e120]:
+              - generic [ref=e121]: 表格
+              - table [ref=e137]:
+                - rowgroup [ref=e138]:
+                  - row [ref=e139]:
+                    - columnheader "业务类型" [ref=e140]
+                    - columnheader "业务说明" [ref=e141]
+                    - columnheader "资源属性" [ref=e142]
+                - rowgroup [ref=e143]:
+                  - row [ref=e144]:
+                    - cell "算力经营租赁" [ref=e145]
+                    - cell "自购算力资产对外出租，按期收取租金，资产权属保留在公司" [ref=e146]
+                    - cell "表内自有资产" [ref=e147]
+                  - row [ref=e148]:
+                    - cell "算力转售 / 代理" [ref=e149]
+                    - cell "向上游采购算力资源后转售给客户，按差价确认收入" [ref=e150]
+                    - cell "表外采购资源" [ref=e151]
+                  - row [ref=e152]:
+                    - cell "算力自营" [ref=e153]
+                    - cell "自有算力资源自主运营，对外提供算力服务并确认收入" [ref=e154]
+                    - cell "表内自有资产" [ref=e155]
+            - heading "2.2 核心核算模式" [level=3] [ref=e157]
+            - generic [ref=e158]: 系统基于合同关键条款自动判定核算路径，判定依据全程留痕可审计：
+            - list [ref=e161]:
+              - listitem [ref=e162]:
+                - strong [ref=e163]: 总额法
+                - text: ：企业拥有自主定价权、承担存货风险与交付主要责任，全额确认营业收入，采购成本全额结转营业成本。
+              - listitem [ref=e164]:
+                - strong [ref=e165]: 净额法
+                - text: ：企业无定价权、不承担存货风险，仅作为代理人角色，仅按服务费差价确认营业收入。
+              - listitem [ref=e166]:
+                - strong [ref=e167]: 经营租赁法
+                - text: ：自购资产对外出租，资产保留在资产负债表内，按期确认租金收入，同步匹配资产折旧成本。
+            - heading "2.3 核心业务主线" [level=3] [ref=e169]
+            - generic [ref=e171]:
+              - text: 以
+              - strong [ref=e172]: 项目编号
+              - text: 作为唯一核心标识，贯穿项目立项→采购下单→批次交付→资产转固→销售签约→收入确认→融资放款→成本归集→结项复盘全流程，所有业务单据强制关联项目号，实现项目维度全量数据聚合与全周期追溯。
+            - separator [ref=e173]
+            - heading "第三章 系统功能需求" [level=2] [ref=e175]
+            - heading "3.1 项目管理" [level=3] [ref=e177]
+            - heading "3.1.1 项目立项管理" [level=4] [ref=e179]
+            - list [ref=e181]:
+              - listitem [ref=e182]: 支持算力项目立项申请与多级审核，生成全系统唯一项目编号与项目名称。
+              - listitem [ref=e183]: 立项信息包含：项目编号、项目名称、业务类型、项目负责人、服务周期、预算总额、备注等。
+              - listitem [ref=e184]: 支持主项目下设子项目，层级关系清晰，可按层级汇总数据。
+              - listitem [ref=e185]: 项目状态管理：筹备中、执行中、已结项、已终止，状态变更全程留痕。
+              - listitem [ref=e186]: 项目生效后，全系统所有业务单据必须关联对应项目号，未关联项目号的单据无法提交审核。
+            - heading "3.1.2 项目全景视图" [level=4] [ref=e188]
+            - list [ref=e190]:
+              - listitem [ref=e191]: 单项目维度聚合展示全链路数据：关联采购合同、销售合同、交付批次进度、资产清单、融资明细、收付款记录、收入确认、成本归集、累计毛利。
+              - listitem [ref=e192]: 支持从项目总览穿透查询到具体单据详情，实现全链路追溯。
+            - heading "3.1.3 项目预算管控" [level=4] [ref=e194]
+            - list [ref=e196]:
+              - listitem [ref=e197]: 维护项目采购预算、费用预算、融资额度预算。
+              - listitem [ref=e198]: 采购下单、付款申请、费用支出时自动校验预算额度，超预算触发预警或审批拦截。
+              - listitem [ref=e199]: 支持预算调整申请与审批，调整记录全程留痕。
+            - heading "3.2 主数据管理" [level=3] [ref=e201]
+            - heading "3.2.1 客户档案管理" [level=4] [ref=e203]
+            - list [ref=e205]:
+              - listitem [ref=e206]: 维护客户工商信息、联系人、银行账户、信用等级、合作资质。
+              - listitem [ref=e207]: 支持客户标签分类、多条件筛选，新建销售合同时直接下拉引用。
+              - listitem [ref=e208]: 数据审核通过后自动同步至 Oracle EBS 客户主数据，保持两端口径一致。
+            - heading "3.2.2 产品与算力资源管理" [level=4] [ref=e210]
+            - list [ref=e212]:
+              - listitem [ref=e213]: 维护 GPU 机型、硬件配置、计费模式（按时 / 天 / 月）、基准单价。
+              - listitem [ref=e214]: 标记资源属性：自购资产（租赁 / 自营）、上游采购资源（转售），匹配对应核算规则。
+              - listitem [ref=e215]: 关联资产折旧规则、单位成本参数，为测算模型与成本核算提供基础数据源。
+            - heading "3.2.3 供应商管理" [level=4] [ref=e217]
+            - list [ref=e219]:
+              - listitem [ref=e220]: 维护硬件供应商、上游算力厂商、保险公司、金融机构档案。
+              - listitem [ref=e221]: 支持供应商分类、资质管理、评级管理。
+              - listitem [ref=e222]: 数据审核通过后自动同步至 Oracle EBS 供应商主数据。
+            - heading "3.2.4 银行账户管理" [level=4] [ref=e224]
+            - list [ref=e226]:
+              - listitem [ref=e227]: 维护公司名下收款账户、付款账户、融资专户信息。
+              - listitem [ref=e228]: 关联资金池与收付款模块，支持按账户维度统计流水。
+            - heading "3.2.5 币种与汇率管理" [level=4] [ref=e230]
+            - list [ref=e232]:
+              - listitem [ref=e233]: 支持多币种档案维护，默认本位币为人民币。
+              - listitem [ref=e234]: 汇率体系：支持维护记账汇率、发票汇率、结算汇率三类汇率，支持按月 / 按日更新。
+              - listitem [ref=e235]: 汇兑损益规则配置：定义汇率差异入账科目为「财务费用 - 汇兑损益」，自动匹配 Oracle EBS 科目映射。
+              - listitem [ref=e236]: 所有业务单据均支持登记币种，默认带出人民币，可手动切换。
+            - heading "3.2.6 基础规则配置" [level=4] [ref=e238]
+            - list [ref=e240]:
+              - listitem [ref=e241]: 批次状态规则、保险险种费率、资产分类与折旧规则。
+              - listitem [ref=e242]: 单据编号规则、审批流程配置、数据字典维护。
+            - heading "3.3 采购与付款管理" [level=3] [ref=e244]
+            - heading "3.3.1 采购合同管理" [level=4] [ref=e246]
+            - list [ref=e248]:
+              - listitem [ref=e249]: 支持三类采购合同：算力硬件采购合同、上游算力资源采购合同、运维 / 技术服务采购合同。
+              - listitem [ref=e250]: 合同强制关联项目号、供应商、币种，成本自动归集至对应项目。
+              - listitem [ref=e251]: 支持单份采购合同拆分多个交付批次，每个批次独立设置交付时间、验收标准、付款节点。
+              - listitem [ref=e252]: 维护合同核心条款：定价规则、质保条款、违约条款、运费与保险承担方。
+              - listitem [ref=e253]:
+                - strong [ref=e254]: 合同变更管理
+                - text: ：支持金额、数量、交付周期、付款条款等变更，生成正式变更单，记录变更前后数据、变更原因、生效时间、审批人，全程留痕版本可追溯；变更审核通过后自动更新对应批次、应付计划，同步 Oracle EBS 采购订单变更。
+              - listitem [ref=e255]:
+                - strong [ref=e256]: 合同终止管理
+                - text: ：支持部分终止、全部终止，登记终止原因、结算方式、违约金；自动生成终止结算单，联动应付调整、退货流程，同步 Oracle EBS 关闭对应采购订单。
+              - listitem [ref=e257]: 合同详情页聚合展示批次进度、验收记录、采购发票、付款记录、变更 / 终止记录、电子合同附件。
+              - listitem [ref=e258]: 合同审核生效后，自动同步 Oracle EBS 采购模块，生成正式采购订单与应付计划。
+            - heading "3.3.2 付款管理" [level=4] [ref=e260]
+            - list [ref=e262]:
+              - listitem [ref=e263]: 采用「付款申请 — 付款登记 — 付款核销」三重管控模式。
+              - listitem [ref=e264]: 付款申请基于采购合同约定的付款节点（预付、到货、验收、质保）发起，关联对应批次与发票。
+              - listitem [ref=e265]: 付款登记支持多币种结算，录入结算币种、结算汇率、实际支付本位币金额，上传银行回单凭证。
+              - listitem [ref=e266]: 付款核销支持一笔付款核销多合同 / 多批次，也支持多笔付款核销同一批次，精准归集每个批次、每个项目的采购成本。
+              - listitem [ref=e267]: 付款核销时，系统自动对比发票汇率与结算汇率，计算汇兑损益金额。
+              - listitem [ref=e268]: 提供付款台账，按供应商、合同、批次、项目、时间维度查询全量付款明细，支持导出。
+              - listitem [ref=e269]: 付款核销完成后，同步 Oracle EBS 应付模块，自动生成付款凭证与汇兑损益凭证。
+            - heading "3.3.3 采购发票管理" [level=4] [ref=e271]
+            - list [ref=e273]:
+              - listitem [ref=e274]: 支持多币种发票登记，录入发票币种、发票汇率、原币金额、本位币金额、税额。
+              - listitem [ref=e275]: 支持 OCR 识别快速录入，关联对应采购合同、交付批次、项目号。
+              - listitem [ref=e276]: 进项税额独立核算，匹配总额法 / 净额法下的税务处理规则。
+              - listitem [ref=e277]: 支持发票认证、抵扣、红冲全流程管理，红字发票对应退货、折让场景，自动冲减应付与成本。
+              - listitem [ref=e278]: 发票信息同步 Oracle EBS 应付发票模块。
+            - heading "3.3.4 采购退货管理" [level=4] [ref=e280]
+            - list [ref=e282]:
+              - listitem [ref=e283]: 支持到货不合格、压测不通过、合同终止等场景发起退货申请，关联原批次、原采购订单、项目号。
+              - listitem [ref=e284]: 退货全流程：退货申请→出库确认→供应商收货→红字发票→退款核销。
+              - listitem [ref=e285]: 财务联动：退货审核通过后自动冲减采购成本；对应资产未转固则冲减在途物资，已转固则触发资产减少与折旧冲回。
+              - listitem [ref=e286]: 对应供应商退款登记与核销，同步冲减应付账款。
+              - listitem [ref=e287]: 退货单、红字发票同步 Oracle EBS 采购与应付模块，自动生成红字入库与应付凭证。
+            - heading "3.4 批次全生命周期管理" [level=3] [ref=e289]
+            - generic [ref=e290]: 以批次为算力资产最小交付单元，全节点状态流转自动触发对应业务动作与财务处理。
+            - heading "3.4.1 批次全节点状态管控" [level=4] [ref=e293]
+            - generic [ref=e294]: 每个批次生成唯一编号，强制关联采购合同号、项目号、产品型号、数量，全流程 7 个标准节点，支持上传验收报告、物流单、压测报告等附件：
+            - list [ref=e297]:
+              - listitem [ref=e298]:
+                - strong [ref=e299]: 订货
+                - text: ：批次已下达采购订单，自动触发预付款申请提醒，生成运输保险投保待办。
+              - listitem [ref=e300]:
+                - strong [ref=e301]: 在途
+                - text: ：货物发出进入运输阶段，关联对应运输保单，跟踪物流信息，保险责任自动生效。
+              - listitem [ref=e302]:
+                - strong [ref=e303]: 到货
+                - text: ：货物送达现场，登记到货时间、实收数量，生成到货验收单，触发暂估入库。
+              - listitem [ref=e304]:
+                - strong [ref=e305]: 己方压测
+                - text: ：到货后硬件性能与稳定性压测，记录压测结果；不合格自动触发退换货流程。
+              - listitem [ref=e306]:
+                - strong [ref=e307]: 上架
+                - text: ：压测通过后正式上架部署；自动触发固定资产转固，按批次生成资产卡片，同步 Oracle EBS 固定资产模块，资源计入「可用算力资源池」。
+              - listitem [ref=e308]:
+                - strong [ref=e309]: 客户压测
+                - text: ：交付客户进行上线前验证，记录客户压测结果与问题整改。
+              - listitem [ref=e310]:
+                - strong [ref=e311]: 点亮验收
+                - text: ：客户正式验收通过，交付完成；同步触发三类业务动作：
+                - list [ref=e313]:
+                  - listitem [ref=e314]: 销售端：对应销售合同该批次正式开始计费，作为收入确认起始时点；
+                  - listitem [ref=e315]: 财务端：触发财产一切险投保，资产进入运营期，开始计提折旧；
+                  - listitem [ref=e316]: 融资端：对应金租 / 银行贷款的批次放款条件达成，自动触发放款申请流程。
+            - heading "3.4.2 批次全景视图" [level=4] [ref=e318]
+            - list [ref=e320]:
+              - listitem [ref=e321]: 单批次全维度聚合：采购信息、物流轨迹、全节点验收记录、关联资产卡片、对应销售合同、保单信息、付款与成本明细。
+              - listitem [ref=e322]: 批次进度看板：按项目、采购合同维度展示所有批次当前状态、滞塞节点、预计完成时间。
+            - heading "3.4.3 保险管理" [level=4] [ref=e324]
+            - list [ref=e326]:
+              - listitem [ref=e327]: 险种基础配置：货物运输险、财产一切险等险种的费率、保额规则、承保公司配置。
+              - listitem [ref=e328]:
+                - text: 自动投保触发：
+                - list [ref=e330]:
+                  - listitem [ref=e331]: 批次进入「在途」状态：自动推送投保提醒，按批次资产价值自动计算保费，生成运输险投保单；
+                  - listitem [ref=e332]: 批次完成「点亮验收」：自动推送财产一切险投保提醒，绑定对应资产卡片。
+              - listitem [ref=e333]: 保费按项目、按批次精准归集，按规则计入资产原值或当期损益。
+              - listitem [ref=e334]: 保单全生命周期管理：保单信息登记、保费摊销、到期续保提醒、理赔记录。
+              - listitem [ref=e335]: 保费核算数据同步 Oracle EBS 总账，自动生成对应入账凭证。
+            - heading "3.5 销售合同与收入管理" [level=3] [ref=e337]
+            - heading "3.5.1 销售合同管理" [level=4] [ref=e339]
+            - list [ref=e341]:
+              - listitem [ref=e342]: 合同强制关联项目号、客户、币种，收入自动归集至对应项目。
+              - listitem [ref=e343]: 支持单份销售合同拆分多个交付批次，关联对应算力批次，按点亮验收时间逐批次启动计费。
+              - listitem [ref=e344]: 维护合同核心条款：服务周期、计费规则、账期、收付款计划。
+              - listitem [ref=e345]:
+                - strong [ref=e346]: 智能判定关键条款录入
+                - text: ：必填定价权归属、存货风险承担方、主要责任人认定三项信息，作为核算路径判定依据。
+              - listitem [ref=e347]:
+                - strong [ref=e348]: 合同变更管理
+                - text: ：支持金额、周期、服务内容、计费规则等变更，生成变更单留存审批痕迹；变更生效后自动调整收入计划、应收余额，同步 Oracle EBS 应收单据调整。
+              - listitem [ref=e349]:
+                - strong [ref=e350]: 合同终止管理
+                - text: ：支持提前终止，登记终止原因、结算金额、违约金；自动生成终止结算单，对应收入冲回、应收调整，联动算力资源释放。
+              - listitem [ref=e351]: 合同详情页聚合展示批次交付进度、收款记录、发票记录、收入确认记录、电子附件、EBS 同步状态。
+            - heading "3.5.2 收入核算路径自动判定引擎" [level=4] [ref=e353]
+            - list [ref=e355]:
+              - listitem [ref=e356]: 基于合同录入的定价权、存货风险、主要责任人三项条款，系统自动推荐或强制锁定核算路径（总额法 / 净额法 / 经营租赁）。
+              - listitem [ref=e357]:
+                - text: 判定规则：
+                - list [ref=e359]:
+                  - listitem [ref=e360]:
+                    - text: 无定价权、不承担存货风险：自动判定
+                    - strong [ref=e361]: 净额法
+                    - text: ，仅确认服务费差价收入；
+                  - listitem [ref=e362]:
+                    - text: 有自主定价权、承担存货与交付风险：自动判定
+                    - strong [ref=e363]: 总额法
+                    - text: ，全额确认营收；
+                  - listitem [ref=e364]:
+                    - text: 自购资产对外出租、资产权属保留：自动判定
+                    - strong [ref=e365]: 经营租赁
+                    - text: ，按期确认租金收入。
+              - listitem [ref=e366]: 判定结果与判定依据全程留痕，可追溯审计，防范「总额法滥用」监管风险。
+            - heading "3.5.3 收入确认管理" [level=4] [ref=e368]
+            - list [ref=e370]:
+              - listitem [ref=e371]: 严格遵循权责发生制，与开票、收款环节完全解耦，支持「先开票后确认收入」「先确认收入后开票」两类场景。
+              - listitem [ref=e372]: 批次完成点亮验收后，系统自动按该批次对应金额与计费周期，按期生成收入确认草稿，人工审核后生效。
+              - listitem [ref=e373]: 支持按项目、按批次独立确认收入，自动匹配对应折旧、保险、运维成本，实现收入成本配比。
+              - listitem [ref=e374]: 支持外币收入折算，汇率差异计入汇兑损益。
+              - listitem [ref=e375]: 收入确认单审核通过后，同步 Oracle EBS 应收模块与总账，按判定的核算模式自动生成收入凭证。
+            - heading "3.6 项目测算中心" [level=3] [ref=e377]
+            - heading "3.6.1 算力项目利润测算模型" [level=4] [ref=e379]
+            - list [ref=e381]:
+              - listitem [ref=e382]: 以项目为单位录入基础参数：合同总收入、采购成本、运输费、保险费、运维 / 电费 / 带宽等运营成本、税费率、折现率、残值率。
+              - listitem [ref=e383]: 支持按批次维度录入成本数据，自动汇总至项目全周期。
+              - listitem [ref=e384]:
+                - strong [ref=e385]: 全周期利润测算
+                - text: ：自动计算项目全生命周期总收入、总成本、毛利额、净利润、IRR、静态 / 动态投资回收期。
+              - listitem [ref=e386]:
+                - strong [ref=e387]: 年度维度拆分
+                - text: ：按自然年度拆分收入、成本、利润，匹配年度预算与考核口径。
+              - listitem [ref=e388]:
+                - strong [ref=e389]: 残值测算
+                - text: ：按批次对应资产分别设定残值率与处置费率，自动计算期末资产残值与处置收益，纳入全周期利润。
+              - listitem [ref=e390]: 多版本测算管理：支持多方案测算对比，定稿版本可一键同步至对应项目，作为项目立项与考核基准。
+              - listitem [ref=e391]: 支持预算与实际对比：自动抓取项目实际发生的收入、成本、费用，实时对比预算毛利与实际毛利差异。
+            - heading "3.6.2 资金成本测算工具" [level=4] [ref=e393]
+            - list [ref=e395]:
+              - listitem [ref=e396]: 核心参数配置：融资金额、年利率、融资期限、放款日期、手续费率。
+              - listitem [ref=e397]: 还款方式切换：支持等额本金、等额本息两种主流还款方式。
+              - listitem [ref=e398]: 还款周期切换：支持按月还款、按季还款两种频率。
+              - listitem [ref=e399]: 支持按批次放款分别测算资金成本，自动汇总项目综合融资成本。
+              - listitem [ref=e400]: 自动生成全周期还款计划表，逐期展示应还本金、应还利息、剩余本金、当期资金成本。
+              - listitem [ref=e401]: 自动计算含手续费的实际年化利率，为融资方案比选提供依据。
+              - listitem [ref=e402]: 测算结果可一键同步至对应融资项目台账。
+            - heading "3.7 融资与资金管理" [level=3] [ref=e404]
+            - heading "3.7.1 融资项目落地跟踪" [level=4] [ref=e406]
+            - list [ref=e408]:
+              - listitem [ref=e409]: 分类管理：金融租赁项目、银行流动资金贷款、项目贷款等全类型融资。
+              - listitem [ref=e410]: 每笔融资绑定对应项目，资金成本精准归集至项目。
+              - listitem [ref=e411]: 全流程节点跟踪：覆盖申请→尽调→审批→签约→分批放款全链路，每个节点记录进度、提交材料、对接人、预计完成时间。
+              - listitem [ref=e412]: 支持按资产批次拆分放款计划，每个批次对应独立放款金额、放款条件。
+              - listitem [ref=e413]: 进度看板：直观展示所有金租、银行贷款项目的当前阶段、各批次放款状态、滞塞节点。
+              - listitem [ref=e414]: 融资申请材料、审批文件、合同文本统一上传归档。
+            - heading "3.7.2 放款还款跟进表" [level=4] [ref=e416]
+            - list [ref=e418]:
+              - listitem [ref=e419]:
+                - strong [ref=e420]: 放款台账
+                - text: ：按批次登记实际放款日、放款金额、到账账户，关联对应融资项目与资产批次，自动同步资金池。
+              - listitem [ref=e421]:
+                - strong [ref=e422]: 还款计划管理
+                - text: ：支持按单笔放款生成独立还款计划，或按融资项目合并生成还款计划。
+              - listitem [ref=e423]: 实际还款登记：录入实际还款金额、日期，核销对应还款计划，自动更新剩余本金与未还利息。
+              - listitem [ref=e424]: 到期预警：提前 7/15 天推送待还款提醒，支持逾期标记与罚息计算。
+              - listitem [ref=e425]: 放款、还款、利息计提数据同步 Oracle EBS 应付与总账模块，自动生成长期负债、利息计提与付款凭证。
+            - heading "3.7.3 收款管理" [level=4] [ref=e427]
+            - list [ref=e429]:
+              - listitem [ref=e430]: 采用「收款登记 — 合同核销」双重管理模式。
+              - listitem [ref=e431]: 收款登记：录入客户到账信息，支持多币种，上传银行回单；支持待认领款项管理。
+              - listitem [ref=e432]: 收款核销：支持一笔款项核销多合同 / 多批次，也支持多笔款项核销一份合同 / 批次，精准匹配应收。
+              - listitem [ref=e433]: 核销时自动计算汇兑损益。
+              - listitem [ref=e434]: 核销完成后自动更新合同应收余额，同步 Oracle EBS 应收核销与资金模块。
+            - heading "3.7.4 资金池管理" [level=4] [ref=e436]
+            - list [ref=e438]:
+              - listitem [ref=e439]: 实时展示资金池余额、累计入金、累计出金。
+              - listitem [ref=e440]: 资金流水台账：按来源、方向、项目、账户维度查询全量收付款记录。
+              - listitem [ref=e441]: 收入构成分析：自有资金、银行流贷、金租放款等资金来源占比统计。
+              - listitem [ref=e442]: 与 Oracle EBS 资金管理模块双向同步，保持资金数据一致。
+            - heading "3.8 资产与资源池管理" [level=3] [ref=e444]
+            - heading "3.8.1 资产台账管理" [level=4] [ref=e446]
+            - list [ref=e448]:
+              - listitem [ref=e449]: 资产卡片强制绑定项目号、批次号、采购合同号，可按项目、批次汇总资产原值、累计折旧、净值。
+              - listitem [ref=e450]:
+                - strong [ref=e451]: 自动转固
+                - text: ：批次进入「上架」节点时，自动按批次生成固定资产卡片，带入资产原值、折旧规则。
+              - listitem [ref=e452]:
+                - strong [ref=e453]: 折旧计提
+                - text: ：点亮验收后资产正式进入运营期，按月自动计提折旧，对应成本自动匹配租赁 / 转售收入。
+              - listitem [ref=e454]: 资产全生命周期管理：从转固、折旧计提、运营维护到处置报废全流程跟踪。
+              - listitem [ref=e455]: 资产退货联动：已转固资产发起退货，自动触发资产减少、折旧冲回，同步 Oracle EBS 固定资产模块。
+              - listitem [ref=e456]: 支持资产卡片与批次、采购合同、付款记录双向核对，确保账实一致。
+            - heading "3.8.2 资源池管理" [level=4] [ref=e458]
+            - list [ref=e460]:
+              - listitem [ref=e461]: 实时展示各状态资源数量：在途、压测、可用、已占用。
+              - listitem [ref=e462]: 批次上架自动计入可用资源，点亮验收自动扣减可用资源、计入已占用资源。
+              - listitem [ref=e463]: 清晰标记资产权属：自购表内资产、转售表外资源，确保资产负债表核算合规。
+            - heading "3.9 发票管理" [level=3] [ref=e465]
+            - heading "3.9.1 销售发票管理" [level=4] [ref=e467]
+            - list [ref=e469]:
+              - listitem [ref=e470]: 支持多币种发票登记，录入发票号、开票日期、金额、税额、对应合同与项目。
+              - listitem [ref=e471]: 与收入确认完全解耦，支持先开票后确认收入、先确认收入后开票。
+              - listitem [ref=e472]: 支持发票红冲，自动冲减对应开票记录与应收。
+              - listitem [ref=e473]: 支持 OCR 识别快速录入。
+              - listitem [ref=e474]: 发票信息同步 Oracle EBS 应收发票模块。
+            - heading "3.9.2 采购发票管理" [level=4] [ref=e476]
+            - generic [ref=e477]: （详见 3.3.3 采购发票管理）
+            - heading "3.10 对账中心" [level=3] [ref=e480]
+            - list [ref=e482]:
+              - listitem [ref=e483]:
+                - strong [ref=e484]: 销售全链路对账
+                - text: ：单合同维度对比合同总金额、累计收款、累计开票、累计确认收入，自动标记差异场景（已开票未回款、已回款未开票、已确认收入未开票等）。
+              - listitem [ref=e485]:
+                - strong [ref=e486]: 采购四单对账
+                - text: ：采购合同、到货单、采购发票、付款单四单匹配校验，定位差异项。
+              - listitem [ref=e487]:
+                - strong [ref=e488]: 资产交付对账
+                - text: ：核对批次交付数量与转固资产数量、点亮资产数量一致性。
+              - listitem [ref=e489]:
+                - strong [ref=e490]: 汇兑损益对账
+                - text: ：核对外币单据汇率折算差异、汇兑损益入账准确性。
+              - listitem [ref=e491]:
+                - strong [ref=e492]: 业财一致性对账
+                - text: ：双向比对 SIEGPU 业务数据与 Oracle EBS 财务科目余额，涵盖应收、应付、资产、资金、损益全科目。
+              - listitem [ref=e493]:
+                - strong [ref=e494]: 三流差异明细表
+                - text: ：全域合同、发票、资金数据对比，支持按客户、供应商、期间筛选。
+            - heading "3.11 数据报表与经营看板" [level=3] [ref=e496]
+            - heading "3.11.1 首页经营看板" [level=4] [ref=e498]
+            - list [ref=e500]:
+              - listitem [ref=e501]: 待办事项中心、核心经营指标概览、快捷操作入口、Oracle EBS 同步状态监控。
+              - listitem [ref=e502]: 核心指标：当期合同额、累计回款、开票金额、确认收入、融资余额、资金池余额、批次交付进度。
+            - heading "3.11.2 合同毛利报表" [level=4] [ref=e504]
+            - list [ref=e506]:
+              - listitem [ref=e507]: 单合同维度明细表：展示合同收入、对应营业成本（采购成本 / 折旧、保险、运维分摊）、毛利额、毛利率。
+              - listitem [ref=e508]: 支持按业务类型、客户、期间筛选汇总。
+            - heading "3.11.3 项目损益报表" [level=4] [ref=e510]
+            - list [ref=e512]:
+              - listitem [ref=e513]:
+                - strong [ref=e514]: 项目全周期毛利表
+                - text: ：按项目汇总总收入、总成本（采购 + 融资利息 + 运维 + 税费 + 保险）、毛利额、净利率。
+              - listitem [ref=e515]:
+                - strong [ref=e516]: 项目年度毛利表
+                - text: ：按自然年度拆分项目收入、成本、毛利，支持预算 vs 实际对比。
+              - listitem [ref=e517]: 项目 IRR 与投资回收期统计表。
+            - heading "3.11.4 采购资产报表" [level=4] [ref=e519]
+            - list [ref=e521]:
+              - listitem [ref=e522]: 采购付款统计表、供应商应付账龄表。
+              - listitem [ref=e523]: 批次交付进度表、资产转固明细表、资源利用率报表。
+            - heading "3.11.5 融资资金报表" [level=4] [ref=e525]
+            - list [ref=e527]:
+              - listitem [ref=e528]: 融资余额表、还款计划表、资金成本分析表。
+              - listitem [ref=e529]: 汇兑损益明细表：按币种、按项目展示当期汇兑损益发生额。
+            - heading "3.11.6 核算审计报表" [level=4] [ref=e531]
+            - list [ref=e533]:
+              - listitem [ref=e534]: 收入核算明细表（按总额法 / 净额法 / 经营租赁拆分）。
+              - listitem [ref=e535]: 保险台账表、合同变更终止统计表、操作日志审计表。
+            - heading "3.12 系统管理" [level=3] [ref=e537]
+            - heading "3.12.1 操作日志" [level=4] [ref=e539]
+            - list [ref=e541]:
+              - listitem [ref=e542]: 全量记录所有操作的操作人、操作时间、操作模块、操作内容、数据变更前后值。
+              - listitem [ref=e543]: 支持按模块、操作人、时间范围筛选查询，满足全链路追溯与审计要求。
+            - heading "3.12.2 操作说明中心" [level=4] [ref=e545]
+            - list [ref=e547]:
+              - listitem [ref=e548]: 分模块操作指南：字段释义、操作步骤、注意事项。
+              - listitem [ref=e549]: 业务勾稽关系说明：项目 - 采购 - 批次 - 资产 - 合同 - 收入 - 融资 - 财务全链路数据流转逻辑。
+              - listitem [ref=e550]: Oracle EBS 对接规则：数据同步触发时机、字段映射关系、异常处理流程。
+            - heading "3.12.3 Oracle EBS 接口管理" [level=4] [ref=e552]
+            - list [ref=e554]:
+              - listitem [ref=e555]: 接口参数配置、字段映射维护。
+              - listitem [ref=e556]: 同步日志查询：展示所有单据同步状态、同步时间、失败原因。
+              - listitem [ref=e557]: 异常数据重试：支持手动触发重传，批量处理异常单据。
+            - heading "3.12.4 权限与基础配置" [level=4] [ref=e559]
+            - list [ref=e561]:
+              - listitem [ref=e562]: 角色配置、用户账号管理、功能权限与数据权限分配。
+              - listitem [ref=e563]: 数据字典、审批流程、单据编号规则等基础配置。
+            - separator [ref=e564]
+            - heading "第四章 系统接口需求" [level=2] [ref=e566]
+            - heading "4.1 对接目标系统" [level=3] [ref=e568]
+            - generic [ref=e570]:
+              - text: 对接公司现有
+              - strong [ref=e571]: Oracle EBS
+              - text: 系统，覆盖以下模块：
+            - list [ref=e573]:
+              - listitem [ref=e574]: 总账模块（GL）：科目余额、凭证同步
+              - listitem [ref=e575]: 应收模块（AR）：客户、应收单、收款核销、发票
+              - listitem [ref=e576]: 应付模块（AP）：供应商、应付单、付款核销、进项发票
+              - listitem [ref=e577]: 固定资产模块（FA）：资产卡片、折旧计提、资产增减变动
+              - listitem [ref=e578]: 采购模块（PO）：采购订单、入库单
+              - listitem [ref=e579]: 资金管理模块（CE）：资金流水、银行账户
+            - heading "4.2 核心接口清单" [level=3] [ref=e581]
+            - generic [ref=e583]:
+              - generic [ref=e584]: 表格
+              - table [ref=e600]:
+                - rowgroup [ref=e601]:
+                  - row [ref=e602]:
+                    - columnheader "接口类别" [ref=e603]
+                    - columnheader "同步方向" [ref=e604]
+                    - columnheader "业务内容" [ref=e605]
+                - rowgroup [ref=e606]:
+                  - row [ref=e607]:
+                    - cell "主数据类" [ref=e608]
+                    - cell "双向" [ref=e609]
+                    - cell "客户档案、供应商档案、产品 / 资产分类、会计科目" [ref=e610]
+                  - row [ref=e611]:
+                    - cell "采购应付类" [ref=e612]
+                    - cell "SIEGPU → EBS" [ref=e613]
+                    - cell "采购合同 / 订单、采购入库、采购发票、付款单、汇兑损益、退货单" [ref=e614]
+                  - row [ref=e615]:
+                    - cell "资产类" [ref=e616]
+                    - cell "SIEGPU → EBS" [ref=e617]
+                    - cell "资产卡片新增、折旧计提、资产减少、资产变更" [ref=e618]
+                  - row [ref=e619]:
+                    - cell "销售应收类" [ref=e620]
+                    - cell "SIEGPU → EBS" [ref=e621]
+                    - cell "销售合同、收入确认单、销售发票、收款核销单" [ref=e622]
+                  - row [ref=e623]:
+                    - cell "资金类" [ref=e624]
+                    - cell "双向" [ref=e625]
+                    - cell "资金流水、银行账户余额" [ref=e626]
+                  - row [ref=e627]:
+                    - cell "核算类" [ref=e628]
+                    - cell "SIEGPU → EBS" [ref=e629]
+                    - cell "收入凭证、成本凭证、费用凭证、汇兑损益凭证" [ref=e630]
+            - heading "4.3 接口管理机制" [level=3] [ref=e632]
+            - list [ref=e634]:
+              - listitem [ref=e635]:
+                - strong [ref=e636]: 同步方式
+                - text: ：关键业务单据实时同步，批量数据支持定时同步。
+              - listitem [ref=e637]:
+                - strong [ref=e638]: 触发机制
+                - text: ：业务单据审核生效后自动触发同步；支持手动触发重传。
+              - listitem [ref=e639]:
+                - strong [ref=e640]: 异常处理
+                - text: ：同步失败自动记录失败原因，在首页工作台集中告警，支持单条 / 批量重试。
+              - listitem [ref=e641]:
+                - strong [ref=e642]: 日志留痕
+                - text: ：所有接口调用记录、请求参数、返回结果完整留存，支持审计追溯。
+            - separator [ref=e643]
+            - heading "第五章 非功能需求" [level=2] [ref=e645]
+            - heading "5.1 性能需求" [level=3] [ref=e647]
+            - list [ref=e649]:
+              - listitem [ref=e650]: 常规页面响应时间≤2 秒，大数据量查询页面响应时间≤5 秒。
+              - listitem [ref=e651]: 支持不少于 50 并发用户同时操作系统，无明显卡顿。
+              - listitem [ref=e652]: 支持百万级单据数据存储与查询，数据统计报表生成时间≤10 秒。
+            - heading "5.2 数据一致性需求" [level=3] [ref=e654]
+            - list [ref=e656]:
+              - listitem [ref=e657]: 业务数据与 Oracle EBS 财务数据保持口径一致，差异可定位、可追溯、可调整。
+              - listitem [ref=e658]: 批次状态、资产状态、合同状态变更时，关联模块数据同步更新，无数据不一致。
+            - heading "5.3 安全性需求" [level=3] [ref=e660]
+            - list [ref=e662]:
+              - listitem [ref=e663]: 支持基于角色的权限管控，数据权限按项目、部门、角色隔离。
+              - listitem [ref=e664]: 关键数据加密存储，操作全程留痕。
+              - listitem [ref=e665]: 支持账号密码策略、登录日志、异常登录拦截。
+            - heading "5.4 可扩展性需求" [level=3] [ref=e667]
+            - list [ref=e669]:
+              - listitem [ref=e670]: 支持后续新增业务模式、核算规则的配置化扩展，减少代码改造。
+              - listitem [ref=e671]: 支持后续对接更多业务系统与财务系统。
+            - heading "5.5 易用性需求" [level=3] [ref=e673]
+            - list [ref=e675]:
+              - listitem [ref=e676]: 界面简洁直观，关键操作路径不超过 3 步。
+              - listitem [ref=e677]: 内嵌操作说明与字段提示，降低用户学习成本。
+              - listitem [ref=e678]: 支持单据批量导入导出，提升操作效率。
+            - separator [ref=e679]
+            - heading "第六章 合规与审计需求" [level=2] [ref=e681]
+            - list [ref=e683]:
+              - listitem [ref=e684]:
+                - strong [ref=e685]: 核算合规
+                - text: ：严格遵循企业会计准则（CAS），收入确认、资产核算、汇兑损益处理符合规范；收入模式判定依据全程留存，防范监管风险。
+              - listitem [ref=e686]:
+                - strong [ref=e687]: 审计追溯
+                - text: ：全流程操作日志、数据变更记录、接口同步日志完整保存，支持从报表追溯到单据、从业务追溯到财务凭证的全链路审计。
+              - listitem [ref=e688]:
+                - strong [ref=e689]: 数据留存
+                - text: ：业务单据、电子附件、日志数据按国家法规与公司制度要求期限留存。
+              - listitem [ref=e690]:
+                - strong [ref=e691]: 变更留痕
+                - text: ：合同、项目、主数据的所有变更均记录变更前后值、操作人、时间，不可删除与篡改。
+            - separator [ref=e692]
+            - heading "附录：术语说明" [level=2] [ref=e694]
+            - list [ref=e696]:
+              - listitem [ref=e697]:
+                - strong [ref=e698]: 点亮验收
+                - text: ：指算力设备完成部署调试，客户验收通过并正式开始计费的节点。
+              - listitem [ref=e699]:
+                - strong [ref=e700]: 总额法
+                - text: ：按交易总额确认收入的核算方式，适用于承担主要责任人角色的业务。
+              - listitem [ref=e701]:
+                - strong [ref=e702]: 净额法
+                - text: ：按交易差价（服务费）确认收入的核算方式，适用于代理人角色的业务。
+              - listitem [ref=e703]:
+                - strong [ref=e704]: IRR
+                - text: ：内部收益率，衡量项目投资收益水平的核心指标。
+            - generic [ref=e706]:
+              - text: 需要我把这份需求说明书拆分为
+              - strong [ref=e707]: 功能清单明细表
+              - text: 和
+              - strong [ref=e708]: 接口字段映射表
+              - text: 两个配套文档，方便后续开发落地吗？
+        - button [ref=e710] [cursor=pointer]
+    - button "打开豆包" [ref=e27] [cursor=pointer]
+  - region "Notifications alt+T"

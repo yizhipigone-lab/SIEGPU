@@ -68,3 +68,16 @@ def compare_project_profit(project_id: str, db: Session = Depends(get_db), user:
 @router.get("/project-comparison")
 def project_comparison(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return {"items": svc.project_comparison(db)}
+
+
+# —— v3.2 客户对账单（F3）——
+
+@router.get("/customer-statement/summary")
+def customer_statement_summary(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return {"items": svc.customer_statement_summary(db)}
+
+
+@router.get("/customer-statement")
+def customer_statement(customer_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    import uuid
+    return svc.customer_statement(db, uuid.UUID(customer_id))

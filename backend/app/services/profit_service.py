@@ -244,9 +244,17 @@ def list_scenarios(db: Session, *, project_id, skip=0, limit=50):
 
 def compare_scenarios(db: Session, *, project_id) -> dict:
     """测算 vs 实际对比：取最新的 is_actual=False 场景和 is_actual=True 场景。"""
-    scenarios = list_scenarios(db, project_id=project_id, limit=100)
-    estimated = next((s for s in scenarios if not s.is_actual), None)
-    actual = next((s for s in scenarios if s.is_actual), None)
+    from app.models.profit_scenario import ProfitScenario
+
+    _q = lambda is_actual: db.execute(
+        select(ProfitScenario).where(
+            ProfitScenario.project_id == project_id,
+            ProfitScenario.is_actual == is_actual,
+            ProfitScenario.deleted_at.is_(None),
+        ).order_by(ProfitScenario.created_at.desc()).limit(1)
+    ).scalar_one_or_none()
+    estimated = _q(False)
+    actual = _q(True)
     if not estimated or not actual:
         return {"estimated": None, "actual": None, "diffs": []}
     est_summary = estimated.result_json.get("summary", {})

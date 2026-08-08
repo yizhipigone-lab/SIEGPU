@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 1.8cm 2cm 2cm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Noto Sans CJK SC", sans-serif; color: #1f2937; font-size: 11pt; line-height: 1.7; margin: 0; }
+  .doc-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5pt solid #1d4ed8; padding-bottom: 10pt; margin-bottom: 18pt; }
+  .brand { font-family: "Noto Serif CJK SC", serif; font-size: 15pt; font-weight: 700; color: #1d4ed8; letter-spacing: .05em; }
+  .brand small { display: block; font-family: "Noto Sans CJK SC", sans-serif; font-size: 8pt; font-weight: 400; color: #6b7280; letter-spacing: 0; margin-top: 2pt; }
+  .doc-no { font-size: 9pt; color: #6b7280; text-align: right; }
+  h1 { font-family: "Noto Serif CJK SC", serif; font-size: 19pt; font-weight: 700; text-align: center; margin: 6pt 0 6pt; color: #111827; letter-spacing: .08em; }
+  .subline { text-align: center; font-size: 10pt; color: #6b7280; margin-bottom: 18pt; }
+  .parties { display: flex; gap: 24pt; margin-bottom: 14pt; }
+  .party { flex: 1; }
+  .party-label { font-size: 9pt; color: #6b7280; margin-bottom: 2pt; }
+  .party-name { font-size: 11.5pt; font-weight: 600; }
+  table.amt { width: 100%; border-collapse: collapse; margin: 6pt 0 16pt; }
+  table.amt th, table.amt td { border: 0.5pt solid #d1d5db; padding: 8pt 10pt; font-size: 10.5pt; text-align: left; }
+  table.amt th { background: #f3f4f6; font-weight: 600; color: #374151; width: 32%; }
+  table.amt td.amt { font-weight: 600; color: #1d4ed8; }
+  table.amt td.due { font-weight: 600; color: #dc2626; }
+  .meta { display: flex; gap: 24pt; margin: 4pt 0 8pt; font-size: 10pt; color: #4b5563; }
+  .meta span b { color: #111827; }
+  .status-tag { display: inline-block; padding: 1pt 8pt; border-radius: 8pt; font-size: 9pt; font-weight: 600; background: #dbeafe; color: #1d4ed8; }
+  .note { margin-top: 10pt; padding: 8pt 12pt; background: #f9fafb; border-left: 3pt solid #1d4ed8; font-size: 9.5pt; color: #4b5563; }
+  .foot { margin-top: 24pt; font-size: 8.5pt; color: #9ca3af; text-align: center; border-top: 0.5pt solid #e5e7eb; padding-top: 8pt; }
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <div class="brand">SIEGPU 算力租赁<small>SIEGPU Computing Power Leasing</small></div>
+  <div class="doc-no">发票/账单号：{{ invoice.invoice_no or '（待开）' }}<br>生成日期：{{ today }}</div>
+</div>
+
+<h1>{{ '销售' if invoice.direction == 'RECEIVABLE' else '购进' }}发票 / 账单</h1>
+<div class="subline">{{ '应收账款' if invoice.direction == 'RECEIVABLE' else '应付账款' }} · 状态 <span class="status-tag">{{ invoice.status }}</span></div>
+
+<div class="parties">
+  <div class="party">
+    <div class="party-label">{{ '收款方' if invoice.direction == 'RECEIVABLE' else '付款方' }}</div>
+    <div class="party-name">SIEGPU 算力服务有限公司</div>
+  </div>
+  <div class="party">
+    <div class="party-label">{{ '付款方' if invoice.direction == 'RECEIVABLE' else '收款方' }}（{{ '客户' if contract.party_type == 'customer' else '供应商' if contract else '往来单位' }}）</div>
+    <div class="party-name">{{ party_name }}</div>
+  </div>
+</div>
+
+<div class="meta">
+  <span>关联项目：<b>{{ project.name if project else '—' }}</b></span>
+  <span>开票日：<b>{{ invoice.issue_date or '—' }}</b></span>
+  <span>到期日：<b>{{ invoice.due_date or '—' }}</b></span>
+</div>
+
+<table class="amt">
+  <tr><th>价税合计（含税）</th><td class="amt">{{ money(invoice.amount) }}</td></tr>
+  <tr><th>其中：不含税金额</th><td>{{ money(invoice.amount_ex_tax) }}</td></tr>
+  <tr><th>增值税额（税率 {{ '{:.0%}'.format(invoice.tax_rate) if invoice.tax_rate else '—' }}）</th><td>{{ money(invoice.tax_amount) }}</td></tr>
+  <tr><th>已收 / 已付金额</th><td>{{ money(invoice.matched_amount) }}</td></tr>
+  <tr><th>{{ '尚欠（应收）' if invoice.direction == 'RECEIVABLE' else '待付（应付）' }}</th><td class="due">{{ money(balance) }}</td></tr>
+</table>
+
+<div class="note">本单据所载金额与合同流、资金流核对一致后方可入账；已核销累计金额以系统记录为准，结清前请勿重复付款。</div>
+
+<div class="foot">本文件由 SIEGPU ERP 系统于 {{ today }} 自动生成，仅供对账参考，不作为税务机关认可的发票凭证。</div>
+
+</body>
+</html>

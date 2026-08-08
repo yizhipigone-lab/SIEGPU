@@ -19,6 +19,9 @@ class LeasingProcessCreate(BaseModel):
     repayment_method: RepaymentMethod | None = None
     start_date: date | None = None
     notes: str | None = None
+    leasing_mode: Literal["自有", "直租", "售后回租"] | None = None
+    financing_type: Literal["金租直租", "金租回租", "银行流贷", "项目贷款"] | None = None
+    materials: dict | None = None
 
 
 class LeasingProcessOut(BaseModel):
@@ -29,6 +32,9 @@ class LeasingProcessOut(BaseModel):
     status: str
     disbursement_date: date | None
     plan_generated: bool
+    leasing_mode: str | None = None
+    financing_type: str | None = None
+    materials: dict | None = None  # W7-8：融资分类材料（合同/发票/权属等）
 
     model_config = {"from_attributes": True}
 
@@ -53,6 +59,9 @@ class LeasingProcessDetail(BaseModel):
     status: str
     disbursement_date: date | None
     plan_generated: bool
+    leasing_mode: str | None = None  # W7-8：融资分类三字段回显
+    financing_type: str | None = None
+    materials: dict | None = None
     nodes: list[LeasingNodeOut]
 
 

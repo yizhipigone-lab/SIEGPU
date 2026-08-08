@@ -10,7 +10,8 @@ from app.models.project import Contract
 
 def create_contract(db: Session, *, project_id, type: str, party_id, amount,
                     tax_rate, monthly_rent=None, contract_no=None, start_date=None,
-                    end_date=None, parent_contract_id=None, file_path=None) -> Contract:
+                    end_date=None, parent_contract_id=None, file_path=None,
+                    leasing_mode=None) -> Contract:
     proj = db.get(Project, project_id)
     if not proj or proj.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "项目不存在", 404)
@@ -29,6 +30,7 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
         party_id=party_id, direction=direction, amount=amount, tax_rate=tax_rate,
         monthly_rent=monthly_rent, start_date=start_date, end_date=end_date,
         parent_contract_id=parent_contract_id, file_path=file_path, status="已签",
+        leasing_mode=leasing_mode,
     )
     db.add(c)
     db.flush()

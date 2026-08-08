@@ -3,6 +3,8 @@ import { computed, h, onMounted, ref } from 'vue'
 import { NButton, NDataTable, NFormItem, NInput, NModal, NSpace, NTag, useMessage } from 'naive-ui'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
+import { statusTagType } from '../utils/format'
+import EmptyState from '../components/EmptyState.vue'
 
 interface Confirmation {
   id: string; billing_id: string; sales_order_id: string
@@ -30,8 +32,6 @@ const showDispute = computed({
   get: () => !!disputeTarget.value,
   set: (v: boolean) => { if (!v) { disputeTarget.value = null; disputeReason.value = '' } },
 })
-
-const statusColors: Record<string, string> = { '已确认': 'success', '有争议': 'error', '待确认': 'warning' }
 
 function openConfirm(row: Confirmation) { confirmTarget.value = row; confirmName.value = '' }
 function openDispute(row: Confirmation) { disputeTarget.value = row; disputeReason.value = '' }
@@ -64,7 +64,7 @@ async function submitDispute() {
 
 const columns = [
   { title: '计费期', key: 'period_label', width: 100 },
-  { title: '状态', key: 'status', width: 90, render: (r: any) => h(NTag, { type: (statusColors[r.status] || 'default') as any, size: 'small' }, () => r.status) },
+  { title: '状态', key: 'status', width: 90, render: (r: any) => h(NTag, { type: statusTagType(r.status) as any, size: 'small' }, () => r.status) },
   { title: '客户签字人', key: 'confirmed_by_customer', width: 140 },
   { title: '确认日期', key: 'confirmed_at', width: 110 },
   { title: '争议原因', key: 'dispute_reason', render: (r: any) => r.dispute_reason || '—' },
@@ -94,7 +94,11 @@ onMounted(load)
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="margin:0">客户确认单</h2>
     </div>
-    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false" />
+    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false">
+      <template #empty>
+        <EmptyState description="还没有客户确认单，交付流程走到「客户确认」并签字后，确认记录会显示在这里" />
+      </template>
+    </n-dataTable>
 
     <!-- 客户确认 -->
     <n-modal v-model:show="showConfirm" preset="card" title="客户确认" style="width:380px">

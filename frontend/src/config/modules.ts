@@ -1,3 +1,6 @@
+import { glossary } from '../utils/glossary'
+import { validators } from '../utils/validators'
+
 export type FieldType = 'text' | 'number' | 'select' | 'date'
 
 /** 远程下拉：从 endpoint 拉取选项。endpoint 传数组时合并多个来源，tags 用作来源前缀（如 [客户]/[供应商]）。 */
@@ -15,6 +18,8 @@ export interface FieldConfig {
   options?: { label: string; value: string }[]
   required?: boolean          // 红星 + 提交前前端校验
   remoteOptions?: RemoteOptions // 远程下拉（消灭 UUID 手填）
+  hint?: string               // 字段术语大白话气泡（小白友好），见 utils/glossary.ts
+  validate?: (value: any) => string | undefined  // 即时校验（小白防误填）：返回警告文案则标黄，见 utils/validators.ts
 }
 
 export interface CrudConfig {
@@ -33,6 +38,7 @@ export interface CrudConfig {
   detailTabs?: DetailTab[]
   stageFlow?: boolean       // 详情抽屉展示交付阶段列表 + 推进按钮（GET {apiPath}/{id}.stages，PATCH {apiPath}/delivery-stages/{stageId}）
   workspaceLink?: boolean   // 行操作列加「工作台」入口，跳 /projects/{id}/workspace（项目模块用）
+  pdfExport?: boolean       // 行操作列加「PDF」按钮，blob 下载 {apiPath}/{id}/pdf 实时生成（F4，不落库）
 }
 
 export interface DetailAction {
@@ -101,9 +107,9 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'name', label: '型号' },
       { key: 'category', label: '类别', type: 'select', options: EQ_CAT },
       { key: 'gpu_type', label: 'GPU 类型' },
-      { key: 'gpu_count', label: '单台 GPU 数', type: 'number' },
+      { key: 'gpu_count', label: '单台 GPU 数', type: 'number', validate: validators.positiveInt },
       { key: 'memory', label: '显存' },
-      { key: 'unit_price_reference', label: '参考单价', type: 'number' },
+      { key: 'unit_price_reference', label: '参考单价(元)', type: 'number', hint: glossary('unit_price'), validate: validators.positiveAmount },
     ],
   },
   banks: {
@@ -114,8 +120,8 @@ export const MODULES: Record<string, CrudConfig> = {
     fields: [
       { key: 'name', label: '银行名称' },
       { key: 'contact_person', label: '联系人' },
-      { key: 'credit_line', label: '授信额度', type: 'number' },
-      { key: 'annual_rate', label: '年利率(小数,如0.0435)', type: 'number' },
+      { key: 'credit_line', label: '授信额度(元)', type: 'number', hint: glossary('credit_line'), validate: validators.positiveAmount },
+      { key: 'annual_rate', label: '年利率(小数,如0.0435)', type: 'number', hint: glossary('annual_rate'), validate: validators.decimalRate },
     ],
   },
   projects: {
@@ -134,7 +140,7 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'name', label: '项目名称' },
       { key: 'code', label: '项目编号' },
       { key: 'template_id', label: '流程模板', remoteOptions: { endpoint: '/workflows/templates', label: 'name', value: 'id' } },
-      { key: 'total_investment', label: '总投资额', type: 'number' },
+      { key: 'total_investment', label: '总投资额(元)', type: 'number', hint: glossary('total_investment'), validate: validators.positiveAmount },
       { key: 'start_date', label: '开始日期', type: 'date' },
     ],
   },
@@ -143,13 +149,13 @@ export const MODULES: Record<string, CrudConfig> = {
     columns: ['contract_no', 'type', 'direction', 'amount', 'status'],
     labels: { contract_no: '合同号', type: '类型', direction: '方向', amount: '金额', status: '状态' },
     tagKeys: ['type', 'direction', 'status'], numKeys: ['amount'],
-    fileUpload: true, uploadEntity: 'contracts',
+    fileUpload: true, uploadEntity: 'contracts', pdfExport: true,
     fields: [
       { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
       { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE, required: true },
       { key: 'party_id', label: '对方(客户/供应商)', required: true, remoteOptions: { endpoint: ['/customers', '/suppliers'], label: 'name', value: 'id', tags: ['客户', '供应商'] } },
-      { key: 'amount', label: '合同金额(不含税)', type: 'number', required: true },
-      { key: 'monthly_rent', label: '月租(含税,销售)', type: 'number' },
+      { key: 'amount', label: '合同金额(不含税,元)', type: 'number', required: true, hint: glossary('amount'), validate: validators.positiveAmount },
+      { key: 'monthly_rent', label: '月租(含税,销售,元/月)', type: 'number', hint: glossary('monthly_rent'), validate: validators.positiveAmount },
       { key: 'contract_no', label: '合同号' },
     ],
   },
@@ -169,8 +175,8 @@ export const MODULES: Record<string, CrudConfig> = {
     fields: [
       { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
       { key: 'equipment_model_id', label: '设备型号', required: true, remoteOptions: { endpoint: '/equipment-models', label: 'name', value: 'id' } },
-      { key: 'quantity', label: '数量', type: 'number', required: true },
-      { key: 'unit_price', label: '单价', type: 'number', required: true },
+      { key: 'quantity', label: '数量(台)', type: 'number', required: true, validate: validators.positiveInt },
+      { key: 'unit_price', label: '单价(元)', type: 'number', required: true, hint: glossary('unit_price'), validate: validators.positiveAmount },
     ],
   },
   assets: {

@@ -18,6 +18,7 @@ class ContractCreate(BaseModel):
     end_date: date | None = None
     parent_contract_id: UUID | None = None
     file_path: str | None = None
+    leasing_mode: Literal["自有", "直租", "售后回租"] | None = None  # 合同模式快照
 
 
 class ContractOut(BaseModel):
@@ -36,4 +37,5 @@ class ContractOut(BaseModel):
     parent_contract_id: UUID | None
     status: str
     file_path: str | None = None
+    leasing_mode: str | None = None
     model_config = {"from_attributes": True}

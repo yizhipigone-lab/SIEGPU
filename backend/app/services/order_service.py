@@ -1,5 +1,6 @@
 """订单/交付服务。建订单自动生成 6 交付阶段；点亮=计费起点，同事务生成资产（W20）。"""
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,10 +22,29 @@ STAGE_TRANSITIONS = {
 }
 
 
-def create_order(db: Session, *, project_id, equipment_model_id, quantity, unit_price,
-                 contract_id=None, order_date=None, expected_delivery_date=None) -> Order:
+def create_order(db: Session, *, project_id, equipment_model_id=None, quantity=None,
+                 unit_price=None, contract_id=None, order_date=None,
+                 expected_delivery_date=None, is_batch=False, batch_name=None,
+                 disbursement_threshold_pct=None) -> Order:
     if not db.get(Project, project_id):
         raise BusinessError("NOT_FOUND", "项目不存在", 404)
+    # W7-8 决策 2：阈值缺省→100（与列 NOT NULL DEFAULT 100 对齐，避免显式传 None 撞约束）。
+    threshold_pct = Decimal("100") if disbursement_threshold_pct is None else disbursement_threshold_pct
+    if is_batch:
+        # 一期 W3-4 discipline ①：批次行 4 字段可空（跨型号组合），汇总值由批内设备聚合派生；
+        # 且不生成 6 条 delivery_stages——节点只走 device_stages。
+        o = Order(
+            project_id=project_id, contract_id=contract_id, equipment_model_id=equipment_model_id,
+            quantity=quantity, unit_price=unit_price, total_amount=None, order_date=order_date,
+            expected_delivery_date=expected_delivery_date, status="已下单",
+            is_batch=True, batch_name=batch_name, flow_type="batch",
+            disbursement_threshold_pct=threshold_pct,
+        )
+        db.add(o)
+        db.flush()
+        from app.services import workflow_service as _wf
+        _wf.after_action(db, project_id)
+        return o
     if not db.get(EquipmentModel, equipment_model_id):
         raise BusinessError("NOT_FOUND", "设备型号不存在", 404)
     total = (quantity * unit_price)
@@ -32,6 +52,8 @@ def create_order(db: Session, *, project_id, equipment_model_id, quantity, unit_
         project_id=project_id, contract_id=contract_id, equipment_model_id=equipment_model_id,
         quantity=quantity, unit_price=unit_price, total_amount=total, order_date=order_date,
         expected_delivery_date=expected_delivery_date, status="已下单",
+        is_batch=is_batch, batch_name=batch_name,
+        disbursement_threshold_pct=threshold_pct,
     )
     db.add(o)
     db.flush()
@@ -64,6 +86,11 @@ def advance_stage(db: Session, *, stage_id, status, actual_date=None) -> Deliver
     st = db.get(DeliveryStage, stage_id)
     if not st or st.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "交付阶段不存在", 404)
+    # 一期 W3-4 discipline ②：设备粒度订单禁走旧 6 节点（防批次/单台双推进双计）
+    from app.services import device_service as dsvc
+    o = db.get(Order, st.order_id)
+    if o is not None:
+        dsvc.assert_legacy_path(db, o)
     allowed = STAGE_TRANSITIONS.get(st.status, set())
     if status not in allowed:
         raise BusinessError("ILLEGAL_TRANSITION", f"阶段不允许 {st.status} → {status}", 409)
@@ -79,6 +106,9 @@ def light_on(db: Session, *, order_id, actual_date: date, operator_id=None):
     o = db.execute(select(Order).where(Order.id == order_id).with_for_update()).scalar_one_or_none()
     if not o:
         raise BusinessError("NOT_FOUND", "订单不存在", 404)
+    # 一期 W3-4 discipline ②：设备粒度订单走 device_stages 点亮验收，禁走旧 light_on（防双重建卡/出账）
+    from app.services import device_service as dsvc
+    dsvc.assert_legacy_path(db, o)
     if o.status == "已点亮":
         raise BusinessError("DUPLICATE", "订单已点亮", 409)
     # 点亮阶段 → 已完成
@@ -95,6 +125,7 @@ def light_on(db: Session, *, order_id, actual_date: date, operator_id=None):
         residual_value=dep["residual_value"], depreciable_value=dep["depreciable_value"],
         annual_depreciation=dep["annual_depreciation"], monthly_depreciation=dep["monthly_depreciation"],
         start_date=actual_date, end_date=add_months(actual_date, 60), status="折旧中",
+        operation_status="运营中",  # W5-6：legacy 点亮即起折旧=运营中（与 device 路径激活一致）
     )
     db.add(asset)
     o.status = "已点亮"

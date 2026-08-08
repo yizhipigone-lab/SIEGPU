@@ -37,6 +37,10 @@ export function statusTagType(v: string): string {
     '未开始': 'default', '已下单': 'default', '进行中 ': 'info',
     // 异常
     '已红冲': 'error', '逾期': 'error', '已拒绝': 'error', '卡住': 'error', '已终止': 'error', '暂停': 'warning',
+    // 验收/确认/核销
+    '已通过': 'success', '已驳回': 'error', '待验收': 'warning', '验收中': 'info',
+    '已确认': 'success', '待确认': 'warning', '有争议': 'error',
+    '已核销': 'success', '已收票': 'info',
     // 方向/类型
     IN: 'success', OUT: 'warning', RECEIVABLE: 'info', PAYABLE: 'warning',
     SALES: 'info', PURCHASE: 'warning',

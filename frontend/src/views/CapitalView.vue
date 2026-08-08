@@ -10,6 +10,7 @@ import * as R from '../composables/useResource'
 import { money, tsToYmd, ymdToTs } from '../utils/format'
 import { errMsg } from '../utils/errMsg'
 import EChart from '../components/EChart.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const msg = useMessage()
 const route = useRoute()
@@ -169,7 +170,7 @@ const txnCols = [
           <n-form-item label="方向" :show-feedback="false">
             <n-select v-model:value="form.direction" :options="DIR_OPTS" style="width:110px" />
           </n-form-item>
-          <n-form-item label="金额" :show-feedback="false">
+          <n-form-item label="金额(元)" :show-feedback="false">
             <n-input-number v-model:value="form.amount" style="width:150px" :show-button="false" placeholder="金额" />
           </n-form-item>
           <n-form-item label="日期" :show-feedback="false">
@@ -190,7 +191,11 @@ const txnCols = [
     </div>
 
     <n-card title="资金流水" v-show="activeTab==='transactions'" style="margin-top:16px">
-      <n-data-table :columns="txnCols" :data="txns" :bordered="false" size="small" striped :pagination="{ pageSize: 12 }" />
+      <n-data-table :columns="txnCols" :data="txns" :bordered="false" size="small" striped :pagination="{ pageSize: 12 }">
+        <template #empty>
+          <EmptyState description="还没有记录，在上方「记一笔」录入第一笔即可" />
+        </template>
+      </n-data-table>
     </n-card>
 
     <!-- 调配弹窗 -->
@@ -203,7 +208,7 @@ const txnCols = [
           <n-select v-model:value="allocForm.to_project_id" :options="projectOpts()" placeholder="选调入项目" filterable />
         </n-form-item>
         <n-space>
-          <n-form-item label="金额"><n-input-number v-model:value="allocForm.amount" :show-button="false" style="width:150px" /></n-form-item>
+          <n-form-item label="金额(元)"><n-input-number v-model:value="allocForm.amount" :show-button="false" style="width:150px" /></n-form-item>
           <n-form-item label="调配日期">
             <n-date-picker type="date" :value="ymdToTs(allocForm.allocation_date)"
               @update:value="(ts: number | null) => allocForm.allocation_date = tsToYmd(ts)" style="width:150px" />

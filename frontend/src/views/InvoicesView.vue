@@ -8,6 +8,7 @@ import {
 import { api } from '../api/client'
 import { money, tsToYmd, ymdToTs } from '../utils/format'
 import { errMsg } from '../utils/errMsg'
+import EmptyState from '../components/EmptyState.vue'
 
 const msg = useMessage()
 const route = useRoute()
@@ -90,6 +91,18 @@ async function reverseInvoice(row: any) {
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
+// F4：实时生成发票/账单 PDF（不落库，浏览器直接下载）。
+async function downloadPdf(row: any) {
+  try {
+    const resp = await api.get(`/invoices/${row.id}/pdf`, { responseType: 'blob' })
+    const url = URL.createObjectURL(resp.data as unknown as Blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `发票-${row.invoice_no || row.id}.pdf`; a.click()
+    URL.revokeObjectURL(url)
+    msg.success('PDF 已生成')
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
 // 核销：选该项目入金流水，支持部分核销（分多笔，累计达发票金额自动「已核销」）
 const recTarget = ref<any | null>(null)
 const recTxns = ref<any[]>([])
@@ -149,8 +162,14 @@ const invCols = [
       h(NTag, { size: 'small', bordered: false,
         type: r.status === '已红冲' ? 'error' : r.status === '已付款' || r.status === '已收票' || r.status === '已核销' ? 'success' : 'info' },
         () => r.status) },
-  { title: '操作', key: '__op', width: 220, render: (r: any) =>
+  { title: '操作', key: '__op', width: 270, render: (r: any) =>
       h(NSpace, { size: 4 }, () => [
+        r.status !== '已红冲'
+          ? h(NTooltip, null, {
+              trigger: () => h(NButton, { size: 'tiny', quaternary: true, onClick: () => downloadPdf(r) }, () => 'PDF'),
+              default: () => '导出 PDF：实时生成发票/账单，可直接打印或发送客户对账',
+            })
+          : null,
         r.status !== '已付款' && r.status !== '已收票' && r.status !== '已红冲'
           ? h(NButton, { size: 'tiny', type: 'primary', quaternary: true, onClick: () => openPay(r) }, () => '收款/付款')
           : null,
@@ -193,7 +212,11 @@ const reconCols = [
         <n-button type="primary" @click="showCreate = true">新增发票</n-button>
       </div>
       <div class="card" style="padding:4px">
-        <n-data-table :columns="invCols" :data="invoices" :bordered="false" size="small" striped />
+        <n-data-table :columns="invCols" :data="invoices" :bordered="false" size="small" striped>
+          <template #empty>
+            <EmptyState description="还没有发票，点击右上角「新增发票」，计费确认后即可按合同开具" />
+          </template>
+        </n-data-table>
       </div>
 
       <!-- 创建弹窗（含 OCR） -->
@@ -217,7 +240,7 @@ const reconCols = [
           <n-form-item label="发票号">
             <n-input v-model:value="form.invoice_no" placeholder="OCR 自动填或手输" />
           </n-form-item>
-          <n-form-item label="含税金额">
+          <n-form-item label="含税金额(元)">
             <n-input-number v-model:value="form.amount" :show-button="false" style="width:100%" placeholder="OCR 自动填或手输" />
           </n-form-item>
           <n-space>
@@ -283,7 +306,11 @@ const reconCols = [
     <n-tab-pane name="recon" tab="三流对账">
       <n-card>
         <div class="muted tiny" style="margin-bottom:10px">合同额 → 应收(计费) → 已开票 → 已收款，逐级差异。</div>
-        <n-data-table :columns="reconCols" :data="recon" :bordered="false" size="small" striped />
+        <n-data-table :columns="reconCols" :data="recon" :bordered="false" size="small" striped>
+          <template #empty>
+            <EmptyState description="暂无对账数据，开具发票并登记收付款后这里会自动汇总" />
+          </template>
+        </n-data-table>
       </n-card>
     </n-tab-pane>
   </n-tabs>

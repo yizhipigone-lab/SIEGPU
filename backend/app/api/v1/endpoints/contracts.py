@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -8,6 +9,7 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.contract import ContractCreate, ContractOut
 from app.services import contract_service as svc
+from app.services import pdf_service
 
 router = APIRouter()
 
@@ -37,3 +39,13 @@ def delete_contract(cid: UUID, db: Session = Depends(get_db), user: User = Depen
     from datetime import datetime, timezone
     c.deleted_at = datetime.now(timezone.utc)
     db.commit()
+
+
+@router.get("/{cid}/pdf")
+def contract_pdf(cid: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """F4：合同 PDF 实时生成（不落库，浏览器直接下载）。"""
+    buf = pdf_service.render_contract_pdf(db, cid)
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="contract-{cid}.pdf"'},
+    )

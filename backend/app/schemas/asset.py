@@ -10,15 +10,18 @@ class AssetOut(BaseModel):
     project_id: UUID
     equipment_model_id: UUID
     order_id: UUID | None
+    device_id: UUID | None
     quantity: int
+    unit_original_value: Decimal
     total_original_value: Decimal
-    residual_value: Decimal
-    depreciable_value: Decimal
-    annual_depreciation: Decimal
-    monthly_depreciation: Decimal
-    start_date: date
-    end_date: date
+    residual_value: Decimal | None
+    depreciable_value: Decimal | None
+    annual_depreciation: Decimal | None
+    monthly_depreciation: Decimal | None
+    start_date: date | None
+    end_date: date | None
     status: str
+    operation_status: str
     model_config = {"from_attributes": True}
 
 

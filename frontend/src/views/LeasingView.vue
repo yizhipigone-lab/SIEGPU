@@ -8,6 +8,7 @@ import {
 import { api } from '../api/client'
 import { money, tsToYmd, ymdToTs } from '../utils/format'
 import { errMsg } from '../utils/errMsg'
+import EmptyState from '../components/EmptyState.vue'
 
 const msg = useMessage()
 const route = useRoute()
@@ -37,6 +38,9 @@ const createForm = ref({
   total_amount: null as number | null, annual_rate: null as number | null,
   term_periods: null as number | null, payment_freq: '月' as string,
   repayment_method: '等额本息' as string, start_date: '',
+  leasing_mode: null as string | null,      // W7-8 融资分类三字段
+  financing_type: null as string | null,
+  materials_note: '' as string,
 })
 
 // 节点标记卡住
@@ -63,6 +67,7 @@ function openCreate() {
   createForm.value = {
     project_id: (route.query.project_id as string) || '', supplier_id: '', total_amount: null, annual_rate: null,
     term_periods: null, payment_freq: '月', repayment_method: '等额本息', start_date: '',
+    leasing_mode: null, financing_type: null, materials_note: '',
   }
   showCreate.value = true
 }
@@ -77,6 +82,8 @@ async function doCreate() {
       annual_rate: f.annual_rate, term_periods: f.term_periods,
       payment_freq: f.payment_freq, repayment_method: f.repayment_method,
       start_date: f.start_date || null,
+      leasing_mode: f.leasing_mode, financing_type: f.financing_type,
+      materials: f.materials_note.trim() ? { note: f.materials_note.trim() } : null,
     })
     msg.success('金租申请已创建')
     showCreate.value = false
@@ -198,7 +205,11 @@ const repayCols = [
       <n-button type="primary" @click="openCreate">新建金租申请</n-button>
     </div>
     <div class="card" style="padding:4px">
-      <n-data-table :columns="processCols" :data="processes" :bordered="false" size="small" striped />
+      <n-data-table :columns="processCols" :data="processes" :bordered="false" size="small" striped>
+        <template #empty>
+          <EmptyState description="还没有金租申请，点击右上角「新建金租申请」即可发起金租融资" />
+        </template>
+      </n-data-table>
     </div>
 
     <!-- 详情抽屉 -->
@@ -208,7 +219,12 @@ const repayCols = [
           <n-space>
             <n-tag :type="detail.status === '已放款' ? 'success' : 'warning'" size="small" :bordered="false">{{ detail.status }}</n-tag>
             <n-tag v-if="detail.plan_generated" type="info" size="small" :bordered="false">{{ detail.term_periods }}期还款计划</n-tag>
+            <n-tag v-if="detail.leasing_mode" size="small" :bordered="false">模式：{{ detail.leasing_mode }}</n-tag>
+            <n-tag v-if="detail.financing_type" size="small" :bordered="false" type="info">融资：{{ detail.financing_type }}</n-tag>
           </n-space>
+          <div v-if="detail.materials" class="muted tiny" style="margin-top:6px">
+            材料：{{ detail.materials.note || JSON.stringify(detail.materials) }}
+          </div>
 
           <!-- 9 节点时间线 -->
           <div class="section-title">流程节点</div>
@@ -232,7 +248,7 @@ const repayCols = [
           <template v-if="detail.status !== '已放款' && detail.status !== '已拒绝'">
             <div class="section-title">放款操作</div>
             <n-space align="center">
-              <n-form-item label="实际放款额" :show-feedback="false">
+              <n-form-item label="实际放款额(元)" :show-feedback="false">
                 <n-input-number v-model:value="disburseForm.actual_disbursement_amount" placeholder="金额" :show-button="false" style="width:160px" />
               </n-form-item>
               <n-form-item label="放款日" :show-feedback="false">
@@ -256,8 +272,8 @@ const repayCols = [
     <!-- 还款确认弹窗 -->
     <n-modal v-model:show="showConfirmModal" preset="card" title="确认还款" style="width:380px">
       <n-space vertical>
-        <n-form-item label="实际还本"><n-input-number v-model:value="confirmForm.actual_principal" :show-button="false" style="width:100%" /></n-form-item>
-        <n-form-item label="实际付息"><n-input-number v-model:value="confirmForm.actual_interest" :show-button="false" style="width:100%" /></n-form-item>
+        <n-form-item label="实际还本(元)"><n-input-number v-model:value="confirmForm.actual_principal" :show-button="false" style="width:100%" /></n-form-item>
+        <n-form-item label="实际付息(元)"><n-input-number v-model:value="confirmForm.actual_interest" :show-button="false" style="width:100%" /></n-form-item>
         <n-form-item label="付款日期">
           <n-date-picker type="date" style="width:100%" :value="ymdToTs(confirmForm.paid_date)"
             @update:value="(ts: number | null) => confirmForm.paid_date = tsToYmd(ts)" />
@@ -276,9 +292,9 @@ const repayCols = [
           <n-select v-model:value="createForm.supplier_id" :options="fundSuppliers.map((s: any) => ({ label: s.name, value: s.id }))" placeholder="选金租公司" filterable />
         </n-form-item>
         <n-space>
-          <n-form-item label="申请金额"><n-input-number v-model:value="createForm.total_amount" :show-button="false" style="width:170px" /></n-form-item>
-          <n-form-item label="年利率(小数)"><n-input-number v-model:value="createForm.annual_rate" :step="0.005" :show-button="false" style="width:110px" /></n-form-item>
-          <n-form-item label="期数"><n-input-number v-model:value="createForm.term_periods" :min="1" style="width:90px" /></n-form-item>
+          <n-form-item label="申请金额(元)"><n-input-number v-model:value="createForm.total_amount" :show-button="false" style="width:170px" /></n-form-item>
+          <n-form-item label="年利率(小数,如0.04)"><n-input-number v-model:value="createForm.annual_rate" :step="0.005" :show-button="false" style="width:110px" /></n-form-item>
+          <n-form-item label="期数(期)"><n-input-number v-model:value="createForm.term_periods" :min="1" style="width:90px" /></n-form-item>
         </n-space>
         <n-space>
           <n-form-item label="还款频率">
@@ -292,6 +308,17 @@ const repayCols = [
               @update:value="(ts: number | null) => createForm.start_date = tsToYmd(ts)" style="width:150px" />
           </n-form-item>
         </n-space>
+        <n-space>
+          <n-form-item label="金租模式">
+            <n-select v-model:value="createForm.leasing_mode" :options="[{ label: '自有', value: '自有' }, { label: '直租', value: '直租' }, { label: '售后回租', value: '售后回租' }]" placeholder="选模式" clearable style="width:130px" />
+          </n-form-item>
+          <n-form-item label="融资类型">
+            <n-select v-model:value="createForm.financing_type" :options="[{ label: '金租直租', value: '金租直租' }, { label: '金租回租', value: '金租回租' }, { label: '银行流贷', value: '银行流贷' }, { label: '项目贷款', value: '项目贷款' }]" placeholder="选类型" clearable style="width:140px" />
+          </n-form-item>
+        </n-space>
+        <n-form-item label="材料备注">
+          <n-input v-model:value="createForm.materials_note" placeholder="如：合同/发票/权属证明（选填）" />
+        </n-form-item>
       </n-space>
       <template #footer>
         <n-space justify="end">

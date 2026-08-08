@@ -2,6 +2,7 @@
 import uuid
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
@@ -36,7 +37,6 @@ def get_acceptance(db: Session, ar_id: uuid.UUID) -> AcceptanceRecord | None:
 
 def list_acceptances(db: Session, *, project_id: uuid.UUID | None = None,
                      acceptance_type: str | None = None, skip=0, limit=100):
-    from sqlalchemy import select
     stmt = select(AcceptanceRecord).where(AcceptanceRecord.deleted_at.is_(None))
     if project_id:
         stmt = stmt.where(AcceptanceRecord.project_id == project_id)

@@ -27,6 +27,8 @@ def _detail(proc, nodes) -> LeasingProcessDetail:
         id=proc.id, project_id=proc.project_id, supplier_id=proc.supplier_id,
         total_amount=proc.total_amount, status=proc.status,
         disbursement_date=proc.disbursement_date, plan_generated=proc.plan_generated,
+        leasing_mode=proc.leasing_mode, financing_type=proc.financing_type,
+        materials=proc.materials,
         nodes=[LeasingNodeOut.model_validate(n) for n in nodes],
     )
 

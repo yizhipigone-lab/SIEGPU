@@ -62,6 +62,11 @@ const form = ref({
   equity_ratio: 0.10,
 })
 
+// 百分比兜底：年利率/自有比例/残值率均以小数存储（0.04 = 4%），值 > 1 几乎必为误填（如把 4% 填成 4）
+const percentWarn = computed(() =>
+  Number(form.value.annual_rate) > 1 || Number(form.value.equity_ratio) > 1 || Number(form.value.residual_rate) > 1,
+)
+
 async function refresh() {
   try {
     const { data } = await api.get('/projects')
@@ -168,15 +173,16 @@ const kpis = computed<Kpi[]>(() => {
           </n-form-item>
           <div class="muted tiny" style="text-align:center">— 或手动调整参数 —</div>
           <n-space :size="8" wrap>
-            <n-form-item label="采购(不含税)" :show-feedback="false"><n-input-number v-model:value="form.purchase_ex_tax" :show-button="false" style="width:140px" /></n-form-item>
-            <n-form-item label="月租金(含税)" :show-feedback="false"><n-input-number v-model:value="form.monthly_rent" :show-button="false" style="width:140px" /></n-form-item>
+            <n-form-item label="采购(不含税,元)" :show-feedback="false"><n-input-number v-model:value="form.purchase_ex_tax" :show-button="false" style="width:140px" /></n-form-item>
+            <n-form-item label="月租金(含税,元/月)" :show-feedback="false"><n-input-number v-model:value="form.monthly_rent" :show-button="false" style="width:140px" /></n-form-item>
             <n-form-item label="出租月数" :show-feedback="false"><n-input-number v-model:value="form.term_months" :show-button="false" style="width:80px" /></n-form-item>
-            <n-form-item label="年利率" :show-feedback="false"><n-input-number v-model:value="form.annual_rate" :step="0.005" :show-button="false" style="width:80px" /></n-form-item>
-            <n-form-item label="金租期数" :show-feedback="false"><n-input-number v-model:value="form.lease_term" :show-button="false" style="width:80px" /></n-form-item>
-            <n-form-item label="月运营成本" :show-feedback="false"><n-input-number v-model:value="form.monthly_opex" :show-button="false" style="width:140px" /></n-form-item>
-            <n-form-item label="自有比例" :show-feedback="false"><n-input-number v-model:value="form.equity_ratio" :step="0.05" :show-button="false" style="width:80px" /></n-form-item>
-            <n-form-item label="残值率" :show-feedback="false"><n-input-number v-model:value="form.residual_rate" :step="0.05" :show-button="false" style="width:80px" /></n-form-item>
+            <n-form-item label="年利率(小数,如0.04)" :show-feedback="false"><n-input-number v-model:value="form.annual_rate" :step="0.005" :show-button="false" :status="form.annual_rate > 1 ? 'warning' : undefined" style="width:90px" /></n-form-item>
+            <n-form-item label="金租期数(期)" :show-feedback="false"><n-input-number v-model:value="form.lease_term" :show-button="false" style="width:80px" /></n-form-item>
+            <n-form-item label="月运营成本(元/月)" :show-feedback="false"><n-input-number v-model:value="form.monthly_opex" :show-button="false" style="width:140px" /></n-form-item>
+            <n-form-item label="自有比例(小数,如0.10)" :show-feedback="false"><n-input-number v-model:value="form.equity_ratio" :step="0.05" :show-button="false" :status="form.equity_ratio > 1 ? 'warning' : undefined" style="width:90px" /></n-form-item>
+            <n-form-item label="残值率(小数,如0.10)" :show-feedback="false"><n-input-number v-model:value="form.residual_rate" :step="0.05" :show-button="false" :status="form.residual_rate > 1 ? 'warning' : undefined" style="width:90px" /></n-form-item>
           </n-space>
+          <div v-if="percentWarn" class="tiny" style="color:#D97706;margin-top:2px">⚠ 百分比请填小数（0.04 表示 4%），检测到有值 &gt; 1，请确认未把 4% 填成 4</div>
           <n-button type="primary" block :loading="loading" @click="calcManual">计算利润</n-button>
           <n-space v-if="result" :size="8">
             <n-button secondary block @click="openSave(false)">保存为场景</n-button>

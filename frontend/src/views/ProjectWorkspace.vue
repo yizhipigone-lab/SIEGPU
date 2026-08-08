@@ -2,7 +2,7 @@
 import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NCard, NTag, NSteps, NStep, NThing, NSpace, NDivider,
+  NButton, NCard, NTag, NSpace, NDivider,
   NEmpty, NSpin, NModal, NInput, NPopconfirm, useMessage,
 } from 'naive-ui'
 import { ArrowLeft, Check, SkipForward, RefreshCw, Play } from 'lucide-vue-next'

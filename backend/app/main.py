@@ -1,3 +1,6 @@
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,11 +8,45 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.endpoints import (
-    acceptances, auth, assets, billings, capital, confirmations, contracts, dashboard, excel, files, funding, health,
-    invoices, leasing, master, ocr, orders, projects, repayments, reports, sales_orders, workflows,
+    acceptances, auth, assets, billings, capital, confirmations, contracts, dashboard, devices, excel, files, funding, health,
+    invoices, leasing, master, notifications, ocr, orders, projects, repayments, reports, sales_orders, workflows,
 )
+from app.core.db import SessionLocal
 
-app = FastAPI(title="SIEGPU ERP", version="2.0")
+# F1：应用内消息提醒——每日 09:00（Asia/Shanghai）扫 alert_service 写 notifications。
+# 内存 jobstore（一期，重启丢未读可接受）；lifespan 取代已弃用的 on_event。
+_scheduler: BackgroundScheduler | None = None
+
+
+def _daily_scan_job() -> None:
+    """定时任务：开独立 session 扫描并幂等落库。"""
+    from app.services.notification_service import scan_and_persist
+    db = SessionLocal()
+    try:
+        scan_and_persist(db)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 —— 定时任务绝不能因扫描异常拖垮应用
+        import logging
+        logging.getLogger("apscheduler").exception("通知扫描失败: %s", exc)
+    finally:
+        db.close()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global _scheduler
+    _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+    # minute=7 避开整点扎堆；每日 09:07 扫一次告警并落库
+    _scheduler.add_job(_daily_scan_job, "cron", hour=9, minute=7, id="daily-notification-scan", replace_existing=True)
+    _scheduler.start()
+    try:
+        yield
+    finally:
+        if _scheduler is not None:
+            _scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="SIEGPU ERP", version="2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,8 +121,10 @@ app.include_router(master.suppliers_router, prefix="/api/suppliers", tags=["mast
 app.include_router(master.customers_router, prefix="/api/customers", tags=["master"])
 app.include_router(master.equipment_models_router, prefix="/api/equipment-models", tags=["master"])
 app.include_router(master.banks_router, prefix="/api/banks", tags=["master"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(contracts.router, prefix="/api/contracts", tags=["contracts"])
 app.include_router(orders.router, prefix="/api/orders", tags=["orders"])
+app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
 app.include_router(billings.router, prefix="/api/billings", tags=["billings"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["invoices"])
 app.include_router(repayments.router, prefix="/api/repayments", tags=["repayments"])

@@ -5,9 +5,12 @@ from app.models.base import Base
 from app.models.billing import Billing, Invoice
 from app.models.capital import CapitalAllocation, CapitalTransaction
 from app.models.delivery import DeliveryStage, Order
+from app.models.device import BatchDevice, Device, DeviceStage, OffBalanceRegister
 from app.models.funding import FundingReplacement
 from app.models.leasing import LeasingNode, LeasingProcess
+from app.models.long_term_payable import LongTermPayable
 from app.models.master import Bank, Customer, EquipmentModel, Supplier
+from app.models.notification import Notification
 from app.models.profit_scenario import ProfitScenario
 from app.models.project import Contract, Project
 from app.models.project_workflow import ProjectWorkflow
@@ -23,11 +26,14 @@ __all__ = [
     "User", "AuditLog", "IdempotencyKey",
     "Supplier", "Customer", "EquipmentModel", "Bank",
     "Project", "Contract",
+    "Notification",
     "SalesOrder",
     "LeasingProcess", "LeasingNode",
+    "LongTermPayable",
     "CapitalTransaction", "CapitalAllocation",
     "FundingReplacement",
     "Order", "DeliveryStage",
+    "Device", "BatchDevice", "DeviceStage", "OffBalanceRegister",
     "AcceptanceRecord",
     "Billing", "Invoice",
     "Repayment",

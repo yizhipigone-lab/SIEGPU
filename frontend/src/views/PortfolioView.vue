@@ -6,6 +6,7 @@ import type { DataTableColumns } from 'naive-ui'
 import { api } from '../api/client'
 import { statusTagType } from '../utils/format'
 import { roleName } from '../utils/role'
+import EmptyState from '../components/EmptyState.vue'
 
 const msg = useMessage()
 const router = useRouter()
@@ -58,7 +59,11 @@ const rowProps = (r: any) => ({
       <div class="muted tiny" style="margin-bottom:10px">
         各项目工作流实时状态一览；停滞 &gt;7 天标黄、&gt;14 天标红。点击行进入项目工作台。
       </div>
-      <n-data-table :columns="cols" :data="items" :bordered="false" size="small" striped :row-props="rowProps" />
+      <n-data-table :columns="cols" :data="items" :bordered="false" size="small" striped :row-props="rowProps">
+        <template #empty>
+          <EmptyState description="还没有项目，建立第一个项目后这里会显示流程进度" cta-label="去建项目" cta-route="/master/projects" />
+        </template>
+      </n-data-table>
     </n-card>
   </div>
 </template>

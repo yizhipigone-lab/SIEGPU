@@ -26,6 +26,10 @@ class LeasingProcess(UUIDPK, TimestampMixin, Base):
     disbursement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     plan_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 一期 W1-2：模式/分类/材料归档
+    leasing_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 自有/直租/售后回租
+    financing_type: Mapped[str | None] = mapped_column(String(30), nullable=True)  # 金租直租/金租回租/银行流贷/项目贷款
+    materials: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class LeasingNode(UUIDPK, TimestampMixin, Base):

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 1.8cm 2cm 2cm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Noto Sans CJK SC", sans-serif; color: #1f2937; font-size: 11pt; line-height: 1.7; margin: 0; }
+  .doc-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5pt solid #1d4ed8; padding-bottom: 10pt; margin-bottom: 18pt; }
+  .brand { font-family: "Noto Serif CJK SC", serif; font-size: 15pt; font-weight: 700; color: #1d4ed8; letter-spacing: .05em; }
+  .brand small { display: block; font-family: "Noto Sans CJK SC", sans-serif; font-size: 8pt; font-weight: 400; color: #6b7280; letter-spacing: 0; margin-top: 2pt; }
+  .doc-no { font-size: 9pt; color: #6b7280; text-align: right; }
+  h1 { font-family: "Noto Serif CJK SC", serif; font-size: 19pt; font-weight: 700; text-align: center; margin: 6pt 0 20pt; color: #111827; letter-spacing: .08em; }
+  .parties { display: flex; gap: 24pt; margin-bottom: 18pt; }
+  .party { flex: 1; }
+  .party-label { font-size: 9pt; color: #6b7280; margin-bottom: 2pt; }
+  .party-name { font-size: 11.5pt; font-weight: 600; }
+  table.terms { width: 100%; border-collapse: collapse; margin: 8pt 0 18pt; }
+  table.terms th, table.terms td { border: 0.5pt solid #d1d5db; padding: 7pt 10pt; font-size: 10.5pt; text-align: left; }
+  table.terms th { background: #f3f4f6; font-weight: 600; width: 26%; color: #374151; }
+  table.terms td.amt { font-family: "Noto Sans CJK SC", sans-serif; font-weight: 600; color: #1d4ed8; }
+  .clause { margin: 6pt 0; }
+  .clause h3 { font-size: 11pt; color: #1d4ed8; margin: 14pt 0 4pt; }
+  .sign { display: flex; gap: 24pt; margin-top: 36pt; }
+  .sign-box { flex: 1; border: 0.5pt solid #d1d5db; border-radius: 3pt; padding: 12pt; height: 90pt; }
+  .sign-box .role { font-weight: 600; margin-bottom: 4pt; }
+  .sign-box .hint { font-size: 8.5pt; color: #9ca3af; }
+  .foot { margin-top: 16pt; font-size: 8.5pt; color: #9ca3af; text-align: center; border-top: 0.5pt solid #e5e7eb; padding-top: 8pt; }
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <div class="brand">SIEGPU 算力租赁<small>SIEGPU Computing Power Leasing</small></div>
+  <div class="doc-no">合同编号：{{ contract.contract_no or '（待编）' }}<br>生成日期：{{ today }}</div>
+</div>
+
+<h1>{{ title }}</h1>
+
+<div class="parties">
+  <div class="party">
+    <div class="party-label">甲方（出租方 / 采购方）</div>
+    <div class="party-name">SIEGPU 算力服务有限公司</div>
+  </div>
+  <div class="party">
+    <div class="party-label">乙方（{{ '承租方' if contract.type == 'SALES' else '供货方' }}）</div>
+    <div class="party-name">{{ party_name }}</div>
+  </div>
+</div>
+
+<table class="terms">
+  <tr><th>关联项目</th><td>{{ project.name if project else '—' }}（{{ project.code if project else '' }}）</td></tr>
+  <tr><th>合同模式</th><td>{{ contract.leasing_mode or '—' }}</td></tr>
+  <tr><th>合同总金额（含税）</th><td class="amt">{{ money(contract.amount) }}</td></tr>
+  <tr><th>其中不含税金额</th><td>{{ money(ex_tax) }}</td></tr>
+  <tr><th>增值税额（税率 {{ '{:.0%}'.format(contract.tax_rate) if contract.tax_rate else '—' }}）</th><td>{{ money(tax_amt) }}</td></tr>
+  {% if contract.type == 'SALES' and contract.monthly_rent %}
+  <tr><th>含税月租</th><td class="amt">{{ money(contract.monthly_rent) }} / 月</td></tr>
+  {% endif %}
+  <tr><th>租 / 供货期限</th><td>{{ contract.start_date or '—' }} 至 {{ contract.end_date or '—' }}</td></tr>
+  <tr><th>当前状态</th><td>{{ contract.status }}</td></tr>
+</table>
+
+<div class="clause">
+  <h3>一、标的与价款</h3>
+  <p>甲乙双方就算力设备 {{ '租赁' if contract.type == 'SALES' else '采购' }} 事宜达成一致，合同总金额（含税）为 <b>{{ money(contract.amount) }}</b>，上述金额为本合同项下乙方履行全部义务的对价。</p>
+</div>
+<div class="clause">
+  <h3>二、结算与发票</h3>
+  <p>乙方应按甲方实际发生的计费周期开具合规增值税发票；发票金额、收款资金与合同约定三流一致方可入账结算。</p>
+</div>
+<div class="clause">
+  <h3>三、生效与争议</h3>
+  <p>本合同自双方签字盖章之日起生效；履行中发生争议的，双方应友好协商解决，协商不成的，提交甲方所在地有管辖权的人民法院诉讼解决。</p>
+</div>
+
+<div class="sign">
+  <div class="sign-box">
+    <div class="role">甲方：SIEGPU 算力服务有限公司</div>
+    <div class="hint">（盖章）授权代表签字：　　　　　　　日期：</div>
+  </div>
+  <div class="sign-box">
+    <div class="role">乙方：{{ party_name }}</div>
+    <div class="hint">（盖章）授权代表签字：　　　　　　　日期：</div>
+  </div>
+</div>
+
+<div class="foot">本文件由 SIEGPU ERP 系统于 {{ today }} 自动生成，仅供业务存档参考，不替代双方签署的纸质合同正本。</div>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 """客户确认单 Service。"""
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
@@ -10,16 +11,12 @@ from app.models.service_confirmation import ServiceConfirmation
 
 def create_confirmation(db: Session, *, billing_id: uuid.UUID, sales_order_id: uuid.UUID,
                         period_label: str, created_by: uuid.UUID | None = None) -> ServiceConfirmation:
-    # 一个 billing 只能有一个确认单
-    existing = db.get(ServiceConfirmation, billing_id)  # billing_id is unique
+    # 一个 billing 只能有一个确认单（唯一约束在 billing_id 上）
+    existing = db.execute(
+        select(ServiceConfirmation).where(ServiceConfirmation.billing_id == billing_id)
+    ).scalar_one_or_none()
     if existing:
-        # 查找 by billing_id
-        from sqlalchemy import select
-        existing = db.execute(
-            select(ServiceConfirmation).where(ServiceConfirmation.billing_id == billing_id)
-        ).scalar_one_or_none()
-        if existing:
-            raise BusinessError("DUPLICATE", "该计费记录已有确认单", 409)
+        raise BusinessError("DUPLICATE", "该计费记录已有确认单", 409)
 
     sc = ServiceConfirmation(
         billing_id=billing_id, sales_order_id=sales_order_id,
@@ -36,7 +33,6 @@ def get_confirmation(db: Session, sc_id: uuid.UUID) -> ServiceConfirmation | Non
 
 def list_confirmations(db: Session, *, sales_order_id: uuid.UUID | None = None,
                        status: str | None = None, skip=0, limit=100):
-    from sqlalchemy import select
     stmt = select(ServiceConfirmation).where(ServiceConfirmation.deleted_at.is_(None))
     if sales_order_id:
         stmt = stmt.where(ServiceConfirmation.sales_order_id == sales_order_id)

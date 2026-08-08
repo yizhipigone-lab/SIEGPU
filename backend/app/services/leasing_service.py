@@ -32,7 +32,8 @@ NODE_TRANSITIONS = {
 
 def create_process(db: Session, *, project_id, supplier_id, total_amount, annual_rate=None,
                    term_periods=None, payment_freq=None, repayment_method=None,
-                   start_date=None, notes=None) -> LeasingProcess:
+                   start_date=None, notes=None,
+                   leasing_mode=None, financing_type=None, materials=None) -> LeasingProcess:
     proj = db.get(Project, project_id)
     if not proj or proj.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "项目不存在", 404)
@@ -46,6 +47,7 @@ def create_process(db: Session, *, project_id, supplier_id, total_amount, annual
         project_id=project_id, supplier_id=supplier_id, total_amount=total_amount,
         annual_rate=annual_rate, term_periods=term_periods, payment_freq=payment_freq,
         repayment_method=repayment_method, start_date=start_date, status="进行中", notes=notes,
+        leasing_mode=leasing_mode, financing_type=financing_type, materials=materials,
     )
     db.add(proc)
     db.flush()

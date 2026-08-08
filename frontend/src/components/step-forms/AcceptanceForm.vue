@@ -5,6 +5,7 @@ import {
 } from 'naive-ui'
 import { http } from '../../api/client'
 import { errMsg } from '../../utils/errMsg'
+import { tsToYmd } from '../../utils/format'
 
 // 验收（acceptance）：链式 create → upload（可选）→ approve
 // 每步失败显示该步中文错误并保留已完成子步骤状态，可直接重试
@@ -20,14 +21,6 @@ const form = ref({
   notes: '',
 })
 const file = ref<File | null>(null)
-
-// NDatePicker 绑定时间戳，提交时转 YYYY-MM-DD
-function toDateStr(ts: number | null): string | null {
-  if (!ts) return null
-  const d = new Date(ts)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 
 type SubState = 'pending' | 'doing' | 'done' | 'skip' | 'error'
 const sub = ref<{ state: SubState; error: string }[]>([
@@ -60,7 +53,7 @@ async function submit() {
           project_id: props.projectId,
           acceptance_type: props.prefill.acceptance_type || '采购验收',
           inspector: form.value.inspector || null,
-          acceptance_date: toDateStr(form.value.acceptance_date),
+          acceptance_date: tsToYmd(form.value.acceptance_date) || null,
           quantity_accepted: form.value.quantity_accepted,
           quantity_rejected: form.value.quantity_rejected || 0,
           notes: form.value.notes || null,
@@ -117,10 +110,10 @@ const SUB_TAG: Record<SubState, { type: any; text: string }> = {
     <n-form-item label="验收人">
       <n-input v-model:value="form.inspector" placeholder="选填" />
     </n-form-item>
-    <n-form-item label="合格数量" required>
+    <n-form-item label="合格数量(台)" required>
       <n-input-number v-model:value="form.quantity_accepted" :min="0" style="width:100%" />
     </n-form-item>
-    <n-form-item label="不合格数量">
+    <n-form-item label="不合格数量(台)">
       <n-input-number v-model:value="form.quantity_rejected" :min="0" style="width:100%" />
     </n-form-item>
     <n-form-item label="备注">

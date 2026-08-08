@@ -12,6 +12,7 @@ from app.core.exceptions import BusinessError
 from app.models.billing import Billing, Invoice
 from app.models.capital import CapitalTransaction
 from app.models.delivery import DeliveryStage, Order
+from app.models.device import Device, DeviceStage
 from app.models.leasing import LeasingProcess
 from app.models.project import Contract, Project
 from app.models.project_workflow import ProjectWorkflow
@@ -25,20 +26,31 @@ from app.models.workflow_template import WorkflowTemplate
 
 logger = logging.getLogger(__name__)
 
-# completion_check 允许的表名白名单（防越权）
-ALLOWED_TABLES = frozenset({
-    "projects", "contracts", "sales_orders", "orders",
-    "capital_transactions", "leasing_processes",
-    "acceptance_records", "delivery_stages",
-    "billings", "service_confirmations", "invoices",
-    "profit_scenarios",
-})
+# 表名 → ORM 类（completion_check 白名单 + 实体映射，单一来源）
+_TABLE_CLASSES: dict[str, type] = {
+    "projects": Project,
+    "contracts": Contract,
+    "sales_orders": SalesOrder,
+    "orders": Order,
+    "capital_transactions": CapitalTransaction,
+    "leasing_processes": LeasingProcess,
+    "acceptance_records": AcceptanceRecord,
+    "delivery_stages": DeliveryStage,
+    "billings": Billing,
+    "service_confirmations": ServiceConfirmation,
+    "invoices": Invoice,
+    "profit_scenarios": ProfitScenario,
+    "devices": Device,            # 一期 W3-4：设备粒度模板 completion_check
+    "device_stages": DeviceStage,
+}
+ALLOWED_TABLES = frozenset(_TABLE_CLASSES)  # 由 _TABLE_CLASSES 自动派生
 
 # 间接 FK 映射：表 → (FK列, 中间表类)  — 用于表上无 project_id 时通过中间表过滤
 _FK_TO_PROJECT: dict[str, tuple] = {
     "invoices": ("contract_id", Contract),
     "service_confirmations": ("sales_order_id", SalesOrder),
     "delivery_stages": ("order_id", Order),
+    "device_stages": ("device_id", Device),  # 一期 W3-4：经 device_id→devices→project_id 过滤
 }
 
 
@@ -114,9 +126,18 @@ def get_my_tasks(db: Session, user_id: uuid.UUID) -> list[dict]:
         )
     ).scalars().all()
 
+    # 批量取项目，避免 N+1（此函数被 Dashboard 每 30s 轮询）
+    project_ids = [wf.project_id for wf in wfs]
+    project_map: dict[uuid.UUID, Project] = {}
+    if project_ids:
+        projects = db.execute(
+            select(Project).where(Project.id.in_(project_ids))
+        ).scalars().all()
+        project_map = {p.id: p for p in projects}
+
     tasks = []
     for wf in wfs:
-        proj = db.get(Project, wf.project_id)
+        proj = project_map.get(wf.project_id)
         if not proj:
             continue
         current = _step_by_seq(wf.steps, wf.current_step)
@@ -306,13 +327,21 @@ def mark_step_done(db: Session, project_id: uuid.UUID, seq: int, note: str | Non
 
 def portfolio(db: Session) -> list[dict]:
     """项目组合总览：每项目 current_step/状态/角色/停滞天数。"""
-    from datetime import datetime
     wfs = db.execute(
         select(ProjectWorkflow).where(ProjectWorkflow.deleted_at.is_(None))
     ).scalars().all()
+
+    project_ids = [wf.project_id for wf in wfs]
+    project_map: dict[uuid.UUID, Project] = {}
+    if project_ids:
+        projects = db.execute(
+            select(Project).where(Project.id.in_(project_ids))
+        ).scalars().all()
+        project_map = {p.id: p for p in projects}
+
     rows = []
     for wf in wfs:
-        proj = db.get(Project, wf.project_id)
+        proj = project_map.get(wf.project_id)
         if not proj:
             continue
         current = _step_by_seq(wf.steps, wf.current_step)
@@ -428,41 +457,138 @@ def _advance_current(wf: ProjectWorkflow):
 
 
 def _table_class(table_name: str):
+    return _TABLE_CLASSES.get(table_name)
+
+
+def _check(table: str, min_count: int = 1, **conditions) -> dict:
+    """completion_check 快捷构造：查某表满足条件行数 >= min_count。"""
+    return {"table": table, "conditions": conditions, "min_count": min_count}
+
+
+def _step(seq: int, name: str, module: str, action: str, *,
+          doer_role: str, check: dict | None = None,
+          required: bool = True, drawer: bool = False,
+          drawer_schema: str | None = None, approver_role: str | None = None,
+          prefill: dict | None = None, context_output: list | None = None,
+          action_chain: list | None = None) -> dict:
     return {
-        "projects": Project,
-        "contracts": Contract,
-        "sales_orders": SalesOrder,
-        "orders": Order,
-        "capital_transactions": CapitalTransaction,
-        "leasing_processes": LeasingProcess,
-        "acceptance_records": AcceptanceRecord,
-        "delivery_stages": DeliveryStage,  # 经 orders 间接关联 project_id（_FK_TO_PROJECT）
-        "billings": Billing,
-        "service_confirmations": ServiceConfirmation,
-        "invoices": Invoice,
-        "profit_scenarios": ProfitScenario,
-    }.get(table_name)
+        "seq": seq, "name": name, "module": module, "action": action,
+        "required": required, "drawer": drawer, "drawer_schema": drawer_schema,
+        "doer_role": doer_role, "approver_role": approver_role,
+        "prefill": prefill or {}, "context_output": context_output or [],
+        "action_chain": action_chain or [],
+        "completion_check": check or {},
+        "status": "pending", "completed_at": None, "completed_by": None,
+    }
 
 
 def _default_steps() -> list[dict]:
     """标准金租 18 步模板（兜底用，实际应通过 workflow_templates 获取）。"""
+    pid = {"project_id": "{{project_id}}"}
     return [
-        {"seq": 1, "name": "项目建立", "module": "project", "action": "create_project", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {}, "context_output": [], "action_chain": [], "completion_check": {"table": "projects", "conditions": {"id": "{{project_id}}", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 2, "name": "销售合同", "module": "contract", "action": "create_contract", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["contract_id"], "action_chain": [], "completion_check": {"table": "contracts", "conditions": {"project_id": "{{project_id}}", "type": "SALES", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 3, "name": "采购合同", "module": "contract", "action": "create_contract", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["contract_id"], "action_chain": [], "completion_check": {"table": "contracts", "conditions": {"project_id": "{{project_id}}", "type": "PURCHASE", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 4, "name": "销售订单", "module": "sales_order", "action": "create_sales_order", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["sales_order_id"], "action_chain": [], "completion_check": {"table": "sales_orders", "conditions": {"project_id": "{{project_id}}", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 5, "name": "采购订单", "module": "order", "action": "create_order", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["order_id"], "action_chain": [], "completion_check": {"table": "orders", "conditions": {"project_id": "{{project_id}}", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 6, "name": "银行流贷入金", "module": "capital", "action": "record_transaction", "required": True, "drawer": True, "drawer_schema": "capital_in", "doer_role": "FINANCE_STAFF", "approver_role": None, "prefill": {"project_id": "{{project_id}}", "source_type": "银行流贷", "direction": "IN"}, "context_output": ["capital_transaction_id"], "action_chain": [], "completion_check": {"table": "capital_transactions", "conditions": {"project_id": "{{project_id}}", "source_type": "银行流贷", "direction": "IN", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 7, "name": "自有资金入金", "module": "capital", "action": "record_transaction", "required": True, "drawer": True, "drawer_schema": "capital_in", "doer_role": "FINANCE_STAFF", "approver_role": None, "prefill": {"project_id": "{{project_id}}", "source_type": "自有资金", "direction": "IN"}, "context_output": ["capital_transaction_id"], "action_chain": [], "completion_check": {"table": "capital_transactions", "conditions": {"project_id": "{{project_id}}", "source_type": "自有资金", "direction": "IN", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 8, "name": "预付采购款", "module": "capital", "action": "record_transaction", "required": True, "drawer": True, "drawer_schema": "capital_out", "doer_role": "FINANCE_STAFF", "approver_role": None, "prefill": {"project_id": "{{project_id}}", "direction": "OUT"}, "context_output": ["capital_transaction_id"], "action_chain": [], "completion_check": {"table": "capital_transactions", "conditions": {"project_id": "{{project_id}}", "direction": "OUT", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 9, "name": "金租申请", "module": "leasing", "action": "create_process", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "DELIVERY", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["leasing_process_id"], "action_chain": [], "completion_check": {"table": "leasing_processes", "conditions": {"project_id": "{{project_id}}", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 10, "name": "金租放款+置换", "module": "leasing", "action": "disburse", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "FINANCE_DIRECTOR", "approver_role": "FINANCE_DIRECTOR", "prefill": {}, "context_output": [], "action_chain": [], "completion_check": {"table": "leasing_processes", "conditions": {"project_id": "{{project_id}}", "status": "已放款", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 11, "name": "采购验收", "module": "acceptance", "action": "create+approve", "required": True, "drawer": True, "drawer_schema": "acceptance", "doer_role": "PROCUREMENT", "approver_role": "FINANCE_DIRECTOR", "prefill": {"project_id": "{{project_id}}", "acceptance_type": "采购验收"}, "context_output": ["acceptance_id"], "action_chain": ["create", "upload", "approve"], "completion_check": {"table": "acceptance_records", "conditions": {"project_id": "{{project_id}}", "acceptance_type": "采购验收", "status": "已通过", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 12, "name": "交付6阶段", "module": "delivery", "action": "advance_stage", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {}, "context_output": [], "action_chain": [], "completion_check": {"table": "delivery_stages", "conditions": {"project_id": "{{project_id}}", "status": "已完成", "deleted_at": None}, "min_count": 6}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 13, "name": "销售验收", "module": "acceptance", "action": "create+approve", "required": True, "drawer": True, "drawer_schema": "acceptance", "doer_role": "DELIVERY", "approver_role": "FINANCE_DIRECTOR", "prefill": {"project_id": "{{project_id}}", "acceptance_type": "销售验收"}, "context_output": ["acceptance_id"], "action_chain": ["create", "upload", "approve"], "completion_check": {"table": "acceptance_records", "conditions": {"project_id": "{{project_id}}", "acceptance_type": "销售验收", "status": "已通过", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 14, "name": "点亮", "module": "order", "action": "light_on", "required": True, "drawer": False, "drawer_schema": None, "doer_role": "PROCUREMENT", "approver_role": None, "prefill": {}, "context_output": [], "action_chain": [], "completion_check": {"table": "orders", "conditions": {"project_id": "{{project_id}}", "status": "已点亮", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 15, "name": "计费", "module": "billing", "action": "generate_billing", "required": True, "drawer": True, "drawer_schema": "billing_confirm", "doer_role": "FINANCE_STAFF", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["billing_id"], "action_chain": [], "completion_check": {"table": "billings", "conditions": {"project_id": "{{project_id}}", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 16, "name": "客户确认", "module": "confirmation", "action": "confirm", "required": True, "drawer": True, "drawer_schema": "confirmation", "doer_role": "FINANCE_STAFF", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": ["confirmation_id"], "action_chain": [], "completion_check": {"table": "service_confirmations", "conditions": {"project_id": "{{project_id}}", "status": "已确认", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 17, "name": "开票+回款+核销", "module": "invoice", "action": "create+pay+reconcile", "required": True, "drawer": True, "drawer_schema": "invoice_issue", "doer_role": "FINANCE_STAFF", "approver_role": "FINANCE_DIRECTOR", "prefill": {"project_id": "{{project_id}}"}, "context_output": ["invoice_id"], "action_chain": ["create", "pay", "reconcile"], "completion_check": {"table": "invoices", "conditions": {"project_id": "{{project_id}}", "status": "已核销", "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
-        {"seq": 18, "name": "盈利测算", "module": "profit", "action": "calculate", "required": False, "drawer": False, "drawer_schema": None, "doer_role": "FINANCE_STAFF", "approver_role": None, "prefill": {"project_id": "{{project_id}}"}, "context_output": [], "action_chain": [], "completion_check": {"table": "profit_scenarios", "conditions": {"project_id": "{{project_id}}", "is_actual": True, "deleted_at": None}, "min_count": 1}, "status": "pending", "completed_at": None, "completed_by": None},
+        _step(1, "项目建立", "project", "create_project", doer_role="PROCUREMENT",
+              check=_check("projects", id="{{project_id}}", deleted_at=None)),
+        _step(2, "销售合同", "contract", "create_contract", doer_role="PROCUREMENT",
+              prefill=pid, context_output=["contract_id"],
+              check=_check("contracts", project_id="{{project_id}}", type="SALES", deleted_at=None)),
+        _step(3, "采购合同", "contract", "create_contract", doer_role="PROCUREMENT",
+              prefill=pid, context_output=["contract_id"],
+              check=_check("contracts", project_id="{{project_id}}", type="PURCHASE", deleted_at=None)),
+        _step(4, "销售订单", "sales_order", "create_sales_order", doer_role="PROCUREMENT",
+              prefill=pid, context_output=["sales_order_id"],
+              check=_check("sales_orders", project_id="{{project_id}}", deleted_at=None)),
+        _step(5, "采购订单", "order", "create_order", doer_role="PROCUREMENT",
+              prefill=pid, context_output=["order_id"],
+              check=_check("orders", project_id="{{project_id}}", deleted_at=None)),
+        _step(6, "银行流贷入金", "capital", "record_transaction", doer_role="FINANCE_STAFF",
+              drawer=True, drawer_schema="capital_in",
+              prefill={**pid, "source_type": "银行流贷", "direction": "IN"},
+              context_output=["capital_transaction_id"],
+              check=_check("capital_transactions", project_id="{{project_id}}", source_type="银行流贷", direction="IN", deleted_at=None)),
+        _step(7, "自有资金入金", "capital", "record_transaction", doer_role="FINANCE_STAFF",
+              drawer=True, drawer_schema="capital_in",
+              prefill={**pid, "source_type": "自有资金", "direction": "IN"},
+              context_output=["capital_transaction_id"],
+              check=_check("capital_transactions", project_id="{{project_id}}", source_type="自有资金", direction="IN", deleted_at=None)),
+        _step(8, "预付采购款", "capital", "record_transaction", doer_role="FINANCE_STAFF",
+              drawer=True, drawer_schema="capital_out",
+              prefill={**pid, "direction": "OUT"}, context_output=["capital_transaction_id"],
+              check=_check("capital_transactions", project_id="{{project_id}}", direction="OUT", deleted_at=None)),
+        _step(9, "金租申请", "leasing", "create_process", doer_role="DELIVERY",
+              prefill=pid, context_output=["leasing_process_id"],
+              check=_check("leasing_processes", project_id="{{project_id}}", deleted_at=None)),
+        _step(10, "金租放款+置换", "leasing", "disburse", doer_role="FINANCE_DIRECTOR",
+              approver_role="FINANCE_DIRECTOR",
+              check=_check("leasing_processes", project_id="{{project_id}}", status="已放款", deleted_at=None)),
+        _step(11, "采购验收", "acceptance", "create+approve", doer_role="PROCUREMENT",
+              drawer=True, drawer_schema="acceptance", approver_role="FINANCE_DIRECTOR",
+              prefill={**pid, "acceptance_type": "采购验收"}, context_output=["acceptance_id"],
+              action_chain=["create", "upload", "approve"],
+              check=_check("acceptance_records", project_id="{{project_id}}", acceptance_type="采购验收", status="已通过", deleted_at=None)),
+        _step(12, "交付6阶段", "delivery", "advance_stage", doer_role="PROCUREMENT",
+              check=_check("delivery_stages", min_count=6, project_id="{{project_id}}", status="已完成", deleted_at=None)),
+        _step(13, "销售验收", "acceptance", "create+approve", doer_role="DELIVERY",
+              drawer=True, drawer_schema="acceptance", approver_role="FINANCE_DIRECTOR",
+              prefill={**pid, "acceptance_type": "销售验收"}, context_output=["acceptance_id"],
+              action_chain=["create", "upload", "approve"],
+              check=_check("acceptance_records", project_id="{{project_id}}", acceptance_type="销售验收", status="已通过", deleted_at=None)),
+        _step(14, "点亮", "order", "light_on", doer_role="PROCUREMENT",
+              check=_check("orders", project_id="{{project_id}}", status="已点亮", deleted_at=None)),
+        _step(15, "计费", "billing", "generate_billing", doer_role="FINANCE_STAFF",
+              drawer=True, drawer_schema="billing_confirm",
+              prefill=pid, context_output=["billing_id"],
+              check=_check("billings", project_id="{{project_id}}", deleted_at=None)),
+        _step(16, "客户确认", "confirmation", "confirm", doer_role="FINANCE_STAFF",
+              drawer=True, drawer_schema="confirmation",
+              prefill=pid, context_output=["confirmation_id"],
+              check=_check("service_confirmations", project_id="{{project_id}}", status="已确认", deleted_at=None)),
+        _step(17, "开票+回款+核销", "invoice", "create+pay+reconcile", doer_role="FINANCE_STAFF",
+              drawer=True, drawer_schema="invoice_issue", approver_role="FINANCE_DIRECTOR",
+              prefill=pid, context_output=["invoice_id"],
+              action_chain=["create", "pay", "reconcile"],
+              check=_check("invoices", project_id="{{project_id}}", status="已核销", deleted_at=None)),
+        _step(18, "盈利测算", "profit", "calculate", doer_role="FINANCE_STAFF",
+              required=False, prefill=pid,
+              check=_check("profit_scenarios", project_id="{{project_id}}", is_actual=True, deleted_at=None)),
+    ]
+
+
+def _device_flow_steps() -> list[dict]:
+    """设备粒度 7 节点向导模板（一期 W3-4）：completion_check 指向 devices/device_stages。
+
+    模板选择沿用 template_id（create_project 时操作员手选）——规格 L259 的「随 flow_type 自动匹配」本轮不实现。
+    节点推进/点亮步骤 min_count=1 作为 W3-4 壳（至少一台设备达到该节点）；按台计费在 W5-6。
+    device_stages 经 _FK_TO_PROJECT 间接关联 project_id，防跨项目误判（审计 A2 / D6）。
+    """
+    pid = {"project_id": "{{project_id}}"}
+    return [
+        _step(1, "项目建立", "project", "create_project", doer_role="PROCUREMENT",
+              check=_check("projects", id="{{project_id}}", deleted_at=None)),
+        _step(2, "销售合同", "contract", "create_contract", doer_role="PROCUREMENT",
+              prefill=pid, context_output=["contract_id"],
+              check=_check("contracts", project_id="{{project_id}}", type="SALES", deleted_at=None)),
+        _step(3, "采购合同", "contract", "create_contract", doer_role="PROCUREMENT",
+              prefill=pid,
+              check=_check("contracts", project_id="{{project_id}}", type="PURCHASE", deleted_at=None)),
+        _step(4, "批次订单", "order", "create_order", doer_role="PROCUREMENT",
+              prefill={**pid, "is_batch": True},
+              check=_check("orders", project_id="{{project_id}}", is_batch=True, deleted_at=None)),
+        _step(5, "设备导入", "device", "import_devices", doer_role="DELIVERY",
+              prefill=pid,
+              check=_check("devices", project_id="{{project_id}}", deleted_at=None, min_count=1)),
+        _step(6, "设备到货", "device", "advance_device_stage", doer_role="DELIVERY",
+              check=_check("device_stages", project_id="{{project_id}}", stage="到货", status="已完成", min_count=1)),
+        _step(7, "设备上架", "device", "advance_device_stage", doer_role="DELIVERY",
+              check=_check("device_stages", project_id="{{project_id}}", stage="上架", status="已完成", min_count=1)),
+        _step(8, "点亮验收", "device", "advance_device_stage", doer_role="DELIVERY",
+              check=_check("device_stages", project_id="{{project_id}}", stage="点亮验收", status="已完成", min_count=1)),
+        _step(9, "金租放款", "leasing", "disburse", doer_role="FINANCE_STAFF",
+              required=False, prefill=pid,  # M2：可选——自有设备无金租；点亮达阈值已自动建申请，此步走放款
+              check=_check("leasing_processes", project_id="{{project_id}}", status="已放款", deleted_at=None)),
+        _step(10, "按台计费", "billing", "generate_billing", doer_role="FINANCE_STAFF",
+              required=False, prefill=pid,
+              check=_check("billings", project_id="{{project_id}}", deleted_at=None)),
+        _step(11, "盈利测算", "profit", "calculate", doer_role="FINANCE_STAFF",
+              required=False, prefill=pid,
+              check=_check("profit_scenarios", project_id="{{project_id}}", is_actual=True, deleted_at=None)),
     ]

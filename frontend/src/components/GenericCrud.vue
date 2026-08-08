@@ -6,12 +6,13 @@ import {
   NForm, NFormItem, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace,
   NTabPane, NTabs, NTag, NTooltip, NUpload, useMessage,
 } from 'naive-ui'
-import { Eye, Pencil, Plus, Trash2, Workflow } from 'lucide-vue-next'
+import { Eye, FileText, HelpCircle, Pencil, Plus, Trash2, Workflow } from 'lucide-vue-next'
 import * as R from '../composables/useResource'
 import { money, statusTagType, tsToYmd, ymdToTs } from '../utils/format'
 import { errMsg } from '../utils/errMsg'
 import { api } from '../api/client'
-import type { CrudConfig, DetailAction } from '../config/modules'
+import type { CrudConfig, DetailAction, FieldConfig } from '../config/modules'
+import WorkflowProgress from './WorkflowProgress.vue'
 
 const props = defineProps<{ config: CrudConfig }>()
 const msg = useMessage()
@@ -22,6 +23,11 @@ const loading = ref(false)
 const showModal = ref(false)
 const editing = ref<any | null>(null)
 const form = reactive<Record<string, any>>({})
+// 即时校验：字段有 validate 时返回警告文案（模板里 :status 标黄 + 下方 ⚠ 提示），undefined 即通过。
+// 非阻断式（不拦保存），与 ProfitView 百分比兜底一致；真正非法值仍由后端拒绝。
+function fieldWarn(f: FieldConfig): string | undefined {
+  return typeof f.validate === 'function' ? f.validate(form[f.key]) : undefined
+}
 const searchTerm = ref('')
 
 // 远程下拉选项缓存：fieldKey → options
@@ -118,7 +124,7 @@ async function advanceStage(stage: any, status: '进行中' | '已完成') {
     })
     msg.success(status === '已完成' ? `阶段「${stage.stage}」已完成` : `阶段「${stage.stage}」已开始`)
     if (detailRow.value) await loadStages(detailRow.value.id)
-  } catch (e: any) { msg.error(e.response?.data?.detail?.message || '推进失败') }
+  } catch (e: any) { msg.error(errMsg(e)) }
 }
 async function submit() {
   // 必填前端校验（缺必填给中文提示）
@@ -136,7 +142,7 @@ async function submit() {
 }
 async function del(row: any) {
   try { await R.deleteRes(props.config.apiPath, row.id); msg.success('已删除'); await refresh() }
-  catch { msg.error('删除失败') }
+  catch (e: any) { msg.error(errMsg(e)) }
 }
 
 // 文件上传
@@ -191,8 +197,9 @@ async function submitAction() {
 function onImportFinish({ event }: any) {
   try {
     const r = JSON.parse(event?.target?.response || '{}')
-    msg.success(`导入成功: ${r.imported ?? 0} 条`)
-    refresh()
+    if (r && r.imported != null) { msg.success(`导入成功: ${r.imported} 条`); refresh() }
+    else if (r && r.detail) msg.error(errMsg({ response: { data: r } }))
+    else msg.error('导入失败：文件格式不符')
   } catch { msg.error('导入失败') }
 }
 async function exportData() {
@@ -205,6 +212,18 @@ async function exportData() {
     URL.revokeObjectURL(url)
     msg.success('导出成功')
   } catch { msg.error('导出失败') }
+}
+
+// F4：实时生成 PDF（不落库，浏览器直接下载）。blob 下载范式同 exportData，endpoint 为 {apiPath}/{id}/pdf。
+async function downloadPdf(row: any) {
+  try {
+    const resp = await api.get(`${props.config.apiPath}/${row.id}/pdf`, { responseType: 'blob' })
+    const url = URL.createObjectURL(resp.data as unknown as Blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${props.config.title}-${String(row.id).slice(0, 8)}.pdf`; a.click()
+    URL.revokeObjectURL(url)
+    msg.success('PDF 已生成')
+  } catch (e: any) { msg.error(errMsg(e)) }
 }
 
 // 表格列
@@ -231,6 +250,13 @@ const tableColumns = computed(() => {
         h(NButton, { size: 'tiny', quaternary: true, onClick: () => router.push(`/projects/${row.id}/workspace`), title: '工作台' },
           { icon: () => h(NIcon, null, { default: () => h(Workflow, { size: 14 }) }) }),
       ] : []),
+      ...(props.config.pdfExport ? [
+        h(NTooltip, null, {
+          trigger: () => h(NButton, { size: 'tiny', quaternary: true, onClick: () => downloadPdf(row), title: '导出PDF' },
+            { icon: () => h(NIcon, null, { default: () => h(FileText, { size: 14 }) }) }),
+          default: () => '导出 PDF：实时生成合同正本，可直接打印或归档',
+        }),
+      ] : []),
       h(NButton, { size: 'tiny', quaternary: true, onClick: () => openDetail(row), title: '详情' },
         { icon: () => h(NIcon, null, { default: () => h(Eye, { size: 14 }) }) }),
       h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row), title: '编辑' },
@@ -238,7 +264,7 @@ const tableColumns = computed(() => {
       h(NPopconfirm, { onPositiveClick: () => del(row) }, {
         trigger: () => h(NButton, { size: 'tiny', quaternary: true, type: 'error', title: '删除' },
           { icon: () => h(NIcon, null, { default: () => h(Trash2, { size: 14 }) }) }),
-        default: () => '确认删除？',
+        default: () => '删除后不可撤销，关联的业务数据可能受影响，确认删除？',
       }),
     ]),
   })
@@ -275,13 +301,25 @@ const tableColumns = computed(() => {
     <!-- 新增/编辑 -->
     <n-modal v-model:show="showModal" preset="card" :title="editing ? '编辑' : '新增'" style="width:520px;max-width:94vw">
       <n-form label-placement="left" :label-width="140">
-        <n-form-item v-for="f in config.fields" :key="f.key" :label="f.label" :required="f.required">
-          <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
-          <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" />
-          <n-input-number v-else-if="f.type === 'number'" v-model:value="form[f.key]" style="width:100%" />
-          <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
-            :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />
-          <n-input v-else v-model:value="form[f.key]" />
+        <n-form-item v-for="f in config.fields" :key="f.key" :required="f.required" :show-feedback="false">
+          <template #label>
+            {{ f.label }}
+            <n-tooltip v-if="f.hint" trigger="hover">
+              <template #trigger>
+                <n-icon style="margin-left:4px;cursor:help;vertical-align:middle;color:#94A3B8"><HelpCircle :size="14" /></n-icon>
+              </template>
+              {{ f.hint }}
+            </n-tooltip>
+          </template>
+          <div style="width:100%">
+            <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
+            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" />
+            <n-input-number v-else-if="f.type === 'number'" v-model:value="form[f.key]" :status="fieldWarn(f) ? 'warning' : undefined" style="width:100%" />
+            <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
+              :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />
+            <n-input v-else v-model:value="form[f.key]" />
+            <div v-if="fieldWarn(f)" class="tiny" style="color:#D97706;margin-top:2px">⚠ {{ fieldWarn(f) }}</div>
+          </div>
         </n-form-item>
       </n-form>
       <template #footer><n-space justify="end"><n-button @click="showModal = false">取消</n-button><n-button type="primary" @click="submit">保存</n-button></n-space></template>
@@ -290,6 +328,7 @@ const tableColumns = computed(() => {
     <!-- 详情抽屉 -->
     <n-drawer v-model:show="showDetail" :width="520" placement="right">
       <n-drawer-content :title="config.title + ' 详情'" closable>
+        <WorkflowProgress v-if="detailRow?.project_id" :project-id="detailRow.project_id" style="margin-bottom:16px" />
         <n-descriptions v-if="detailRow" label-placement="left" bordered :column="1" size="small">
           <n-descriptions-item v-for="f in allFields" :key="f.key" :label="f.label">
             <span v-if="numKeys.has(f.key)" class="num">{{ money(detailRow[f.key]) }}</span>

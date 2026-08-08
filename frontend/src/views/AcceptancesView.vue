@@ -6,7 +6,8 @@ import {
 } from 'naive-ui'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
-
+import { statusTagType } from '../utils/format'
+import EmptyState from '../components/EmptyState.vue'
 interface Acceptance {
   id: string; project_id: string; acceptance_type: string
   order_id: string | null; sales_order_id: string | null
@@ -39,8 +40,6 @@ const showReject = computed({
   get: () => !!rejectTarget.value,
   set: (v: boolean) => { if (!v) { rejectTarget.value = null; rejectReason.value = '' } },
 })
-
-const statusColors: Record<string, string> = { '已通过': 'success', '已驳回': 'error', '待验收': 'warning', '验收中': 'info' }
 
 const projectOpts = () => projects.value.map((p: any) => ({ label: p.name, value: p.id }))
 const orderOpts = () => orders.value.map((o: any) => ({
@@ -75,7 +74,7 @@ async function submitReject() {
 const columns = [
   { title: '项目', key: 'project_id', render: (r: any) => projectName(r.project_id) },
   { title: '类型', key: 'acceptance_type', width: 100, render: (r: any) => h(NTag, { type: r.acceptance_type === '采购验收' ? 'info' : 'success', size: 'small' }, () => r.acceptance_type) },
-  { title: '状态', key: 'status', width: 90, render: (r: any) => h(NTag, { type: (statusColors[r.status] || 'default') as any, size: 'small' }, () => r.status) },
+  { title: '状态', key: 'status', width: 90, render: (r: any) => h(NTag, { type: statusTagType(r.status) as any, size: 'small' }, () => r.status) },
   { title: '验收人', key: 'inspector', width: 100 },
   { title: '合格', key: 'quantity_accepted', width: 70 },
   { title: '不合格', key: 'quantity_rejected', width: 80 },
@@ -141,7 +140,11 @@ onMounted(load)
       <h2 style="margin:0">验收管理</h2>
       <n-button type="primary" @click="openCreate">新建验收</n-button>
     </div>
-    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false" />
+    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false">
+      <template #empty>
+        <EmptyState description="还没有验收记录，点击右上角「新建验收」，设备到货后即可登记验收" />
+      </template>
+    </n-dataTable>
 
     <!-- 新建验收 -->
     <n-modal v-model:show="showCreate" preset="card" title="新建验收" style="width:480px;max-width:94vw">
@@ -160,8 +163,8 @@ onMounted(load)
         </n-form-item>
         <n-space>
           <n-form-item label="验收人"><n-input v-model:value="form.inspector" style="width:130px" /></n-form-item>
-          <n-form-item label="合格数"><n-input-number v-model:value="form.quantity_accepted" :min="0" style="width:100px" /></n-form-item>
-          <n-form-item label="不合格数"><n-input-number v-model:value="form.quantity_rejected" :min="0" style="width:100px" /></n-form-item>
+          <n-form-item label="合格数(台)"><n-input-number v-model:value="form.quantity_accepted" :min="0" style="width:100px" /></n-form-item>
+          <n-form-item label="不合格数(台)"><n-input-number v-model:value="form.quantity_rejected" :min="0" style="width:100px" /></n-form-item>
         </n-space>
         <n-form-item label="备注"><n-input v-model:value="form.notes" type="textarea" :rows="2" /></n-form-item>
       </n-space>

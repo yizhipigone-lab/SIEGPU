@@ -50,6 +50,9 @@ def test_light_on_generates_asset_and_depreciation(db):
     assert asset.end_date == date(2031, 9, 15)  # +5 年（add_months 60）
     assets = db.execute(select(Asset).where(Asset.order_id == o.id)).scalars().all()
     assert len(assets) == 1
+    # W5-6 回归：legacy 资产仍单张 quantity=N、device_id=None、点亮即运营中
+    assert asset.device_id is None
+    assert asset.operation_status == "运营中"
 
 
 def test_double_light_on_blocked(db):
@@ -58,3 +61,65 @@ def test_double_light_on_blocked(db):
     svc.light_on(db, order_id=o.id, actual_date=date(2026, 9, 15))
     with pytest.raises(BusinessError):
         svc.light_on(db, order_id=o.id, actual_date=date(2026, 9, 15))
+
+
+# ---------- 一期 W3-4：is_batch 分支 + 防双计闸 ----------
+
+def test_create_order_is_batch_skips_stages_and_accepts_none(db):
+    p = _project(db)
+    o = svc.create_order(db, project_id=p.id, is_batch=True, batch_name="批次X")
+    assert o.is_batch is True
+    assert o.flow_type == "batch"
+    assert o.total_amount is None
+    assert o.equipment_model_id is None and o.quantity is None and o.unit_price is None
+    _, stages = svc.get_order_with_stages(db, o.id)
+    assert stages == []  # 不生成 6 条 delivery_stages，节点只走 device_stages
+
+
+def _order_with_device(db):
+    """普通订单挂设备→变 device 路径（真实双计攻击面：残留 6 节点 + 新设备路径）。"""
+    from app.services import device_service as dsvc
+    p = _project(db); e = _equipment(db)
+    o = svc.create_order(db, project_id=p.id, equipment_model_id=e.id,
+                         quantity=2, unit_price=Decimal("1"))
+    d = dsvc.create_device(db, project_id=p.id, equipment_model_id=e.id)
+    dsvc.add_to_batch(db, device_id=d.id, batch_id=o.id)  # 固化 o 为 batch 载体
+    return o, d
+
+
+def test_advance_stage_blocked_for_device_order(db):
+    o, _ = _order_with_device(db)
+    _, stages = svc.get_order_with_stages(db, o.id)
+    with pytest.raises(BusinessError):  # 防双计：旧 6 节点入口被闸
+        svc.advance_stage(db, stage_id=stages[0].id, status="进行中")
+
+
+def test_light_on_blocked_for_device_order(db):
+    o, _ = _order_with_device(db)
+    with pytest.raises(BusinessError):
+        svc.light_on(db, order_id=o.id, actual_date=date(2026, 9, 15))
+
+
+def test_normal_order_advance_and_light_unaffected(db):
+    # 回归：普通订单（无设备挂载）走旧路径不受闸影响
+    p = _project(db); e = _equipment(db)
+    o = svc.create_order(db, project_id=p.id, equipment_model_id=e.id,
+                         quantity=2, unit_price=Decimal("1"))
+    _, stages = svc.get_order_with_stages(db, o.id)
+    svc.advance_stage(db, stage_id=stages[0].id, status="进行中")
+    svc.advance_stage(db, stage_id=stages[0].id, status="已完成")
+    o2, asset = svc.light_on(db, order_id=o.id, actual_date=date(2026, 9, 15))
+    assert o2.status == "已点亮" and asset is not None
+
+
+def test_order_detail_schema_serializes_batch_nulls():
+    """回归：批次订单 4 字段（equipment_model_id/quantity/unit_price/total_amount）可为 None，
+    OrderDetail 序列化不得抛 ValidationError→接口 500。
+    亲历 bug：A2 放宽 model 列 nullable 但漏改响应 schema，service 测试全绿却 HTTP 500（端到端验证铁律）。
+    """
+    from app.schemas.order import OrderDetail
+    d = OrderDetail(id=uuid.uuid4(), project_id=uuid.uuid4(), equipment_model_id=None,
+                    quantity=None, unit_price=None, total_amount=None, status="未点亮",
+                    contract_id=None, stages=[])
+    assert d.total_amount is None and d.quantity is None
+    assert d.equipment_model_id is None and d.unit_price is None

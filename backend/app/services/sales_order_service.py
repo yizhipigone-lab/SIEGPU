@@ -1,6 +1,7 @@
 """销售订单 Service — CRUD。"""
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.sales_order import SalesOrder
@@ -30,7 +31,6 @@ def get_sales_order(db: Session, so_id: uuid.UUID) -> SalesOrder | None:
 
 
 def list_sales_orders(db: Session, *, project_id: uuid.UUID | None = None, skip=0, limit=100):
-    from sqlalchemy import select
     stmt = select(SalesOrder).where(SalesOrder.deleted_at.is_(None))
     if project_id:
         stmt = stmt.where(SalesOrder.project_id == project_id)

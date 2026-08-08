@@ -6,6 +6,7 @@ import {
 } from 'naive-ui'
 import { http } from '../../api/client'
 import { errMsg } from '../../utils/errMsg'
+import { tsToYmd } from '../../utils/format'
 
 // 开票（invoice_issue）：create → pay（填了收款日期才执行）→ reconcile（选了流水才执行）
 // 未核销时在抽屉内提示到发票对账页完成核销并给出跳转
@@ -18,14 +19,6 @@ const submitting = ref(false)
 
 const contracts = ref<any[]>([])
 const txns = ref<any[]>([])
-
-// NDatePicker 绑定时间戳，提交时转 YYYY-MM-DD
-function toDateStr(ts: number | null): string | null {
-  if (!ts) return null
-  const d = new Date(ts)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 
 const form = ref({
   contract_id: null as string | null,
@@ -74,13 +67,13 @@ async function submit() {
       contract_id: form.value.contract_id,
       invoice_no: form.value.invoice_no || null,
       amount: form.value.amount,
-      issue_date: toDateStr(form.value.issue_date),
-      due_date: toDateStr(form.value.due_date),
+      issue_date: tsToYmd(form.value.issue_date) || null,
+      due_date: tsToYmd(form.value.due_date) || null,
     })
     // 第 2 步：登记收款（选填）
     if (form.value.paid_date) {
       try {
-        await http.post(`/invoices/${inv.id}/pay`, { paid_date: toDateStr(form.value.paid_date) })
+        await http.post(`/invoices/${inv.id}/pay`, { paid_date: tsToYmd(form.value.paid_date) || null })
       } catch (e: any) {
         msg.error(`发票已开具，但登记收款失败：${errMsg(e)}`)
         return
@@ -118,7 +111,7 @@ const reconciledPending = ref(false)
     <n-form-item label="发票号">
       <n-input v-model:value="form.invoice_no" placeholder="选填" />
     </n-form-item>
-    <n-form-item label="开票金额（含税）" required>
+    <n-form-item label="开票金额(含税,元)" required>
       <n-input-number v-model:value="form.amount" :min="0" :show-button="false" style="width:100%" />
     </n-form-item>
     <n-form-item label="开票日期" required>
