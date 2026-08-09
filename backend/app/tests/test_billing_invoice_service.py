@@ -82,6 +82,69 @@ def test_reconciliation_gaps(db):
     assert row2["received"] == Decimal("53333.33")
 
 
+# ---------- 债①回归：纯核销（不经 /pay）写 paid_date ----------
+
+def _receipt_txn(db, contract, amount, txn_date):
+    """建一笔销售收款流水（IN），供核销用。"""
+    from app.models.capital import CapitalTransaction
+    txn = CapitalTransaction(project_id=contract.project_id, source_type="租金收入",
+                             direction="IN", amount=amount, transaction_date=txn_date)
+    db.add(txn)
+    db.flush()
+    return txn
+
+
+def _user(db):
+    """建一个真实用户，供 reconciled_by 等 FK→users 字段用（测试库空 schema 无 seed）。"""
+    from app.models.user import User
+    u = User(username=f"u{uuid.uuid4().hex[:6]}", display_name="核销员",
+             password_hash="x", role="FINANCE_STAFF")
+    db.add(u)
+    db.flush()
+    return u.id
+
+
+def test_reconcile_full_sets_paid_date(db):
+    """债①核心回归：纯核销（不调 mark_paid）全额匹配→同步写 paid_date（取流水到账日）。
+    修复前：reconcile 只写 status=已核销，paid_date 留空→对账单 received 读 paid_date 漏计。"""
+    c, o = _setup_lit_sales(db, contract_amount=Decimal("1000000"))
+    inv = isvc.create_invoice(db, contract_id=c.id, amount=Decimal("53333.33"),
+                              issue_date=date(2026, 9, 30))  # 含税
+    txn = _receipt_txn(db, c, Decimal("53333.33"), date(2026, 10, 20))
+    isvc.reconcile_invoice(db, invoice_id=inv.id, txn_id=txn.id, reconciled_by=_user(db))
+    db.refresh(inv)
+    assert inv.status == "已核销"
+    assert inv.paid_date == date(2026, 10, 20)  # 取核销流水到账日
+    # 三流对账 received 应反映（读 paid_date IS NOT NULL）——修复前为 0
+    row = [r for r in isvc.reconciliation(db) if r["contract_id"] == str(c.id)][0]
+    assert row["received"] == Decimal("53333.33")
+
+
+def test_reconcile_partial_does_not_set_paid_date(db):
+    """部分核销（流水未覆盖发票全额）不置 paid_date——发票尚未全额回款。"""
+    c, o = _setup_lit_sales(db, contract_amount=Decimal("1000000"))
+    inv = isvc.create_invoice(db, contract_id=c.id, amount=Decimal("53333.33"),
+                              issue_date=date(2026, 9, 30))
+    txn = _receipt_txn(db, c, Decimal("20000.00"), date(2026, 10, 20))  # 不够覆盖
+    isvc.reconcile_invoice(db, invoice_id=inv.id, txn_id=txn.id, reconciled_by=_user(db))
+    db.refresh(inv)
+    assert inv.status != "已核销"  # 仍是「已开」
+    assert inv.paid_date is None
+
+
+def test_reconcile_does_not_overwrite_paid_date_from_pay(db):
+    """已 /pay 置过 paid_date 的，核销不覆盖→守工作流 pay→reconcile 既有行为（零回归）。"""
+    c, o = _setup_lit_sales(db, contract_amount=Decimal("1000000"))
+    inv = isvc.create_invoice(db, contract_id=c.id, amount=Decimal("53333.33"),
+                              issue_date=date(2026, 9, 30))
+    isvc.mark_paid(db, inv.id, date(2026, 10, 5))  # 先回款，paid_date=10/5
+    txn = _receipt_txn(db, c, Decimal("53333.33"), date(2026, 10, 20))  # 到账日更晚
+    isvc.reconcile_invoice(db, invoice_id=inv.id, txn_id=txn.id, reconciled_by=_user(db))
+    db.refresh(inv)
+    assert inv.status == "已核销"
+    assert inv.paid_date == date(2026, 10, 5)  # 仍是 /pay 的日期，未被流水日期覆盖
+
+
 # ---------- 一期 W3-4：设备粒度订单禁走旧 generate_billing ----------
 
 def test_generate_billing_blocked_for_device_order(db):

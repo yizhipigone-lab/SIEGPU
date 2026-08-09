@@ -7,4 +7,6 @@ export default defineConfig({
   use: { baseURL: 'http://localhost:8080' },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   reporter: [['list']],
+  // 全套跑完清 dev-DB 本轮 e2e 数据，防共享库测试数据无限堆积（见 global-teardown.ts）。
+  globalTeardown: './global-teardown',
 })

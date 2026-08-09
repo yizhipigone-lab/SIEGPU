@@ -163,6 +163,11 @@ def reconcile_invoice(db: Session, *, invoice_id, txn_id,
     # 回填关联
     txn.invoice_id = inv.id
     inv.capital_transaction_id = txn_id
+    # 必须显式 flush 再查：生产 SessionLocal=autoflush False（db.py），不刷则下面 matched 查询读到的
+    # 还是 invoice_id=NULL 的旧值 → matched=0 → 全核销分支永不进入（status 留「已开」、paid_date 不写）。
+    # pytest 的 db fixture 走默认 Session(autoflush=True) 故此前误绿——autoflush 差异只能由 e2e 揪出
+    # （端到端铁律）。不依赖 autoflush 做「写入后立即查」的正确性，显式 flush 才是生产可靠写法。
+    db.flush()
 
     # 检查是否全部匹配：Σ已关联流水金额 >= 发票金额
     matched = db.execute(
@@ -174,6 +179,12 @@ def reconcile_invoice(db: Session, *, invoice_id, txn_id,
         inv.status = "已核销"
         inv.reconciled_at = func.now()
         inv.reconciled_by = reconciled_by
+        # 债①修复：全额核销=钱已到账→若尚未置 paid_date 则补上（取核销流水到账日 txn.transaction_date）。
+        # 纯核销（不经 /pay）原本只写 status=已核销、不写 paid_date，而客户对账单 received、流水明细
+        # 「回款/开票」标签、三流对账 reconciliation() 三处均读 paid_date → 纯核销会漏计回款。
+        # `is None` 守卫：已 /pay 置过 paid_date 的不覆盖，守工作流 pay→reconcile 既有行为（零回归）。
+        if inv.paid_date is None:
+            inv.paid_date = txn.transaction_date
 
     db.flush()
     from app.services import audit_service as _audit

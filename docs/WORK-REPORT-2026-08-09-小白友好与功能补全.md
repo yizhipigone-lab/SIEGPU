@@ -202,7 +202,10 @@ SIEGPU 算力租赁 ERP 业务链路已 90% 打通（立项→采购→金租→
 ### 7.2 设计债（已记录，未排期）
 - F1 jobstore 内存：重启丢未读，如需持久后续换 `SQLAlchemyJobStore`
 - F4 PDF 不提供模板自定义（一期固定模板，二期可加 logo/页眉配置）
-- e2e 未给新页（对账单/设备看板）加 journey（仅回归不破，未加正向 journey）
+- ~~e2e 未给新页（对账单/设备看板）加 journey~~ ✅ 已补（2026-08-09 一期终审 Step 1）：给 F2 设备看板 / F3 对账单 / F4 合同发票 PDF / F1 消息铃铛 各补了正向 e2e journey（`e2e/tests/w9_final_audit.spec.ts`），全套 48/48 绿
+- **首页待办查询无分页 + 前端吞错（2026-08-09 一期终审新增）**：`get_my_tasks`（`backend/app/services/workflow_service.py:116`）**无 LIMIT**，全量加载所有「进行中」工作流；前端 `Dashboard.vue` 用 `myTasks.value = t.data || []` 把请求失败/超时**静默吞成空列表** → 待办卡显示「暂无轮到你的步骤」。dev-DB 曾堆到 99 条采购待办，全量并发下请求超时即触发，致 `wizard-workspace a1` 间歇 flake（表面像新 journey 回归，实为污染压垮超时阈值）。
+  - 已做兜底（治标 =「勤倒垃圾」）：`e2e/global-teardown.ts` + `backend/app/scripts/cleanup_e2e.py` 每次 e2e 跑完清 dev-DB 测试残留，防堆积复发。
+  - 未做（治本 =「垃圾桶再大也不炸」，建议排期）：`get_my_tasks` 加 LIMIT/分页 + 前端失败不吞错（让超时显形成告警，而非伪装成「无待办」）。
 
 ### 7.3 一期收尾
 - W9-10 联调回归 + 一期终审

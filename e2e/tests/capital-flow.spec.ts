@@ -3,6 +3,8 @@ import { test, expect } from '@playwright/test'
 // 全程走 baseURL(nginx:8080) → /api 反代 backend → db，真实端到端链路。
 test('登录 → 建项目 → 记流水 → 对账（资金池净头寸）', async ({ request }) => {
   const api = '/api'
+  // RUN 后缀：共享 dev-DB 无隔离，每次跑造唯一项目名，globalTeardown 据前缀 E2E- 清理。
+  const RUN = Date.now().toString(36)
 
   // 1) 登录拿 token
   const loginRes = await request.post(`${api}/auth/login`, {
@@ -15,7 +17,7 @@ test('登录 → 建项目 → 记流水 → 对账（资金池净头寸）', as
   // 2) 建项目
   const projRes = await request.post(`${api}/projects`, {
     headers: H,
-    data: { name: 'E2E-商机5090' },
+    data: { name: `E2E-商机5090-${RUN}` },
   })
   expect(projRes.ok()).toBeTruthy()
   const proj = await projRes.json()
