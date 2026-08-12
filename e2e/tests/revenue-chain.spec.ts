@@ -158,16 +158,27 @@ test('营收全链路串烧：立项→销售合同→采购→设备点亮→�
   const myOption = page.locator('.n-base-select-option', { hasText: custName })
     .filter({ visible: true }).first()
   await expect(myOption).toBeVisible({ timeout: 5000 })
+
+  // 债④根治（2026-08-10，同债③ sn 锚点手法）：选客户 → setSelectedId → watch → loadStatement →
+  // GET /reports/customer-statement?customer_id=<id>（CustomerStatementView.vue:46 watch + :35 GET，无查询按钮，
+  // 选即触发）。并发负载下该查询可达数秒，期间 stmt 仍显示上一客户旧值 → 旧版裸等 30s 偶发命中旧值超时（债④ flake）。
+  // 修法：点选「之前」注册 waitForResponse，谓词钉死 customer_id=cust.id（UUID 全局唯一，绝不误中别 worker
+  // 的客户查询——同「按 sn 定位我的设备」原理）；点选后等「本客户的」查询响应到达且 ok，此时 stmt 已切到
+  // 本客户数据 → 再断言流水明细 DOM（既是加载完成信号又是正确性断言）。
+  // 旧注释「曾试 waitForResponse 谓词偶发不匹配→弃用」根因=谓词没钉 customer_id（或注册晚于请求）；
+  // 钉死唯一 customer_id + 选前注册后此问题消除。
+  const stmtResp = page.waitForResponse(
+    (r) => r.url().includes('/reports/customer-statement')
+         && r.url().includes(`customer_id=${cust.id}`)
+         && r.request().method() === 'GET',
+  )
   await myOption.click()
   await waitForMenu(page, false)
+  const resp = await stmtResp
+  expect(resp.ok(), '本客户对账单查询应成功').toBeTruthy()
 
-  // ⚠️ 组件无 loading 标志、loadStatement 慢时 stmt 仍显示上一客户旧值（并行负载下查询可达数秒）。
-  //   选完我的客户后，直接对「流水明细里我的计费真值 money(B)」做 toBeVisible（30s 预算）：它会在
-  //   stmt 切到本客户数据后出现，既是「加载完成」信号又是正确性断言。money(B) 唯一（本链计费额），
-  //   不会误中上一客户旧值。曾试 waitForResponse 钉 URL，但谓词偶发不匹配（响应到了却未命中）→ 弃用，
-  //   直接断言可见 DOM 更稳，也更贴合「端到端铁律」（验用户真看到的渲染）。
-  //   注意：发票 /pay 后 paid_date 非空 → 流水明细里该发票显示为「回款」（非「开票」）。
+  // 注意：发票 /pay 后 paid_date 非空 → 流水明细里该发票显示为「回款」（非「开票」）。
   const lineCard = page.locator('.n-card', { hasText: '流水明细' })
-  await expect(lineCard.getByText(money(B)), '流水明细应含计费行金额').toBeVisible({ timeout: 30_000 })
+  await expect(lineCard.getByText(money(B)), '流水明细应含计费行金额').toBeVisible({ timeout: 10_000 })
   await expect(lineCard.getByText(money(I)), '流水明细应含回款行金额').toBeVisible({ timeout: 10_000 })
 })

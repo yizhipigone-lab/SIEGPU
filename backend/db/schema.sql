@@ -717,7 +717,50 @@ CREATE INDEX idx_notif_user_created ON notifications(user_id, created_at DESC) W
 CREATE INDEX idx_notif_ref ON notifications(kind, ref_id) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_notifications_updated BEFORE UPDATE ON notifications FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- ============================ 完成：31 张表 ============================
+-- ============================ EBS 接口 Mock（二期 W1-2 新增） ============================
+-- 业财一体化出站基础：SIEGPU→EBS Mock（10 类业务域），entity_version 内容 hash 幂等。
+-- 与 alembic 0010 双写一致；Mock 阶段仅出站，入站属期外里程碑。
+-- 字段映射配置：SIEGPU 字段 ↔ EBS 字段 + 转换规则
+CREATE TABLE ebs_field_mappings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type VARCHAR(40) NOT NULL,
+    siegpu_field VARCHAR(100) NOT NULL,
+    ebs_field VARCHAR(100) NOT NULL,
+    transform_rule VARCHAR(50) NOT NULL DEFAULT 'direct',
+    transform_config JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX idx_ebs_fm_entity_field ON ebs_field_mappings(entity_type, siegpu_field) WHERE deleted_at IS NULL;
+CREATE INDEX idx_ebs_fm_entity ON ebs_field_mappings(entity_type) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_ebs_fm_updated BEFORE UPDATE ON ebs_field_mappings FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 同步日志：每次出站一行，entity_version 内容 hash 做幂等/乱序判定
+CREATE TABLE ebs_sync_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id VARCHAR(64) NOT NULL,
+    entity_version VARCHAR(64) NOT NULL,
+    direction VARCHAR(20) NOT NULL DEFAULT 'SIEGPU_TO_EBS',
+    sync_type VARCHAR(16) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    ebs_reference VARCHAR(64),
+    request_payload JSONB,
+    response_payload JSONB,
+    error_message VARCHAR(500),
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_ebs_sl_entity_version ON ebs_sync_logs(entity_type, entity_id, entity_version);
+CREATE INDEX idx_ebs_sl_entity_status ON ebs_sync_logs(entity_type, status, synced_at DESC);
+CREATE INDEX idx_ebs_sl_retry ON ebs_sync_logs(status, retry_count) WHERE status = 'FAILED';
+CREATE TRIGGER trg_ebs_sl_updated BEFORE UPDATE ON ebs_sync_logs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================ 完成：35 张表 ============================
 -- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
 -- projects, contracts, leasing_processes, leasing_nodes,
 -- capital_transactions, invoices, capital_allocations,
@@ -726,3 +769,4 @@ CREATE TRIGGER trg_notifications_updated BEFORE UPDATE ON notifications FOR EACH
 -- [v3.1 +5表] sales_orders, acceptance_records, funding_replacements,
 -- profit_scenarios, service_confirmations
 -- [一期W1-2 +3表] devices, batch_devices, off_balance_registers
+-- [二期W1-2 +2表] ebs_field_mappings, ebs_sync_logs

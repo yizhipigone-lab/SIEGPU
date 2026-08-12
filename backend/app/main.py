@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.endpoints import (
-    acceptances, auth, assets, billings, capital, confirmations, contracts, dashboard, devices, excel, files, funding, health,
+    acceptances, auth, assets, billings, capital, confirmations, contracts, dashboard, devices, ebs, excel, files, funding, health,
     invoices, leasing, master, notifications, ocr, orders, projects, repayments, reports, sales_orders, workflows,
 )
 from app.core.db import SessionLocal
@@ -51,7 +51,7 @@ app = FastAPI(title="SIEGPU ERP", version="2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # W5：收敛白名单 + 关闭 credentials（鉴权用 Bearer，不用 cookie）
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:5173"],
+    allow_origins=["http://localhost:8088", "http://127.0.0.1:8088", "http://localhost:5173"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -140,3 +140,5 @@ app.include_router(acceptances.router, tags=["acceptances"])
 app.include_router(confirmations.router, tags=["confirmations"])
 app.include_router(funding.router, tags=["funding"])
 app.include_router(workflows.router, tags=["workflows"])
+# 二期 W1-2 新增：EBS 接口 Mock（业财一体化出站骨架）
+app.include_router(ebs.router, prefix="/api/ebs", tags=["ebs"])

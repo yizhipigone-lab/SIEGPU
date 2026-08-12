@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-// 全程走 baseURL(nginx:8080) → /api 反代 backend → db，真实端到端链路。
+// 全程走 baseURL(nginx:8088) → /api 反代 backend → db，真实端到端链路。
 test('登录 → 建项目 → 记流水 → 对账（资金池净头寸）', async ({ request }) => {
   const api = '/api'
   // RUN 后缀：共享 dev-DB 无隔离，每次跑造唯一项目名，globalTeardown 据前缀 E2E- 清理。

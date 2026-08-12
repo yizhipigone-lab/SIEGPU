@@ -6,6 +6,7 @@ from app.models.billing import Billing, Invoice
 from app.models.capital import CapitalAllocation, CapitalTransaction
 from app.models.delivery import DeliveryStage, Order
 from app.models.device import BatchDevice, Device, DeviceStage, OffBalanceRegister
+from app.models.ebs import EbsFieldMapping, EbsSyncLog
 from app.models.funding import FundingReplacement
 from app.models.leasing import LeasingNode, LeasingProcess
 from app.models.long_term_payable import LongTermPayable
@@ -34,6 +35,7 @@ __all__ = [
     "FundingReplacement",
     "Order", "DeliveryStage",
     "Device", "BatchDevice", "DeviceStage", "OffBalanceRegister",
+    "EbsFieldMapping", "EbsSyncLog",
     "AcceptanceRecord",
     "Billing", "Invoice",
     "Repayment",

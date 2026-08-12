@@ -24,6 +24,7 @@ const router = createRouter({
         { path: 'confirmations', name: 'confirmations', component: () => import('../views/ConfirmationsView.vue') },
         { path: 'billing', name: 'billing', component: () => import('../views/BillingsView.vue') },
         { path: 'customer-statement', name: 'customer-statement', component: () => import('../views/CustomerStatementView.vue') },
+        { path: 'ebs', name: 'ebs', component: () => import('../views/EbsMonitor.vue') },
         { path: 'projects/:id/workspace', name: 'workspace', component: () => import('../views/ProjectWorkspace.vue') },
         { path: 'master/:module', name: 'crud', component: () => import('../views/CrudPage.vue') },
       ],

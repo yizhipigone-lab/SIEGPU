@@ -13,12 +13,12 @@ const ACCOUNTS: [string, string][] = [
 for (const [u, role] of ACCOUNTS) {
   test(`浏览器登录 ${u}/sie123 → ${role}`, async ({ page, context }) => {
     await context.clearCookies()
-    await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
+    await page.goto('http://localhost:8088/login', { waitUntil: 'networkidle' })
     await page.evaluate(() => localStorage.clear())
     await page.getByPlaceholder('请输入账号').fill(u)
     await page.getByPlaceholder('请输入密码').fill('sie123')
     await page.getByRole('button', { name: /登.*录/ }).click()
-    await expect(page).toHaveURL('http://localhost:8080/', { timeout: 8000 })
+    await expect(page).toHaveURL('http://localhost:8088/', { timeout: 8000 })
     // 首页用户区应显示对应角色
     await expect(page.locator('body')).toContainText(role)
   })

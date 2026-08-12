@@ -10,7 +10,7 @@ test('调试登录 cfo/sie123', async ({ page }) => {
     if (r.url().includes('/api/')) log.push(`[resp] ${r.request().method()} ${r.url()} → ${r.status()}`)
   })
 
-  await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
+  await page.goto('http://localhost:8088/login', { waitUntil: 'networkidle' })
   log.push(`login page url=${page.url()}`)
 
   await page.getByPlaceholder('请输入账号').fill('cfo')

@@ -6,7 +6,7 @@ import { test, expect, APIRequestContext, Locator, Page } from '@playwright/test
 // 留给浏览器驱动；守门是后端逻辑、UI 只以错误 toast 呈现（脆），故守门走 HTTP 全栈断言。
 // 断言落在「持久表格行」而非「瞬时 toast」：success toast ~3s 自动消失，行才是 durable 信号。
 
-const BASE = 'http://localhost:8080'
+const BASE = 'http://localhost:8088'
 const API = `${BASE}/api`
 const STAGES = ['订货', '在途', '到货', '己方压测', '上架', '客户压测', '点亮验收']
 

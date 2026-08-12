@@ -5,7 +5,7 @@ const log: string[] = []
 
 test('最终验证', async ({ page }) => {
   try {
-    await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
+    await page.goto('http://localhost:8088/login', { waitUntil: 'networkidle' })
     await page.fill('input[placeholder="请输入账号"]', 'cfo')
     await page.fill('input[placeholder="请输入密码"]', 'sie123')
     await page.click('button:has-text("登")')
@@ -14,7 +14,7 @@ test('最终验证', async ({ page }) => {
 
   // 项目详情 → 关联子表
   try {
-    await page.goto('http://localhost:8080/master/projects', { waitUntil: 'domcontentloaded' })
+    await page.goto('http://localhost:8088/master/projects', { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1000)
     const eyeBtn = page.locator('button[title="详情"]').first()
     if (await eyeBtn.count()) {

@@ -8,24 +8,24 @@ test('全页面审计（截图 + 行数 + 控制台错误）', async ({ page }) 
   page.on('pageerror', e => log.push(`[pageerror] ${e.message}`))
 
   // 登录
-  await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
+  await page.goto('http://localhost:8088/login', { waitUntil: 'networkidle' })
   await page.getByPlaceholder('请输入账号').fill('cfo')
   await page.getByPlaceholder('请输入密码').fill('sie123')
   await page.getByRole('button', { name: /登.*录/ }).click()
-  await page.waitForURL('http://localhost:8080/')
+  await page.waitForURL('http://localhost:8088/')
 
   const pages = [
-    ['首页', 'http://localhost:8080/'],
-    ['资金池', 'http://localhost:8080/capital'],
-    ['发票对账', 'http://localhost:8080/invoices'],
-    ['供应商', 'http://localhost:8080/master/suppliers'],
-    ['客户', 'http://localhost:8080/master/customers'],
-    ['设备型号', 'http://localhost:8080/master/equipment'],
-    ['银行', 'http://localhost:8080/master/banks'],
-    ['项目', 'http://localhost:8080/master/projects'],
-    ['合同', 'http://localhost:8080/master/contracts'],
-    ['订单', 'http://localhost:8080/master/orders'],
-    ['资产', 'http://localhost:8080/master/assets'],
+    ['首页', 'http://localhost:8088/'],
+    ['资金池', 'http://localhost:8088/capital'],
+    ['发票对账', 'http://localhost:8088/invoices'],
+    ['供应商', 'http://localhost:8088/master/suppliers'],
+    ['客户', 'http://localhost:8088/master/customers'],
+    ['设备型号', 'http://localhost:8088/master/equipment'],
+    ['银行', 'http://localhost:8088/master/banks'],
+    ['项目', 'http://localhost:8088/master/projects'],
+    ['合同', 'http://localhost:8088/master/contracts'],
+    ['订单', 'http://localhost:8088/master/orders'],
+    ['资产', 'http://localhost:8088/master/assets'],
   ]
 
   for (const [name, url] of pages) {

@@ -24,6 +24,8 @@ devices (sn)                   ``^GPU-``                                     —
 contracts (contract_no)        ``^HT-F``                                     ——
 invoices (invoice_no)          ``^INV-``                                     ——
 notifications (body)           ``E2E-F1-``                                   ——
+ebs_field_mappings (ebs_field) ``^E2E_``                                     ——（二期 W1-2 新表）
+ebs_sync_logs (entity_id)      e2e 客户集合（``客户-E2E``）                   ——（二期 W1-2 新表）
 ============================  ============================================  ========================================
 
 实现要点
@@ -97,7 +99,16 @@ def purge_e2e(db) -> dict:
         res = db.execute(text(f"DELETE FROM {tbl} WHERE {col} ~ :re"), {"re": pat})
         deleted[tbl] = res.rowcount
 
-    # 4) 主数据（客户/供应商/型号）—— 引用它们的子表已清，可安全删
+    # 4) 二期 W1-2 EBS：清测试字段映射（按 ebs_field 前缀 E2E_ 标记）+ 同步日志
+    #    （按 e2e 客户集合；entity_id 是 text，子查询须在客户被删前执行）
+    res = db.execute(text("DELETE FROM ebs_field_mappings WHERE ebs_field ~ :re"), {"re": r"^E2E_"})
+    deleted["ebs_field_mappings"] = res.rowcount
+    res = db.execute(text(
+        "DELETE FROM ebs_sync_logs WHERE entity_id IN (SELECT id::text FROM customers WHERE name ~ :re)"
+    ), {"re": _CUST_RE})
+    deleted["ebs_sync_logs"] = res.rowcount
+
+    # 5) 主数据（客户/供应商/型号）—— 引用它们的子表已清，可安全删
     for tbl, col, pat in [("customers", "name", _CUST_RE),
                           ("suppliers", "name", _SUP_RE),
                           ("equipment_models", "name", _EQ_RE)]:

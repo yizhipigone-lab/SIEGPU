@@ -9,7 +9,7 @@ import {
   Bell, Boxes, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Cpu,
   Eye, EyeOff,
   FileSignature, FileText, FolderKanban, GitCompareArrows, HelpCircle, Landmark, LayoutDashboard, LogOut, Package, Receipt,
-  ShoppingCart, TrendingUp, User, Users, Wallet,
+  Share2, ShoppingCart, TrendingUp, User, Users, Wallet,
   Server,
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
@@ -46,6 +46,7 @@ const allMenuOptions = [
   { label: '客户确认', key: '/confirmations', icon: renderIcon(ClipboardCheck) },
   { label: '计费管理', key: '/billing', icon: renderIcon(Receipt) },
   { label: '客户对账单', key: '/customer-statement', icon: renderIcon(ClipboardList) },
+  { label: 'EBS 监控', key: '/ebs', icon: renderIcon(Share2) },
   { label: '主数据', key: 'g1', type: 'group' as const, children: [
     { label: '供应商', key: '/master/suppliers', icon: renderIcon(Building2) },
     { label: '客户', key: '/master/customers', icon: renderIcon(Users) },
@@ -96,6 +97,7 @@ const TITLE_MAP: Record<string, string> = {
   '/confirmations': '客户确认',
   '/billing': '计费管理',
   '/customer-statement': '客户对账单',
+  '/ebs': 'EBS 监控',
   '/master/suppliers': '供应商',
   '/master/customers': '客户',
   '/master/equipment': '设备型号',
@@ -295,7 +297,22 @@ onUnmounted(() => { if (notifTimer !== undefined) window.clearInterval(notifTime
   font-family: var(--font-heading); font-weight: 700; font-size: 15px;
 }
 .brand-text { font-family: var(--font-heading); font-weight: 700; color: #fff; letter-spacing: .04em; }
-.sidebar :deep(.n-menu) { background: transparent; flex: 1; padding: 8px; }
+/* 菜单可能很多项（含两个分组 + EBS），超过视口时菜单区独立滚动，brand / 收起按钮固定不动。
+   min-height:0 是关键：flex 子项默认 min-height:auto 会被内容撑高，不加它 overflow 不生效、底部项被裁够不着。 */
+.sidebar :deep(.n-menu) {
+  background: transparent;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;                                            /* Firefox */
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+/* 暗色侧栏原生滚动条美化，避免亮色滚动条刺眼（Webkit: Chrome/Edge/Safari） */
+.sidebar :deep(.n-menu)::-webkit-scrollbar { width: 6px; }
+.sidebar :deep(.n-menu)::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+.sidebar :deep(.n-menu)::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+.sidebar :deep(.n-menu)::-webkit-scrollbar-track { background: transparent; }
 .sidebar :deep(.n-menu-item-content) { color: var(--c-sidebar-text); border-radius: 8px; }
 .sidebar :deep(.n-menu-item-content:hover) { background: var(--c-sidebar-hover); }
 .sidebar :deep(.n-menu-item-content--selected) {

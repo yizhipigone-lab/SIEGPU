@@ -3,14 +3,14 @@ import * as fs from 'fs'
 
 test('验证金租+发票+详情新功能', async ({ page }) => {
   const log: string[] = []
-  await page.goto('http://localhost:8080/login', { waitUntil: 'networkidle' })
+  await page.goto('http://localhost:8088/login', { waitUntil: 'networkidle' })
   await page.fill('input[placeholder="请输入账号"]', 'cfo')
   await page.fill('input[placeholder="请输入密码"]', 'sie123')
   await page.click('button:has-text("登")')
   await page.waitForTimeout(1500)
 
   // 1. 金租流程页
-  await page.goto('http://localhost:8080/leasing', { waitUntil: 'domcontentloaded' })
+  await page.goto('http://localhost:8088/leasing', { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1000)
   const leasingRows = await page.locator('table tbody tr').count()
   const leasingText = await page.locator('body').innerText().catch(() => '')
@@ -28,7 +28,7 @@ test('验证金租+发票+详情新功能', async ({ page }) => {
   }
 
   // 3. 发票页（OCR 按钮）
-  await page.goto('http://localhost:8080/invoices', { waitUntil: 'domcontentloaded' })
+  await page.goto('http://localhost:8088/invoices', { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(800)
   const invText = await page.locator('body').innerText().catch(() => '')
   log.push(`发票: 有OCR=${invText.includes('OCR')}, 有对账=${invText.includes('对账')}`)
@@ -43,7 +43,7 @@ test('验证金租+发票+详情新功能', async ({ page }) => {
   }
 
   // 4. 合同详情 + 上传
-  await page.goto('http://localhost:8080/master/contracts', { waitUntil: 'domcontentloaded' })
+  await page.goto('http://localhost:8088/master/contracts', { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(800)
   const eyeBtn = page.locator('button[title="详情"]').first()
   if (await eyeBtn.count()) {
