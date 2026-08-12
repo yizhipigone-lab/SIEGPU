@@ -3,7 +3,7 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NDatePicker, NDescriptions, NDescriptionsItem, NDrawer, NDrawerContent, NEmpty,
-  NForm, NFormItem, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace,
+  NAlert, NDivider, NForm, NFormItem, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace,
   NTabPane, NTabs, NTag, NTooltip, NUpload, useMessage,
 } from 'naive-ui'
 import { Eye, FileText, HelpCircle, Pencil, Plus, Trash2, Workflow } from 'lucide-vue-next'
@@ -59,7 +59,8 @@ const activeAction = ref<DetailAction | null>(null)
 const actionForm = reactive<Record<string, any>>({})
 
 function blankForm() {
-  props.config.fields.forEach((f) => { form[f.key] = f.type === 'number' ? null : '' })
+  // select 默认 null（非 ''）：'' 会被后端 Literal 枚举拒绝（如合同判定三字段）
+  props.config.fields.forEach((f) => { form[f.key] = (f.type === 'number' || f.type === 'select') ? null : '' })
 }
 async function refresh() {
   loading.value = true
@@ -90,7 +91,7 @@ function openCreate() {
 }
 function openEdit(row: any) {
   editing.value = row
-  props.config.fields.forEach((f) => { form[f.key] = row[f.key] ?? (f.type === 'number' ? null : '') })
+  props.config.fields.forEach((f) => { form[f.key] = row[f.key] ?? ((f.type === 'number' || f.type === 'select') ? null : '') })
   showModal.value = true
 }
 async function openDetail(row: any) {
@@ -100,15 +101,17 @@ async function openDetail(row: any) {
   stages.value = []
   // 交付阶段（stageFlow 模块：拉详情里的 stages）
   if (props.config.stageFlow) await loadStages(row.id)
-  // 拉关联子表
-  if (props.config.detailTabs?.length) {
-    for (const tab of props.config.detailTabs) {
-      try {
-        const params = tab.paramKey ? { [tab.paramKey]: row.id } : {}
-        const { data } = await api.get(tab.endpoint, { params })
-        tabData.value[tab.label] = data.items || []
-      } catch { tabData.value[tab.label] = [] }
-    }
+  await loadTabs(row.id)
+}
+async function loadTabs(rowId: string) {
+  // 拉关联子表（业务操作成功后也会重拉，防 tab 展示操作前旧数据——W9-10 变更记录实测踩中）
+  if (!props.config.detailTabs?.length) return
+  for (const tab of props.config.detailTabs) {
+    try {
+      const params = tab.paramKey ? { [tab.paramKey]: rowId } : {}
+      const { data } = await api.get(tab.endpoint, { params })
+      tabData.value[tab.label] = data.items || []
+    } catch { tabData.value[tab.label] = [] }
   }
 }
 async function loadStages(orderId: string) {
@@ -145,6 +148,32 @@ async function del(row: any) {
   catch (e: any) { msg.error(errMsg(e)) }
 }
 
+// 二期 W3-4：合同「核算判定信息」实时预览（纯函数预览端点，不落库；300ms 防抖）
+const judgePreview = ref<{ method: string | null; rule: string; basis: string } | null>(null)
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => [form.project_id, form.type, form.pricing_authority, form.inventory_risk_bearer, form.principal_role],
+  () => {
+    if (!props.config.revenueJudge) return
+    judgePreview.value = null
+    if (!form.project_id || !form.type) return
+    if (previewTimer) clearTimeout(previewTimer)
+    previewTimer = setTimeout(async () => {
+      try {
+        const { data } = await api.get('/contracts/judge-preview', {
+          params: {
+            project_id: form.project_id, type: form.type,
+            pricing_authority: form.pricing_authority || undefined,
+            inventory_risk_bearer: form.inventory_risk_bearer || undefined,
+            principal_role: form.principal_role || undefined,
+          },
+        })
+        judgePreview.value = data
+      } catch { judgePreview.value = null }
+    }, 300)
+  },
+)
+
 // 文件上传
 const uploadUrl = computed(() => `/api/files/${props.config.uploadEntity}/${detailRow.value?.id}/upload`)
 const uploadHeaders = computed(() => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` }))
@@ -173,21 +202,29 @@ const visibleActions = computed(() =>
 )
 function triggerAction(act: DetailAction) {
   activeAction.value = act
-  act.fields?.forEach(f => { actionForm[f.key] = '' })
+  act.fields?.forEach(f => { actionForm[f.key] = f.type === 'select' ? null : '' })
   if (act.fields?.length) { showActionModal.value = true } else { submitAction() }
 }
 async function submitAction() {
   if (!activeAction.value || !detailRow.value) return
   const act = activeAction.value
+  // 必填校验（如人工覆盖核算路径的「原因」）
+  const missing = (act.fields || [])
+    .filter((f: any) => f.required && (actionForm[f.key] === null || actionForm[f.key] === undefined || actionForm[f.key] === ''))
+    .map((f: any) => f.label)
+  if (missing.length) { msg.warning(`请填写必填项：${missing.join('、')}`); return }
   try {
     const url = `${act.endpoint}/${detailRow.value.id}${act.action}`
-    if (act.method === 'PATCH') await api.patch(url, { ...actionForm })
-    else await api.post(url, { ...actionForm })
+    // 剥空串/null：可选数值字段（如变更的新金额）空串会被后端 Decimal 校验 422
+    const body = Object.fromEntries(Object.entries({ ...actionForm }).filter(([, v]) => v !== '' && v !== null && v !== undefined))
+    if (act.method === 'PATCH') await api.patch(url, body)
+    else await api.post(url, body)
     msg.success(act.successMsg || '操作成功')
     showActionModal.value = false
     await refresh()
     const updated = items.value.find((i: any) => i.id === detailRow.value?.id)
     if (updated) detailRow.value = updated
+    if (detailRow.value) await loadTabs(detailRow.value.id)  // 操作落库 → 重拉聚合 tabs（变更记录等）
   } catch (e: any) {
     msg.error(errMsg(e))
   }
@@ -301,7 +338,9 @@ const tableColumns = computed(() => {
     <!-- 新增/编辑 -->
     <n-modal v-model:show="showModal" preset="card" :title="editing ? '编辑' : '新增'" style="width:520px;max-width:94vw">
       <n-form label-placement="left" :label-width="140">
-        <n-form-item v-for="f in config.fields" :key="f.key" :required="f.required" :show-feedback="false">
+        <template v-for="f in config.fields" :key="f.key">
+          <n-divider v-if="f.section" style="margin:6px 0 14px;font-size:13px">{{ f.section }}</n-divider>
+        <n-form-item :required="f.required" :show-feedback="false">
           <template #label>
             {{ f.label }}
             <n-tooltip v-if="f.hint" trigger="hover">
@@ -313,7 +352,7 @@ const tableColumns = computed(() => {
           </template>
           <div style="width:100%">
             <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
-            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" />
+            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" clearable />
             <n-input-number v-else-if="f.type === 'number'" v-model:value="form[f.key]" :status="fieldWarn(f) ? 'warning' : undefined" style="width:100%" />
             <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
               :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />
@@ -321,7 +360,20 @@ const tableColumns = computed(() => {
             <div v-if="fieldWarn(f)" class="tiny" style="color:#D97706;margin-top:2px">⚠ {{ fieldWarn(f) }}</div>
           </div>
         </n-form-item>
+        </template>
       </n-form>
+      <!-- 二期 W3-4：核算判定实时预览（纯函数预览，保存后才落库） -->
+      <n-alert v-if="config.revenueJudge && judgePreview" :type="judgePreview.method ? 'info' : 'warning'"
+        :bordered="false" style="margin-top:4px" data-testid="judge-preview">
+        <template v-if="judgePreview.method">
+          判定预览：<b>{{ judgePreview.method }}</b>（{{ judgePreview.rule }}）<br />
+          <span class="tiny">{{ judgePreview.basis }}</span>
+        </template>
+        <template v-else>{{ judgePreview.basis }}</template>
+      </n-alert>
+      <n-alert v-else-if="config.revenueJudge && form.type === 'PURCHASE'" type="default" :bordered="false" style="margin-top:4px" data-testid="judge-preview">
+        采购合同属成本侧，不参与收入核算路径判定
+      </n-alert>
       <template #footer><n-space justify="end"><n-button @click="showModal = false">取消</n-button><n-button type="primary" @click="submit">保存</n-button></n-space></template>
     </n-modal>
 
@@ -336,6 +388,20 @@ const tableColumns = computed(() => {
             <span v-else>{{ detailRow[f.key] ?? '-' }}</span>
           </n-descriptions-item>
         </n-descriptions>
+
+        <!-- 二期 W3-4：核算判定信息（判定依据 + 确认留痕） -->
+        <div v-if="config.revenueJudge && detailRow?.revenue_method" style="margin-top:20px" data-testid="judge-detail">
+          <div class="muted" style="margin-bottom:8px;font-weight:600">核算判定信息</div>
+          <n-alert type="info" :bordered="false">
+            <div>核算路径：<b>{{ detailRow.revenue_method }}</b>
+              <n-tag v-if="detailRow.method_confirmed_at" size="tiny" type="success" :bordered="false" style="margin-left:6px">已人工确认</n-tag>
+            </div>
+            <div class="tiny" style="margin-top:4px">{{ detailRow.method_judge_basis }}</div>
+            <div v-if="detailRow.method_confirmed_at" class="tiny muted" style="margin-top:4px">
+              确认时间：{{ String(detailRow.method_confirmed_at).slice(0, 19).replace('T', ' ') }}
+            </div>
+          </n-alert>
+        </div>
 
         <!-- 文件上传 -->
         <div v-if="config.fileUpload && detailRow" style="margin-top:20px">
@@ -396,9 +462,10 @@ const tableColumns = computed(() => {
     <!-- 业务操作弹窗 -->
     <n-modal v-model:show="showActionModal" preset="card" :title="activeAction?.label || '操作'" style="width:340px">
       <n-form label-placement="left" :label-width="120">
-        <n-form-item v-for="f in activeAction?.fields || []" :key="f.key" :label="f.label">
+        <n-form-item v-for="f in activeAction?.fields || []" :key="f.key" :label="f.label" :required="(f as any).required">
           <n-date-picker v-if="f.type === 'date'" type="date" style="width:100%"
             :value="ymdToTs(actionForm[f.key])" @update:value="(ts: number | null) => actionForm[f.key] = tsToYmd(ts)" />
+          <n-select v-else-if="f.type === 'select'" v-model:value="actionForm[f.key]" :options="(f as any).options" style="width:100%" />
           <n-input v-else v-model:value="actionForm[f.key]" />
         </n-form-item>
       </n-form>

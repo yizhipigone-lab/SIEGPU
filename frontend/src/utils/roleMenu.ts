@@ -29,6 +29,10 @@ export const ROLE_MENU: Record<string, readonly string[]> = {
     '/confirmations', '/devices',
     '/master/assets', '/master/banks', '/master/projects', '/master/orders',
     '/ebs', // 二期 W1-2：业财一体化 EBS 出站监控
+    '/exchange-rates', // 二期 W5-6：币种与汇率管理
+    '/insurance', // 二期 W7-8：保险管理
+    '/prepayments', // 二期 W9-10：预付款台账
+    '/payments', // 二期 W11-12：付款管控+审批中心
   ],
   // 采购对接人（兼商务）：设备 / 项目 / 合同 / 订单 + 主数据维护（供应商/客户/设备型号）
   PROCUREMENT: [

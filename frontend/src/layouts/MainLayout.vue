@@ -6,10 +6,11 @@ import {
   NLayoutHeader, NMenu, NPopover,
 } from 'naive-ui'
 import {
-  Bell, Boxes, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Cpu,
+  Bell, Boxes, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Coins, Cpu,
   Eye, EyeOff,
   FileSignature, FileText, FolderKanban, GitCompareArrows, HelpCircle, Landmark, LayoutDashboard, LogOut, Package, Receipt,
-  Share2, ShoppingCart, TrendingUp, User, Users, Wallet,
+  Share2, ShieldCheck, ShoppingCart, TrendingUp, User, Users, Wallet,
+  BadgeCheck, PiggyBank,
   Server,
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
@@ -47,6 +48,10 @@ const allMenuOptions = [
   { label: '计费管理', key: '/billing', icon: renderIcon(Receipt) },
   { label: '客户对账单', key: '/customer-statement', icon: renderIcon(ClipboardList) },
   { label: 'EBS 监控', key: '/ebs', icon: renderIcon(Share2) },
+  { label: '币种汇率', key: '/exchange-rates', icon: renderIcon(Coins) },
+  { label: '保险管理', key: '/insurance', icon: renderIcon(ShieldCheck) },
+  { label: '预付款', key: '/prepayments', icon: renderIcon(PiggyBank) },
+  { label: '付款管控', key: '/payments', icon: renderIcon(BadgeCheck) },
   { label: '主数据', key: 'g1', type: 'group' as const, children: [
     { label: '供应商', key: '/master/suppliers', icon: renderIcon(Building2) },
     { label: '客户', key: '/master/customers', icon: renderIcon(Users) },
@@ -98,6 +103,10 @@ const TITLE_MAP: Record<string, string> = {
   '/billing': '计费管理',
   '/customer-statement': '客户对账单',
   '/ebs': 'EBS 监控',
+  '/exchange-rates': '币种与汇率',
+  '/insurance': '保险管理',
+  '/prepayments': '预付款台账',
+  '/payments': '付款管控',
   '/master/suppliers': '供应商',
   '/master/customers': '客户',
   '/master/equipment': '设备型号',

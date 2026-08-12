@@ -30,11 +30,14 @@ async function loadCustomers() {
 }
 
 async function loadStatement() {
-  if (!selectedId.value) { stmt.value = null; return }
+  const id = selectedId.value
+  if (!id) { stmt.value = null; return }
   try {
-    const { data } = await api.get('/reports/customer-statement', { params: { customer_id: selectedId.value } })
-    stmt.value = data
-  } catch (e: any) { msg.error(errMsg(e)); stmt.value = null }
+    const { data } = await api.get('/reports/customer-statement', { params: { customer_id: id } })
+    // 防乱序覆盖：挂载自动选第一名 + 手动点选会连发两请求，慢的旧响应不得盖掉新选择的明细
+    // （2026-08-12 全套并发下实测踩中：别人的对账单晚到 0.x 秒覆盖了我的，revenue-chain 断言错数据）
+    if (selectedId.value === id) stmt.value = data
+  } catch (e: any) { if (selectedId.value === id) { msg.error(errMsg(e)); stmt.value = null } }
 }
 
 const customerOpts = () => customers.value.map((c: any) => ({

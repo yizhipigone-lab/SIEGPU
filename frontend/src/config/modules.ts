@@ -20,6 +20,7 @@ export interface FieldConfig {
   remoteOptions?: RemoteOptions // 远程下拉（消灭 UUID 手填）
   hint?: string               // 字段术语大白话气泡（小白友好），见 utils/glossary.ts
   validate?: (value: any) => string | undefined  // 即时校验（小白防误填）：返回警告文案则标黄，见 utils/validators.ts
+  section?: string            // 分组标题：表单中在该字段前渲染分割线（如「核算判定信息」）
 }
 
 export interface CrudConfig {
@@ -39,6 +40,7 @@ export interface CrudConfig {
   stageFlow?: boolean       // 详情抽屉展示交付阶段列表 + 推进按钮（GET {apiPath}/{id}.stages，PATCH {apiPath}/delivery-stages/{stageId}）
   workspaceLink?: boolean   // 行操作列加「工作台」入口，跳 /projects/{id}/workspace（项目模块用）
   pdfExport?: boolean       // 行操作列加「PDF」按钮，blob 下载 {apiPath}/{id}/pdf 实时生成（F4，不落库）
+  revenueJudge?: boolean    // 二期 W3-4：合同表单「核算判定信息」区实时预览判定结果（GET /contracts/judge-preview）
 }
 
 export interface DetailAction {
@@ -47,7 +49,7 @@ export interface DetailAction {
   action: string
   method?: 'POST' | 'PATCH'
   showWhen?: (row: any) => boolean
-  fields?: { key: string; label: string; type?: 'date' }[]
+  fields?: { key: string; label: string; type?: 'date' | 'select'; options?: { label: string; value: string }[]; required?: boolean }[]
   successMsg?: string
   tooltip?: string           // 按钮释义（NTooltip）
 }
@@ -67,6 +69,11 @@ const SUP_TYPE = [
 ]
 const EQ_CAT = [{ label: '大卡', value: '大卡' }, { label: '小卡', value: '小卡' }, { label: '组网设备', value: '组网设备' }]
 const CONTRACT_TYPE = [{ label: '销售 SALES', value: 'SALES' }, { label: '采购 PURCHASE', value: 'PURCHASE' }]
+// 二期 W3-4：收入核算路径判定枚举（与后端 contracts CHECK / revenue_rules 一致）
+const PRICING_AUTHORITY = ['自主定价', '客户定价', '上游定价'].map((v) => ({ label: v, value: v }))
+const INVENTORY_RISK = ['我方', '客户', '上游'].map((v) => ({ label: v, value: v }))
+const PRINCIPAL_ROLE = ['主要责任人', '代理人'].map((v) => ({ label: v, value: v }))
+const REVENUE_METHOD = ['总额法', '净额法', '经营租赁', '服务费', '待判定'].map((v) => ({ label: v, value: v }))
 
 export const MODULES: Record<string, CrudConfig> = {
   suppliers: {
@@ -146,10 +153,45 @@ export const MODULES: Record<string, CrudConfig> = {
   },
   contracts: {
     title: '合同', apiPath: '/contracts',
-    columns: ['contract_no', 'type', 'direction', 'amount', 'status'],
-    labels: { contract_no: '合同号', type: '类型', direction: '方向', amount: '金额', status: '状态' },
-    tagKeys: ['type', 'direction', 'status'], numKeys: ['amount'],
+    columns: ['contract_no', 'type', 'direction', 'amount', 'status', 'revenue_method'],
+    labels: { contract_no: '合同号', type: '类型', direction: '方向', amount: '金额', status: '状态', revenue_method: '核算路径' },
+    tagKeys: ['type', 'direction', 'status', 'revenue_method'], numKeys: ['amount'],
     fileUpload: true, uploadEntity: 'contracts', pdfExport: true,
+    revenueJudge: true,
+    detailTabs: [
+      { label: '发票', endpoint: '/invoices', paramKey: 'contract_id', columns: ['invoice_no', 'amount', 'status'], labels: { invoice_no: '发票号', amount: '金额', status: '状态' } },
+      { label: '计费单', endpoint: '/billings', paramKey: 'contract_id', columns: ['period_label', 'amount', 'status'], labels: { period_label: '期间', amount: '金额(含税)', status: '状态' } },
+      { label: '变更记录', endpoint: '/contracts/amendments', paramKey: 'contract_id', columns: ['amendment_date', 'change_type', 'reason'], labels: { amendment_date: '变更日', change_type: '类型', reason: '原因' } },
+      { label: '终止记录', endpoint: '/contracts/terminations', paramKey: 'contract_id', columns: ['termination_date', 'reason', 'settlement_note'], labels: { termination_date: '终止日', reason: '原因', settlement_note: '结算说明' } },
+    ],
+    detailActions: [
+      { label: '人工确认核算路径', endpoint: '/contracts', action: '/confirm-method',
+        fields: [
+          { key: 'method', label: '核算路径', type: 'select', options: REVENUE_METHOD, required: true },
+          { key: 'reason', label: '覆盖/确认原因', required: true },
+        ],
+        showWhen: (r: any) => r.type === 'SALES',
+        tooltip: '确认系统判定结果，或判定有误时人工覆盖；原因必填，全程留痕（审计 + 确认人/时间）',
+        successMsg: '核算路径已确认/覆盖' },
+      { label: '合同变更', endpoint: '/contracts', action: '/amendments',
+        fields: [
+          { key: 'change_type', label: '变更类型', type: 'select', options: ['金额变更', '月租变更', '期限变更', '其他'].map((v) => ({ label: v, value: v })), required: true },
+          { key: 'new_amount', label: '新合同金额(可空)' },
+          { key: 'new_monthly_rent', label: '新月租(可空)' },
+          { key: 'reason', label: '变更原因', required: true },
+        ],
+        showWhen: (r: any) => r.status !== '已终止',
+        tooltip: '金额/月租至少改一项；变更落合同即对未来期计费生效，前后快照留痕并同步 EBS',
+        successMsg: '变更已生效' },
+      { label: '合同终止', endpoint: '/contracts', action: '/terminate',
+        fields: [
+          { key: 'reason', label: '终止原因', required: true },
+          { key: 'settlement_note', label: '结算说明(可空)' },
+        ],
+        showWhen: (r: any) => r.status !== '已终止',
+        tooltip: '终止后合同不可再变更/计费请谨慎；终止记录留痕并同步 EBS',
+        successMsg: '合同已终止' },
+    ],
     fields: [
       { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
       { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE, required: true },
@@ -157,6 +199,9 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'amount', label: '合同金额(不含税,元)', type: 'number', required: true, hint: glossary('amount'), validate: validators.positiveAmount },
       { key: 'monthly_rent', label: '月租(含税,销售,元/月)', type: 'number', hint: glossary('monthly_rent'), validate: validators.positiveAmount },
       { key: 'contract_no', label: '合同号' },
+      { key: 'pricing_authority', label: '定价权', type: 'select', options: PRICING_AUTHORITY, section: '核算判定信息（销售合同）', hint: '谁决定卖价：我方自主定价 / 客户说了算 / 上游供应商说了算（收入核算判定输入）' },
+      { key: 'inventory_risk_bearer', label: '存货风险承担', type: 'select', options: INVENTORY_RISK, hint: '设备卖不掉/跌价的风险谁扛：我方 / 客户 / 上游（收入核算判定输入）' },
+      { key: 'principal_role', label: '我方角色', type: 'select', options: PRINCIPAL_ROLE, hint: '主要责任人=对交付负全责（倾向总额法）；代理人=只撮合赚差价（倾向净额法）' },
     ],
   },
   orders: {
