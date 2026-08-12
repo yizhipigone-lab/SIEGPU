@@ -108,4 +108,16 @@ def compute_alerts(db: Session) -> list[dict]:
         alerts.append({"level": "警告", "code": "WORKFLOW_STUCK",
                        "message": f"项目「{pname}」工作流停滞超过 14 天", "ref_id": str(w.project_id)})
 
+    # 9. 保单到期（<30天，续保提醒；二期 W7-8）
+    from app.models.insurance import InsurancePolicy
+    for p in db.execute(
+        select(InsurancePolicy).where(
+            InsurancePolicy.end_date.is_not(None), InsurancePolicy.end_date <= horizon,
+            InsurancePolicy.end_date >= today, InsurancePolicy.status.in_(["已生效", "理赔中"]))
+    ).scalars():
+        days_left = (p.end_date - today).days
+        alerts.append({"level": "提示", "code": "POLICY_EXPIRING",
+                       "message": f"{p.policy_type}保单 {p.policy_no or str(p.id)[:8]} 将于 {days_left} 天后到期，请安排续保",
+                       "ref_id": str(p.id)})
+
     return alerts

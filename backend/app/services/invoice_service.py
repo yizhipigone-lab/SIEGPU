@@ -13,7 +13,8 @@ from .contract_service import get_contract_or_404
 
 
 def create_invoice(db: Session, *, contract_id, amount: Decimal, invoice_no=None,
-                   issue_date=None, due_date=None, paid_date=None, file_path=None) -> Invoice:
+                   issue_date=None, due_date=None, paid_date=None, file_path=None,
+                   currency_code=None, invoice_rate=None) -> Invoice:
     c = get_contract_or_404(db, contract_id)
     ex, tax = _split(amount, c.tax_rate)
     # 超开拦截：Σ已有不含税 + 新增不含税 > 合同额 × (1 + tolerance)
@@ -30,6 +31,8 @@ def create_invoice(db: Session, *, contract_id, amount: Decimal, invoice_no=None
         contract_id=contract_id, direction=c.direction, invoice_no=invoice_no, amount=amount,
         amount_ex_tax=ex, tax_amount=tax, tax_rate=c.tax_rate, issue_date=issue_date, due_date=due_date,
         paid_date=paid_date, status="已开", file_path=file_path,
+        # 二期 W5-6：未显式给币种时继承合同币种（外币合同开外币票），率按开票日口径由调用方给
+        currency_code=currency_code or c.currency_code, invoice_rate=invoice_rate,
     )
     db.add(inv)
     db.flush()
@@ -114,6 +117,59 @@ def reverse_invoice(db: Session, *, invoice_id, reversed_by, note: str = "红冲
     return inv, rev
 
 
+# —— 二期 W11-12：进项税认证/抵扣（审计 A10） ——
+
+def certify_invoice(db: Session, *, invoice_id, certification_date, actor_id=None) -> Invoice:
+    """进项认证：仅采购发票（PAYABLE）；未认证/NULL → 已认证。"""
+    inv = db.get(Invoice, invoice_id)
+    if not inv or inv.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "发票不存在", 404)
+    if inv.direction != "PAYABLE":
+        raise BusinessError("BAD_REQUEST", "仅采购发票参与进项认证", 400)
+    if inv.certification_status in ("已认证", "已抵扣"):
+        raise BusinessError("DUPLICATE", f"发票已{inv.certification_status}", 409)
+    inv.certification_status = "已认证"
+    inv.certification_date = certification_date
+    db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=actor_id, action="UPDATE", target_type="invoice",
+               target_id=inv.id, after_json={"certification_status": "已认证"})
+    return inv
+
+
+def deduct_invoice(db: Session, *, invoice_id, actor_id=None) -> Invoice:
+    """进项抵扣：已认证 → 已抵扣。"""
+    inv = db.get(Invoice, invoice_id)
+    if not inv or inv.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "发票不存在", 404)
+    if inv.certification_status != "已认证":
+        raise BusinessError("ILLEGAL_TRANSITION", "发票须先认证再抵扣", 409)
+    inv.certification_status = "已抵扣"
+    db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=actor_id, action="UPDATE", target_type="invoice",
+               target_id=inv.id, after_json={"certification_status": "已抵扣"})
+    return inv
+
+
+def input_tax_ledger(db: Session, *, project_id=None) -> list[dict]:
+    """进项税台账：采购发票按认证状态聚合（不含税额/税额分列）。"""
+    stmt = (select(Invoice.certification_status, func.count(Invoice.id),
+                   func.coalesce(func.sum(Invoice.amount_ex_tax), 0),
+                   func.coalesce(func.sum(Invoice.tax_amount), 0))
+            .where(Invoice.direction == "PAYABLE", Invoice.deleted_at.is_(None),
+                   Invoice.status != "已红冲")
+            .group_by(Invoice.certification_status))
+    if project_id:
+        stmt = stmt.join(Contract, Invoice.contract_id == Contract.id).where(
+            Contract.project_id == project_id)
+    rows = []
+    for status, cnt, ex, tax in db.execute(stmt).all():
+        rows.append({"certification_status": status or "未认证", "count": cnt,
+                     "amount_ex_tax": q2(ex), "tax_amount": q2(tax)})
+    return rows
+
+
 # —— v3.1 发票池 + 核销 ——
 
 def pool_query(db: Session, *, direction: str | None = None,
@@ -187,6 +243,9 @@ def reconcile_invoice(db: Session, *, invoice_id, txn_id,
             inv.paid_date = txn.transaction_date
 
     db.flush()
+    # 二期 W5-6：外币核销 → 汇兑损益落账（同币种非本币 + 双率齐全才算；0 不落；不填 invoice_id 防污染核销口径）
+    from app.services import exchange_service as _fx
+    _fx.maybe_book_exchange_diff(db, invoice=inv, txn=txn, actor_id=reconciled_by)
     from app.services import audit_service as _audit
     _audit.log(db, user_id=reconciled_by, action="RECONCILE", target_type="invoice",
                target_id=inv.id, after_json={"amount": str(inv.amount), "matched": str(matched)})

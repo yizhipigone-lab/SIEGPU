@@ -26,6 +26,7 @@ def create_invoice(payload: InvoiceCreate, db: Session = Depends(get_db), user: 
     inv = svc.create_invoice(
         db, contract_id=payload.contract_id, amount=payload.amount, invoice_no=payload.invoice_no,
         issue_date=payload.issue_date, due_date=payload.due_date, file_path=payload.file_path,
+        currency_code=payload.currency_code, invoice_rate=payload.invoice_rate,
     )
     db.commit()
     return InvoiceOut.model_validate(inv)
@@ -77,3 +78,29 @@ def reconcile_inv(invoice_id: UUID, txn_id: UUID,
     inv = svc.reconcile_invoice(db, invoice_id=invoice_id, txn_id=txn_id, reconciled_by=user.id)
     db.commit()
     return InvoiceOut.model_validate(inv).model_dump(mode="json")
+
+
+# —— 二期 W11-12：进项税认证/抵扣 + 台账 ——
+
+@router.post("/{invoice_id}/certify", response_model=InvoiceOut)
+def certify(invoice_id: UUID, payload: MarkPaid, db: Session = Depends(get_db),
+            user: User = Depends(get_current_user)):
+    """进项认证（复用 MarkPaid 的 paid_date 字段传认证日期）。"""
+    inv = svc.certify_invoice(db, invoice_id=invoice_id, certification_date=payload.paid_date,
+                              actor_id=user.id)
+    db.commit()
+    return InvoiceOut.model_validate(inv)
+
+
+@router.post("/{invoice_id}/deduct", response_model=InvoiceOut)
+def deduct(invoice_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    inv = svc.deduct_invoice(db, invoice_id=invoice_id, actor_id=user.id)
+    db.commit()
+    return InvoiceOut.model_validate(inv)
+
+
+@router.get("/input-tax-ledger")
+def input_tax_ledger(project_id: UUID | None = None,
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """进项税台账：采购发票按认证状态聚合（不含税/税额分列）。"""
+    return {"items": svc.input_tax_ledger(db, project_id=project_id)}

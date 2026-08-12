@@ -32,6 +32,8 @@ class Device(UUIDPK, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default="订货", nullable=False)
     ownership: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 表内自有/金租表外/转售表外
     prepayment_settled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 一期 W7-8：售后回租预付款结转标记（回租出售时置 True）
+    # 二期 W9-10（D2 裁定）：预付款累计已结转额，复用 devices 单源（不建 prepayments 表）；NULL 按 0 计
+    prepayment_settled_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
 
 
 class DeviceStage(UUIDPK, TimestampMixin, Base):

@@ -46,13 +46,10 @@ IMPORT_COLS = ["sn", "leasing_mode", "monthly_price", "purchase_value", "prepaym
 
 
 def generate_sn(db: Session) -> str:
-    """GPU-{yyyymm}-{seq5}：取当月前缀下最大序号 +1。同事务内调用，配合 SN 唯一约束兜底。"""
-    prefix = f"GPU-{date.today():%Y%m}-"
-    last = db.execute(
-        select(Device.sn).where(Device.sn.like(f"{prefix}%")).order_by(Device.sn.desc()).limit(1)
-    ).scalar_one_or_none()
-    seq = int(last.rsplit("-", 1)[1]) + 1 if last else 1
-    return f"{prefix}{seq:05d}"
+    """GPU-{yyyymm}-{seq5}：二期 W9-10 起委托 doc_number_service（规则表回迁，A8）。
+    生成结果与一期硬编码完全一致：规则初始化从存量设备读当月最大 seq 接续（test_doc_number 锁死）。"""
+    from app.services import doc_number_service
+    return doc_number_service.generate_device_sn(db)
 
 
 def create_device(db: Session, *, project_id, equipment_model_id, sn=None, order_id=None,
@@ -453,6 +450,16 @@ def advance_device_stage(db: Session, *, device_id, stage, status,
     db.flush()
     # W5-6：上架建卡 / 点亮激活 的资产同步（D1 两段式生命周期）
     _sync_device_asset(db, d, stage, status, actual_date, operator_id=operator_id)
+    # 二期 W7-8：自动投保 hook（advisory——无配置/异常只记日志，绝不阻塞设备推进）
+    try:
+        from app.services import insurance_service as _ins
+        if stage == "在途" and status in ("进行中", "已完成") and d.batch_id:
+            _ins.maybe_auto_transport_policy(db, batch_id=d.batch_id, operator_id=operator_id)
+        elif stage == "点亮验收" and status == "已完成":
+            _ins.maybe_auto_property_policy(db, device=d, operator_id=operator_id)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("insurance auto-policy hook failed: device=%s stage=%s", d.id, stage)
     if d.batch_id:
         _sync_batch_status(db, d.batch_id)
         # W7-8 D3：点亮验收完成 → 批次放款达成率达阈值 → 自动建金租融资申请（幂等哨兵防二建）

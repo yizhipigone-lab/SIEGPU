@@ -21,6 +21,10 @@ class TransactionCreate(BaseModel):
     contract_id: UUID | None = None
     leasing_process_id: UUID | None = None
     idempotency_key: str | None = None
+    # 二期 W5-6：外币收付（amount=交易币种金额；base_amount=人民币，仅外币有值）
+    currency_code: str | None = None
+    settlement_rate: Decimal | None = Field(None, gt=0)
+    base_amount: Decimal | None = Field(None, ge=0)
 
 
 class TransactionOut(BaseModel):
@@ -34,6 +38,9 @@ class TransactionOut(BaseModel):
     note: str | None
     idempotency_key: str | None
     is_reversal: bool
+    currency_code: str | None = None
+    settlement_rate: Decimal | None = None
+    base_amount: Decimal | None = None
 
     model_config = {"from_attributes": True}
 

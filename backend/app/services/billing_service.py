@@ -19,6 +19,19 @@ def _light_on_date(db: Session, order_id):
     return st.actual_date
 
 
+def _fx_inherit(db: Session, c, billing_date) -> dict:
+    """二期 W5-6：计费单继承合同币种；booked_rate 按计费日取汇率（最近不未来）。
+    无汇率记录 → booked_rate 留 NULL（不阻断计费主流程；率缺失只影响后续汇兑计算的前置数据）。"""
+    if not c.currency_code:
+        return {}
+    from app.services import exchange_service as _fx
+    try:
+        rate = _fx.get_rate(db, c.currency_code, _fx.base_currency_code(db), billing_date)
+    except BusinessError:
+        rate = None
+    return {"currency_code": c.currency_code, "booked_rate": rate}
+
+
 def generate_billing(db: Session, *, order_id, contract_id, period_index: int, billing_date,
                      created_by, idempotency_key: str | None = None) -> Billing:
     o = db.get(Order, order_id)
@@ -58,6 +71,7 @@ def generate_billing(db: Session, *, order_id, contract_id, period_index: int, b
         period_index=period_index, period_label=f"{billing_date.year}-{billing_date.month:02d}",
         billing_date=billing_date, days_in_period=days, amount=amount, amount_ex_tax=ex,
         tax_amount=tax, tax_rate=c.tax_rate, idempotency_key=idempotency_key,
+        **_fx_inherit(db, c, billing_date),
     )
     db.add(b)
     db.flush()
@@ -152,9 +166,13 @@ def generate_billing_device(db: Session, *, device_id, contract_id, period_index
         period_index=period_index, period_label=f"{billing_date.year}-{billing_date.month:02d}",
         billing_date=billing_date, days_in_period=days, amount=amount, amount_ex_tax=ex,
         tax_amount=tax, tax_rate=c.tax_rate, idempotency_key=idempotency_key,
+        **_fx_inherit(db, c, billing_date),
     )
     db.add(b)
     db.flush()
+    # 二期 W9-10（D2）：按台计费生成 → 预付款按月直线结转（无预付款/已结清/无合同月数自动跳过）
+    from app.services import prepayment_service as _pp
+    _pp.settle_for_billing(db, b, actor_id=created_by)
     from app.services import workflow_service as _wf
     _wf.after_action(db, d.project_id)
     return b

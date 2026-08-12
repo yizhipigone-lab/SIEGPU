@@ -40,6 +40,9 @@ class Billing(UUIDPK, TimestampMixin, Base):
     confirmation_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 待确认 / 已确认 / 有争议
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("billings.id"), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("devices.id"), nullable=True)  # 一期 W1-2：按台计费
+    # 二期 W5-6：币种与计费日记账汇率（nullable；NULL=人民币）
+    currency_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    booked_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
 
 
 class Invoice(UUIDPK, TimestampMixin, Base):
@@ -64,10 +67,18 @@ class Invoice(UUIDPK, TimestampMixin, Base):
     reconciliation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reversal_of_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 二期 W5-6：币种与开票日汇率（nullable；NULL=人民币）
+    currency_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    invoice_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    # 二期 W11-12：进项侧认证/抵扣（nullable；NULL=未涉及进项流程）
+    certification_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    certification_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 # v3.2: 已核销累计金额 = 关联核销流水金额合计（查询期计算，不落库列；InvoiceOut.matched_amount 由它填充）
+# 二期 W11-12：payment_settlements 多对多核销同样计入（新核销路径不写 txn.invoice_id，两路径互斥不双计）
 from app.models.capital import CapitalTransaction  # noqa: E402
+from app.models.payment import PaymentSettlement  # noqa: E402
 
 Invoice.matched_amount = column_property(
     select(func.coalesce(func.sum(CapitalTransaction.amount), 0))
@@ -76,5 +87,13 @@ Invoice.matched_amount = column_property(
         CapitalTransaction.deleted_at.is_(None),
     )
     .correlate_except(CapitalTransaction)
+    .scalar_subquery()
+    +
+    select(func.coalesce(func.sum(PaymentSettlement.amount), 0))
+    .where(
+        PaymentSettlement.invoice_id == Invoice.id,
+        PaymentSettlement.deleted_at.is_(None),
+    )
+    .correlate_except(PaymentSettlement)
     .scalar_subquery()
 )

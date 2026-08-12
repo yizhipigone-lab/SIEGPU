@@ -25,7 +25,9 @@ contracts (contract_no)        ``^HT-F``                                     —
 invoices (invoice_no)          ``^INV-``                                     ——
 notifications (body)           ``E2E-F1-``                                   ——
 ebs_field_mappings (ebs_field) ``^E2E_``                                     ——（二期 W1-2 新表）
-ebs_sync_logs (entity_id)      e2e 客户集合（``客户-E2E``）                   ——（二期 W1-2 新表）
+ebs_sync_logs (entity_id)      e2e 客户集合（``客户-E2E``）；判定快照按载荷合同号 ``^HT-F``  ——（二期 W1-2/W3-4 新表）
+currencies / exchange_rates    币种码 ``^E2``（e2e 用 E2+RUN 伪 ISO 码，真实 ISO 码无 E2 前缀）
+exchange_gain_loss_rules       scenario ``^E2E场景``（二期 W5-6 新表）
 ============================  ============================================  ========================================
 
 实现要点
@@ -61,6 +63,10 @@ _STANDALONE = [
     ("contracts", "contract_no", r"^HT-F"),
     ("invoices", "invoice_no", r"^INV-"),
     ("notifications", "body", r"E2E-F1-"),
+    # 二期 W5-6：币种/汇率/科目规则（无 project_id，不走级联；e2e 用 E2 前缀币种码 + E2E场景 前缀）
+    ("currencies", "code", r"^E2"),
+    ("exchange_rates", "from_currency", r"^E2"),
+    ("exchange_gain_loss_rules", "scenario", r"^E2E场景"),
 ]
 
 
@@ -107,6 +113,36 @@ def purge_e2e(db) -> dict:
         "DELETE FROM ebs_sync_logs WHERE entity_id IN (SELECT id::text FROM customers WHERE name ~ :re)"
     ), {"re": _CUST_RE})
     deleted["ebs_sync_logs"] = res.rowcount
+    # 二期 W3-4：收入判定快照日志（entity_id=合同 id，按载荷里的 e2e 合同号识别）
+    res = db.execute(text(
+        "DELETE FROM ebs_sync_logs WHERE entity_type = 'contract_revenue_method'"
+        " AND request_payload->>'contract_no' ~ :re"
+    ), {"re": r"^HT-F"})
+    deleted["ebs_sync_logs(revenue_method)"] = res.rowcount
+    # 二期 W7-8：insurance_policy_devices 无 project_id 不走级联 → 项目级联删保单后扫孤儿分摊行
+    res = db.execute(text(
+        "DELETE FROM insurance_policy_devices WHERE policy_id NOT IN (SELECT id FROM insurance_policies)"
+    ))
+    deleted["insurance_policy_devices(orphan)"] = res.rowcount
+    # 二期 W9-10：合同变更/终止挂 contract_id（非 project_id）→ 合同被级联/独立删后扫孤儿行
+    for tbl in ("contract_amendments", "contract_terminations"):
+        res = db.execute(text(
+            f"DELETE FROM {tbl} WHERE contract_id NOT IN (SELECT id FROM contracts)"
+        ))
+        deleted[f"{tbl}(orphan)"] = res.rowcount
+    # 二期 W11-12：approvals(biz_id→payment_requests) / payment_settlements(→capital_transactions) 孤儿行
+    res = db.execute(text(
+        "DELETE FROM approvals WHERE biz_type = '付款申请' AND biz_id NOT IN (SELECT id FROM payment_requests)"
+    ))
+    deleted["approvals(orphan)"] = res.rowcount
+    res = db.execute(text(
+        "DELETE FROM payment_settlements WHERE capital_transaction_id NOT IN (SELECT id FROM capital_transactions)"
+    ))
+    deleted["payment_settlements(orphan)"] = res.rowcount
+    # 二期 W7-8/W13-14：insurance_configs 无项目关联也无 e2e 标记位（险种唯一约束），
+    # dev-DB Mock 期视为测试配置全清（demo 未配置；残留会让自动投保在后续 run 误触发）
+    res = db.execute(text("DELETE FROM insurance_configs"))
+    deleted["insurance_configs"] = res.rowcount
 
     # 5) 主数据（客户/供应商/型号）—— 引用它们的子表已清，可安全删
     for tbl, col, pat in [("customers", "name", _CUST_RE),

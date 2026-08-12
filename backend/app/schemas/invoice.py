@@ -12,6 +12,9 @@ class InvoiceCreate(BaseModel):
     issue_date: date | None = None
     due_date: date | None = None
     file_path: str | None = None
+    # 二期 W5-6：外币开票（amount=开票币种金额；invoice_rate=开票日汇率）
+    currency_code: str | None = None
+    invoice_rate: Decimal | None = Field(None, gt=0)
 
 
 class InvoiceOut(BaseModel):
@@ -27,6 +30,10 @@ class InvoiceOut(BaseModel):
     paid_date: date | None
     status: str
     matched_amount: Decimal = Decimal("0")  # v3.2: 已核销累计金额
+    currency_code: str | None = None
+    invoice_rate: Decimal | None = None
+    certification_status: str | None = None
+    certification_date: date | None = None
     model_config = {"from_attributes": True}
 
 

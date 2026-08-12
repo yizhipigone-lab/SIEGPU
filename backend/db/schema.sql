@@ -13,6 +13,17 @@
 --            扩展 equipment_models(+resource_attr+billing_modes) suppliers(+is_leasing_org+leasing_coop_modes)
 --            扩展 orders(+is_batch+batch_name+batch_status+flow_type) contracts(+leasing_mode)
 --            扩展 leasing_processes(+leasing_mode+financing_type+materials) billings(+device_id)
+-- 修订：二期W3-4 — 扩展 contracts(+pricing_authority+inventory_risk_bearer+principal_role
+--            +revenue_method+method_judge_basis+method_confirmed_by+method_confirmed_at, 全nullable, 迁移0011)
+-- 修订：二期W5-6 — 新增3表(currencies/exchange_rates/exchange_gain_loss_rules)
+--            扩展 contracts(+currency_code+booked_rate) invoices(+currency_code+invoice_rate)
+--            billings(+currency_code+booked_rate) capital_transactions(+currency_code+settlement_rate+base_amount,
+--            source_type CHECK+汇兑损益)（全nullable, 迁移0012）
+-- 修订：二期W7-8 — 新增3表(insurance_policies/insurance_policy_devices/insurance_configs, 迁移0013)
+-- 修订：二期W9-10 — 新增4表(contract_amendments/contract_terminations/doc_number_rules/leasing_rule_configs)
+--            扩展 devices(+prepayment_settled_amount) contracts(+6深化字段)（迁移0014）
+-- 修订：二期W11-12 — 新增3表(approvals/payment_requests/payment_settlements)
+--            扩展 invoices(+certification_status+certification_date)（迁移0015）
 -- ===========================================================================
 
 -- updated_at 自动维护
@@ -139,6 +150,24 @@ CREATE TABLE contracts (
     status VARCHAR(20) NOT NULL DEFAULT '草稿' CHECK (status IN ('草稿','已签','执行中','已完成','已终止')),
     file_path VARCHAR(500),
     leasing_mode VARCHAR(20) CHECK (leasing_mode IS NULL OR leasing_mode IN ('自有','直租','售后回租')),
+    -- 二期 W3-4：收入核算路径判定（迁移 0011；输入 3 字段 + 判定快照 + 确认留痕，全 nullable）
+    pricing_authority VARCHAR(20) CHECK (pricing_authority IS NULL OR pricing_authority IN ('自主定价','客户定价','上游定价')),
+    inventory_risk_bearer VARCHAR(20) CHECK (inventory_risk_bearer IS NULL OR inventory_risk_bearer IN ('我方','客户','上游')),
+    principal_role VARCHAR(20) CHECK (principal_role IS NULL OR principal_role IN ('主要责任人','代理人')),
+    revenue_method VARCHAR(20) CHECK (revenue_method IS NULL OR revenue_method IN ('总额法','净额法','经营租赁','服务费','待判定')),
+    method_judge_basis TEXT,
+    method_confirmed_by UUID REFERENCES users(id),
+    method_confirmed_at TIMESTAMPTZ,
+    -- 二期 W5-6：币种与签约记账汇率（迁移 0012；NULL=人民币，存量语义不变）
+    currency_code VARCHAR(10),
+    booked_rate DECIMAL(18,8),
+    -- 二期 W9-10：合同深化（迁移 0014，全 nullable）
+    purchase_type VARCHAR(20),           -- 采购类型（设备/服务/其他）
+    delivery_terms VARCHAR(200),         -- 交付条款
+    warranty_terms VARCHAR(200),         -- 质保条款
+    penalty_terms VARCHAR(200),          -- 违约条款
+    prepayment_ratio NUMERIC(10,8),      -- 预付款比例（小数）
+    collection_account_type VARCHAR(20), -- 销售收款账户类型（监管户/一般户）
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -223,7 +252,7 @@ CREATE INDEX idx_leasing_nodes_process ON leasing_nodes(process_id) WHERE delete
 CREATE TABLE capital_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id),
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('自有资金','银行流贷','金租融资','租金收入','调配','调配归还','还款','归还流贷','归还自有')),
+    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('自有资金','银行流贷','金租融资','租金收入','调配','调配归还','还款','归还流贷','归还自有','汇兑损益')),
     direction VARCHAR(4) NOT NULL CHECK (direction IN ('IN','OUT')),
     amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
     transaction_date DATE NOT NULL,
@@ -239,6 +268,10 @@ CREATE TABLE capital_transactions (
     replaced_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (replaced_amount >= 0),
     note TEXT,
     created_by UUID REFERENCES users(id),
+    -- 二期 W5-6：币种/结算汇率/本币金额（迁移 0012；currency NULL=人民币；base_amount 恒人民币，仅外币有值）
+    currency_code VARCHAR(10),
+    settlement_rate DECIMAL(18,8),
+    base_amount DECIMAL(18,2),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
@@ -292,6 +325,12 @@ CREATE TABLE invoices (
     reconciliation_note TEXT,
     reversal_of_id UUID REFERENCES invoices(id),
     file_path VARCHAR(500),
+    -- 二期 W11-12：进项侧认证/抵扣（迁移 0015，审计 A10；NULL=未涉及进项流程）
+    certification_status VARCHAR(20) CHECK (certification_status IS NULL OR certification_status IN ('未认证','已认证','已抵扣')),
+    certification_date DATE,
+    -- 二期 W5-6：币种与开票日汇率（迁移 0012；NULL=人民币）
+    currency_code VARCHAR(10),
+    invoice_rate DECIMAL(18,8),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -388,6 +427,7 @@ CREATE TABLE devices (
     status VARCHAR(20) NOT NULL DEFAULT '订货' CHECK (status IN ('订货','在途','到货','己方压测','上架','客户压测','点亮验收')),
     ownership VARCHAR(20) CHECK (ownership IS NULL OR ownership IN ('表内自有','金租表外','转售表外')),
     prepayment_settled BOOLEAN NOT NULL DEFAULT FALSE,  -- 一期 W7-8：售后回租预付款结转标记
+    prepayment_settled_amount DECIMAL(18,2) CHECK (prepayment_settled_amount IS NULL OR prepayment_settled_amount >= 0),  -- 二期 W9-10：累计已结转（D2 复用 devices 单源，迁移 0014）
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
@@ -496,6 +536,9 @@ CREATE TABLE billings (
     capital_transaction_id UUID REFERENCES capital_transactions(id),
     idempotency_key VARCHAR(128),
     reversal_of_id UUID REFERENCES billings(id),
+    -- 二期 W5-6：币种与计费日记账汇率（迁移 0012；NULL=人民币）
+    currency_code VARCHAR(10),
+    booked_rate DECIMAL(18,8),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -625,7 +668,7 @@ CREATE TRIGGER trg_profit_scenarios_updated BEFORE UPDATE ON profit_scenarios FO
 CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY,
     user_id UUID REFERENCES users(id),
-    action VARCHAR(20) NOT NULL CHECK (action IN ('CREATE','UPDATE','DELETE','REVERSE','LOGIN','APPROVE_OVERCONTRACT','SUPERSEDE','ACCEPT_APPROVE','RECONCILE','RECONCILE_REVOKE','SUPERSEDE_REVOKE','CONFIRM_UPLOAD','DISBURSE','CAPITAL_TXN','LIGHT_ON','ALLOCATE','ALLOCATE_RETURN','LEASEBACK_SALE')),
+    action VARCHAR(20) NOT NULL CHECK (action IN ('CREATE','UPDATE','DELETE','REVERSE','LOGIN','APPROVE_OVERCONTRACT','SUPERSEDE','ACCEPT_APPROVE','RECONCILE','RECONCILE_REVOKE','SUPERSEDE_REVOKE','CONFIRM_UPLOAD','DISBURSE','CAPITAL_TXN','LIGHT_ON','ALLOCATE','ALLOCATE_RETURN','LEASEBACK_SALE','REVENUE_JUDGE','REVENUE_OVERRIDE')),
     entity_type VARCHAR(50) NOT NULL,
     entity_id UUID,
     before_json JSONB,
@@ -760,7 +803,239 @@ CREATE INDEX idx_ebs_sl_entity_status ON ebs_sync_logs(entity_type, status, sync
 CREATE INDEX idx_ebs_sl_retry ON ebs_sync_logs(status, retry_count) WHERE status = 'FAILED';
 CREATE TRIGGER trg_ebs_sl_updated BEFORE UPDATE ON ebs_sync_logs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- ============================ 完成：35 张表 ============================
+-- ============================ 币种与汇率（二期 W5-6 新增） ============================
+-- 量纲铁律（docs/superpowers/specs/2026-08-12-w5-6-unit-dimension-table.md）：
+-- rate 存 DECIMAL(18,8) 全精度（直接标价法：1 外币 = N 元人民币），永不 round；金额两位，仅「外币×率→人民币」q2。
+-- 与 alembic 0012 双写一致。
+-- 币种主数据：is_base=TRUE 即本币（人民币），全系统恰好一个（service 层守卫）
+CREATE TABLE currencies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(10) NOT NULL,
+    name VARCHAR(50) NOT NULL,
+    symbol VARCHAR(10),
+    is_base BOOLEAN NOT NULL DEFAULT FALSE,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_currencies_code ON currencies(code) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_currencies_updated BEFORE UPDATE ON currencies FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 汇率表：取值 = from/to + rate_type 下 effective_date <= 业务日的最近一条（最近不未来）
+CREATE TABLE exchange_rates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_currency VARCHAR(10) NOT NULL,
+    to_currency VARCHAR(10) NOT NULL,
+    rate_type VARCHAR(20) NOT NULL DEFAULT '中间价',
+    rate DECIMAL(18,8) NOT NULL CHECK (rate > 0),
+    effective_date DATE NOT NULL,
+    source VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_fx_rates_lookup ON exchange_rates(from_currency, to_currency, rate_type, effective_date DESC) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_fx_rates_updated BEFORE UPDATE ON exchange_rates FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 汇兑损益科目规则：场景 → EBS 总账科目码（W11-12 分摊/三期过账用，本阶段先建配置）
+CREATE TABLE exchange_gain_loss_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scenario VARCHAR(50) NOT NULL,
+    gl_account_code VARCHAR(50) NOT NULL,
+    description VARCHAR(200),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_fxgl_scenario ON exchange_gain_loss_rules(scenario) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_fxgl_updated BEFORE UPDATE ON exchange_gain_loss_rules FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================ 保险管理（二期 W7-8 新增） ============================
+-- 设备粒度保单：运输险（在途触发）/财产险（点亮触发）；保费按设备价值占比分摊到 insurance_policy_devices。
+-- 硬约束：保费仅「点亮前」可归集进资产原值（collected_at 留痕幂等）；点亮后一律长期待摊（不触动折旧）。
+-- 与 alembic 0013 双写一致。
+CREATE TABLE insurance_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    batch_id UUID REFERENCES orders(id),          -- 批次（运输险按批次）；单台财产险可空
+    policy_type VARCHAR(20) NOT NULL CHECK (policy_type IN ('运输险','财产险')),
+    policy_no VARCHAR(100),
+    insurer_id UUID REFERENCES suppliers(id),      -- 保险公司（供应商主数据）
+    insured_amount DECIMAL(18,2) CHECK (insured_amount IS NULL OR insured_amount >= 0),   -- 保额
+    premium_rate NUMERIC(10,8) CHECK (premium_rate IS NULL OR premium_rate >= 0),          -- 费率（小数，如 0.001）
+    premium_amount DECIMAL(18,2) CHECK (premium_amount IS NULL OR premium_amount >= 0),    -- 保费 = q2(保额×费率)
+    start_date DATE,
+    end_date DATE,
+    status VARCHAR(20) NOT NULL DEFAULT '待确认' CHECK (status IN ('待确认','已生效','理赔中','已到期','已退保')),
+    trigger_event VARCHAR(20),                     -- 在途/点亮/手工
+    cost_allocation VARCHAR(20) CHECK (cost_allocation IS NULL OR cost_allocation IN ('资产原值','长期待摊')),
+    amortization_months INTEGER CHECK (amortization_months IS NULL OR amortization_months > 0),
+    collected_at TIMESTAMPTZ,                      -- 保费归集进原值的时间（幂等守卫 + 留痕）
+    claims JSONB,                                  -- 理赔登记列表 [{date,amount,description,by}]
+    file_path VARCHAR(500),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_inspol_project ON insurance_policies(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_inspol_batch ON insurance_policies(batch_id) WHERE deleted_at IS NULL AND batch_id IS NOT NULL;
+CREATE INDEX idx_inspol_status ON insurance_policies(status, end_date) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_inspol_updated BEFORE UPDATE ON insurance_policies FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 保单-设备分摊：保费按设备价值（purchase_value）占比逐台分摊，末台吃尾差保合计精确
+CREATE TABLE insurance_policy_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_id UUID NOT NULL REFERENCES insurance_policies(id),
+    device_id UUID NOT NULL REFERENCES devices(id),
+    allocated_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (allocated_amount >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_inspd_policy_device ON insurance_policy_devices(policy_id, device_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_inspd_device ON insurance_policy_devices(device_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_inspd_updated BEFORE UPDATE ON insurance_policy_devices FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 投保配置：险种默认费率/投保比例/承保人/费用归集口径（自动投保的输入）
+CREATE TABLE insurance_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_type VARCHAR(20) NOT NULL CHECK (policy_type IN ('运输险','财产险')),
+    default_rate NUMERIC(10,8) CHECK (default_rate IS NULL OR default_rate >= 0),
+    insured_ratio NUMERIC(10,8) CHECK (insured_ratio IS NULL OR insured_ratio >= 0),  -- 投保比例（1=全额）
+    insurer_id UUID REFERENCES suppliers(id),
+    cost_allocation VARCHAR(20) CHECK (cost_allocation IS NULL OR cost_allocation IN ('资产原值','长期待摊')),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_inscfg_type ON insurance_configs(policy_type) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_inscfg_updated BEFORE UPDATE ON insurance_configs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================ 合同深化 + 单据编号 + 金租规则（二期 W9-10 新增） ============================
+-- 与 alembic 0014 双写一致。预付款按 D2 裁定复用 devices 字段（不建 prepayments 表）。
+-- 合同变更：before/after 快照 + 原因；变更落合同即对未来计费生效（计费按周期现算，无预生成计划行）
+CREATE TABLE contract_amendments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id UUID NOT NULL REFERENCES contracts(id),
+    amendment_date DATE NOT NULL,
+    change_type VARCHAR(30) NOT NULL,        -- 金额变更/月租变更/期限变更/其他
+    before_json JSONB,
+    after_json JSONB,
+    reason TEXT,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_ctramend_contract ON contract_amendments(contract_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_ctramend_updated BEFORE UPDATE ON contract_amendments FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 合同终止：落合同 status=已终止 + 终止记录留痕
+CREATE TABLE contract_terminations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_id UUID NOT NULL REFERENCES contracts(id),
+    termination_date DATE NOT NULL,
+    reason TEXT,
+    settlement_note TEXT,                     -- 结算说明（尾款/违约金安排）
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_ctrterm_contract ON contract_terminations(contract_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_ctrterm_updated BEFORE UPDATE ON contract_terminations FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 单据编号规则：前缀+日期段+流水（device_sn 规则回迁一期硬编码 GPU-{yyyymm}-{seq5}，生成结果必须一致）
+CREATE TABLE doc_number_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_type VARCHAR(50) NOT NULL,            -- device_sn/contract_no/batch_no/payment_no…
+    prefix VARCHAR(20) NOT NULL DEFAULT '',
+    date_format VARCHAR(20),                  -- YYYYMM / YYYYMMDD / NULL=无日期段
+    seq_digits INTEGER NOT NULL DEFAULT 5 CHECK (seq_digits BETWEEN 1 AND 10),
+    current_period VARCHAR(20),               -- 当前日期段（跨段流水归零）
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_docnum_type ON doc_number_rules(doc_type) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_docnum_updated BEFORE UPDATE ON doc_number_rules FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 金租规则参数表（键值；如放款阈值默认、审批链配置）
+CREATE TABLE leasing_rule_configs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_key VARCHAR(50) NOT NULL,
+    rule_value VARCHAR(200) NOT NULL,
+    description VARCHAR(200),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_leasing_rule_key ON leasing_rule_configs(rule_key) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_leasing_rule_updated BEFORE UPDATE ON leasing_rule_configs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================ 付款管控 + 通用审批 + 进项税（二期 W11-12 新增） ============================
+-- 与 alembic 0015 双写一致。核销多对多：一笔流水 ↔ 多发票/多批次/多台设备（按金额逐台多行）。
+CREATE TABLE approvals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    biz_type VARCHAR(30) NOT NULL,          -- 项目立项/付款申请/预付款/预算调整/监管划转/合同变更/收入确认…
+    biz_id UUID,
+    title VARCHAR(200) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT '待审批' CHECK (status IN ('待审批','已通过','已驳回')),
+    level INTEGER NOT NULL DEFAULT 1,
+    max_level INTEGER NOT NULL DEFAULT 1,   -- 多级扩展位（本期单级）
+    submitted_by UUID REFERENCES users(id),
+    approved_by UUID REFERENCES users(id),
+    approved_at TIMESTAMPTZ,
+    reject_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_approvals_biz ON approvals(biz_type, biz_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_approvals_status ON approvals(status) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_approvals_updated BEFORE UPDATE ON approvals FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE payment_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    contract_id UUID REFERENCES contracts(id),
+    direction VARCHAR(4) NOT NULL DEFAULT 'OUT' CHECK (direction IN ('IN','OUT')),
+    amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
+    currency_code VARCHAR(10),
+    reason TEXT,
+    prepayment_offset DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (prepayment_offset >= 0),
+    status VARCHAR(20) NOT NULL DEFAULT '待审批' CHECK (status IN ('待审批','已批准','已驳回','已付款')),
+    approval_id UUID REFERENCES approvals(id),
+    capital_transaction_id UUID REFERENCES capital_transactions(id),
+    requested_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_payreq_project ON payment_requests(project_id, status) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_payreq_updated BEFORE UPDATE ON payment_requests FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE payment_settlements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    capital_transaction_id UUID NOT NULL REFERENCES capital_transactions(id),
+    invoice_id UUID REFERENCES invoices(id),      -- 可空：待认领/预付款冲抵
+    batch_id UUID REFERENCES orders(id),          -- 可空
+    device_id UUID REFERENCES devices(id),        -- 可空：按金额占比逐台多行
+    amount DECIMAL(18,2) NOT NULL CHECK (amount >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_payset_txn ON payment_settlements(capital_transaction_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_payset_invoice ON payment_settlements(invoice_id) WHERE deleted_at IS NULL AND invoice_id IS NOT NULL;
+CREATE INDEX idx_payset_device ON payment_settlements(device_id) WHERE deleted_at IS NULL AND device_id IS NOT NULL;
+CREATE TRIGGER trg_payset_updated BEFORE UPDATE ON payment_settlements FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================ 完成：48 张表 ============================
 -- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
 -- projects, contracts, leasing_processes, leasing_nodes,
 -- capital_transactions, invoices, capital_allocations,

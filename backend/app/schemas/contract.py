@@ -1,9 +1,15 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+# 二期 W3-4：收入核算路径判定输入/结果枚举（与 contracts CHECK 一致）
+PricingAuthority = Literal["自主定价", "客户定价", "上游定价"]
+InventoryRiskBearer = Literal["我方", "客户", "上游"]
+PrincipalRole = Literal["主要责任人", "代理人"]
+RevenueMethod = Literal["总额法", "净额法", "经营租赁", "服务费", "待判定"]
 
 
 class ContractCreate(BaseModel):
@@ -19,6 +25,80 @@ class ContractCreate(BaseModel):
     parent_contract_id: UUID | None = None
     file_path: str | None = None
     leasing_mode: Literal["自有", "直租", "售后回租"] | None = None  # 合同模式快照
+    # 二期 W3-4：核算判定信息（可选；SALES 且项目已填 business_type 时保存即自动判定）
+    pricing_authority: PricingAuthority | None = None
+    inventory_risk_bearer: InventoryRiskBearer | None = None
+    principal_role: PrincipalRole | None = None
+    # 二期 W5-6：外币合同（currency_code NULL=人民币；booked_rate=签约日记账汇率）
+    currency_code: str | None = None
+    booked_rate: Decimal | None = Field(None, gt=0)
+
+
+class ContractUpdate(BaseModel):
+    """合同编辑（二期 W3-4 新增 PATCH）：金额/类型/项目等核心字段不可改，仅可改下列字段。"""
+    contract_no: str | None = None
+    monthly_rent: Decimal | None = Field(None, ge=0)
+    start_date: date | None = None
+    end_date: date | None = None
+    file_path: str | None = None
+    leasing_mode: Literal["自有", "直租", "售后回租"] | None = None
+    pricing_authority: PricingAuthority | None = None
+    inventory_risk_bearer: InventoryRiskBearer | None = None
+    principal_role: PrincipalRole | None = None
+    currency_code: str | None = None
+    booked_rate: Decimal | None = Field(None, gt=0)
+
+
+class MethodConfirmIn(BaseModel):
+    """人工覆盖/确认核算路径（原因必填，记 audit + confirmed 留痕）。"""
+    method: RevenueMethod
+    reason: str = Field(min_length=1)
+
+
+class JudgePreviewOut(BaseModel):
+    """判定预览（纯函数，不落库）：前端表单实时预览用。"""
+    method: str | None
+    rule: str
+    basis: str
+
+
+# ------------------------------ 二期 W9-10：合同变更/终止 ------------------------------
+
+class AmendmentIn(BaseModel):
+    change_type: Literal["金额变更", "月租变更", "期限变更", "其他"]
+    amendment_date: date | None = None  # 缺省 = 今天（端点填）
+    reason: str = Field(min_length=1)  # 变更原因必填（留痕）
+    new_amount: Decimal | None = Field(None, ge=0)
+    new_monthly_rent: Decimal | None = Field(None, ge=0)
+    new_end_date: date | None = None
+
+
+class AmendmentOut(BaseModel):
+    id: UUID
+    contract_id: UUID
+    amendment_date: date
+    change_type: str
+    before_json: dict | None
+    after_json: dict | None
+    reason: str | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class TerminationIn(BaseModel):
+    termination_date: date | None = None  # 缺省 = 今天
+    reason: str | None = None
+    settlement_note: str | None = None
+
+
+class TerminationOut(BaseModel):
+    id: UUID
+    contract_id: UUID
+    termination_date: date
+    reason: str | None
+    settlement_note: str | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
 
 
 class ContractOut(BaseModel):
@@ -38,4 +118,14 @@ class ContractOut(BaseModel):
     status: str
     file_path: str | None = None
     leasing_mode: str | None = None
+    # 二期 W3-4：核算判定快照
+    pricing_authority: str | None = None
+    inventory_risk_bearer: str | None = None
+    principal_role: str | None = None
+    revenue_method: str | None = None
+    method_judge_basis: str | None = None
+    method_confirmed_by: UUID | None = None
+    method_confirmed_at: datetime | None = None
+    currency_code: str | None = None
+    booked_rate: Decimal | None = None
     model_config = {"from_attributes": True}

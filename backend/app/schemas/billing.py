@@ -36,4 +36,6 @@ class BillingOut(BaseModel):
     amount_ex_tax: Decimal
     tax_amount: Decimal
     status: str
+    currency_code: str | None = None
+    booked_rate: Decimal | None = None
     model_config = {"from_attributes": True}

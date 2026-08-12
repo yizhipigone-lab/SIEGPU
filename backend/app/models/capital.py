@@ -34,6 +34,10 @@ class CapitalTransaction(UUIDPK, TimestampMixin, Base):
     replaced_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    # 二期 W5-6：币种/结算汇率/本币金额（nullable；currency NULL=人民币；base_amount 恒人民币，仅外币有值）
+    currency_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    settlement_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    base_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
 
 
 class CapitalAllocation(UUIDPK, TimestampMixin, Base):

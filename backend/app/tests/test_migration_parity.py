@@ -186,3 +186,200 @@ def test_alembic_0008_downgrade_is_lossless_reversible():
     # 无数据迁移语句（与 0007 split_bulk 不同）
     assert "split_bulk" not in code
     assert "DELETE FROM" not in down  # 无破坏性数据清理
+
+
+# ---- 0011 二期 W3-4：contracts 收入核算路径判定 +7 字段（全 nullable，纯加法） ----
+
+ALEMBIC_0011 = ROOT / "alembic" / "versions" / "0011_revenue_judge_fields.py"
+
+JUDGE_COLS = ("pricing_authority", "inventory_risk_bearer", "principal_role",
+              "revenue_method", "method_judge_basis", "method_confirmed_by", "method_confirmed_at")
+
+
+def test_schema_sql_contracts_judge_fields():
+    sql = _read(SCHEMA_SQL)
+    for col in JUDGE_COLS:
+        assert col in sql
+    # 枚举 CHECK（容 NULL 形式，与 projects.business_type 同款）
+    assert "pricing_authority IN ('自主定价','客户定价','上游定价')" in sql
+    assert "inventory_risk_bearer IN ('我方','客户','上游')" in sql
+    assert "principal_role IN ('主要责任人','代理人')" in sql
+    assert "revenue_method IN ('总额法','净额法','经营租赁','服务费','待判定')" in sql
+    assert "method_confirmed_by UUID REFERENCES users(id)" in sql
+
+
+def test_alembic_0011_adds_contracts_judge_columns():
+    code = _read(ALEMBIC_0011)
+    assert 'revision = "0011_revenue_judge_fields"' in code
+    assert 'down_revision = "0010_ebs_mock"' in code
+    for col in JUDGE_COLS:
+        assert f"ALTER TABLE contracts ADD COLUMN {col}" in code
+    # audit CHECK 扩 REVENUE_JUDGE/REVENUE_OVERRIDE（只扩不收窄，含全部旧 18 枚举）
+    upgrade = code.split("def downgrade")[0]
+    assert "DROP CONSTRAINT IF EXISTS audit_logs_action_check" in upgrade
+    for act in ("'REVENUE_JUDGE'", "'REVENUE_OVERRIDE'", "'LEASEBACK_SALE'", "'DISBURSE'"):
+        assert act in upgrade
+
+
+def test_alembic_0011_downgrade_drops_all_columns():
+    """0011 downgrade：DROP 全部新列 + audit CHECK 回旧 18（先 DELETE 新动作行 guard，防收窄失败）。"""
+    code = _read(ALEMBIC_0011)
+    down = code.split("def downgrade")[1]
+    for col in JUDGE_COLS:
+        assert f"DROP COLUMN IF EXISTS {col}" in down
+    # audit CHECK 收窄前的 guard：清 0011 新动作行（0007 DELETE guard 范式），否则存量行让 ADD CONSTRAINT 失败
+    assert "DELETE FROM audit_logs WHERE action IN ('REVENUE_JUDGE','REVENUE_OVERRIDE')" in down
+    # audit CHECK 回旧 18 枚举（新动作不出现在旧约束里）
+    assert "'LEASEBACK_SALE'" in down
+    assert "ADD CONSTRAINT audit_logs_action_check" in down
+
+
+# ---- 0012 二期 W5-6：币种与汇率（3 新表 + 4 表加币种/汇率字段，全 nullable 纯加法） ----
+
+ALEMBIC_0012 = ROOT / "alembic" / "versions" / "0012_currency_exchange.py"
+
+FX_NEW_TABLES = ("currencies", "exchange_rates", "exchange_gain_loss_rules")
+FX_COLS = (("contracts", "currency_code"), ("contracts", "booked_rate"),
+           ("invoices", "currency_code"), ("invoices", "invoice_rate"),
+           ("billings", "currency_code"), ("billings", "booked_rate"),
+           ("capital_transactions", "currency_code"), ("capital_transactions", "settlement_rate"),
+           ("capital_transactions", "base_amount"))
+
+
+def test_schema_sql_fx_new_tables():
+    sql = _read(SCHEMA_SQL)
+    for t in FX_NEW_TABLES:
+        assert f"CREATE TABLE {t}" in sql
+    assert "rate DECIMAL(18,8) NOT NULL CHECK (rate > 0)" in sql  # 率全精度，永不 round（D6 对照表）
+    assert "uq_currencies_code" in sql
+    assert "idx_fx_rates_lookup" in sql
+
+
+def test_schema_sql_fx_existing_table_columns():
+    sql = _read(SCHEMA_SQL)
+    for _tbl, col in FX_COLS:
+        assert col in sql
+    # source_type CHECK 含汇兑损益（只扩不收窄）
+    assert "'汇兑损益'" in sql
+    assert "'租金收入'" in sql
+
+
+def test_alembic_0012_creates_tables_and_columns():
+    code = _read(ALEMBIC_0012)
+    assert 'revision = "0012_currency_exchange"' in code
+    assert 'down_revision = "0011_revenue_judge_fields"' in code
+    for t in FX_NEW_TABLES:
+        assert f"CREATE TABLE {t}" in code
+    for tbl, col in FX_COLS:
+        assert f"ALTER TABLE {tbl} ADD COLUMN {col}" in code
+    upgrade = code.split("def downgrade")[0]
+    assert "'汇兑损益'" in upgrade and "'归还自有'" in upgrade  # CHECK 只扩不收窄
+
+
+def test_alembic_0012_downgrade_reversible():
+    """0012 无数据迁移 → 无损可逆：DROP 全部新对象 + source_type CHECK 回旧 9 枚举（先 DELETE guard）。"""
+    code = _read(ALEMBIC_0012)
+    down = code.split("def downgrade")[1]
+    for t in FX_NEW_TABLES:
+        assert f"DROP TABLE IF EXISTS {t}" in down
+    for _tbl, col in FX_COLS:
+        assert f"DROP COLUMN IF EXISTS {col}" in down
+    # CHECK 收窄前清汇兑损益流水（0011 guard 范式）；旧 9 枚举经模块常量 _CT_SOURCE_OLD 回写
+    assert "DELETE FROM capital_transactions WHERE source_type = '汇兑损益'" in down
+    assert "ADD CONSTRAINT capital_transactions_source_type_check" in down
+    assert "_CT_SOURCE_OLD" in down
+    assert "'归还自有'" in code  # 旧枚举全集在模块常量中（upgrade/downgrade 共用校验）
+
+
+# ---- 0013 二期 W7-8：保险管理（3 新表，纯加法） ----
+
+ALEMBIC_0013 = ROOT / "alembic" / "versions" / "0013_insurance.py"
+
+INS_TABLES = ("insurance_policies", "insurance_policy_devices", "insurance_configs")
+
+
+def test_schema_sql_insurance_tables():
+    sql = _read(SCHEMA_SQL)
+    for t in INS_TABLES:
+        assert f"CREATE TABLE {t}" in sql
+        assert f"trg_" in sql
+    # 硬约束枚举：险种 / 归集口径 / 状态
+    assert "policy_type IN ('运输险','财产险')" in sql
+    assert "cost_allocation IS NULL OR cost_allocation IN ('资产原值','长期待摊')" in sql
+    assert "status IN ('待确认','已生效','理赔中','已到期','已退保')" in sql
+    assert "uq_inspd_policy_device" in sql
+    assert "collected_at TIMESTAMPTZ" in sql  # 归集幂等守卫
+
+
+def test_alembic_0013_creates_tables():
+    code = _read(ALEMBIC_0013)
+    assert 'revision = "0013_insurance"' in code
+    assert 'down_revision = "0012_currency_exchange"' in code
+    for t in INS_TABLES:
+        assert f"CREATE TABLE {t}" in code
+        assert f"DROP TABLE IF EXISTS {t}" in code.split("def downgrade")[1]
+
+
+# ---- 0014 二期 W9-10：合同深化 + 单据编号 + 金租规则（4 新表 + devices/ contracts 加列，纯加法） ----
+
+ALEMBIC_0014 = ROOT / "alembic" / "versions" / "0014_contract_ext.py"
+
+W910_TABLES = ("contract_amendments", "contract_terminations", "doc_number_rules", "leasing_rule_configs")
+W910_CONTRACT_COLS = ("purchase_type", "delivery_terms", "warranty_terms",
+                      "penalty_terms", "prepayment_ratio", "collection_account_type")
+
+
+def test_schema_sql_w910_tables_and_columns():
+    sql = _read(SCHEMA_SQL)
+    for t in W910_TABLES:
+        assert f"CREATE TABLE {t}" in sql
+    for col in W910_CONTRACT_COLS:
+        assert col in sql
+    assert "prepayment_settled_amount" in sql  # D2：devices 单源结转列
+    assert "uq_docnum_type" in sql
+
+
+def test_alembic_0014_creates_and_drops_all():
+    code = _read(ALEMBIC_0014)
+    assert 'revision = "0014_contract_ext"' in code
+    assert 'down_revision = "0013_insurance"' in code
+    for t in W910_TABLES:
+        assert f"CREATE TABLE {t}" in code
+    assert "ALTER TABLE devices ADD COLUMN prepayment_settled_amount" in code
+    down = code.split("def downgrade")[1]
+    for t in W910_TABLES:
+        assert f"DROP TABLE IF EXISTS {t}" in down
+    for col in W910_CONTRACT_COLS:
+        assert f"ADD COLUMN {col}" in code
+        assert f"DROP COLUMN IF EXISTS {col}" in down
+    assert "DROP COLUMN IF EXISTS prepayment_settled_amount" in down
+
+
+# ---- 0015 二期 W11-12：付款管控 + 通用审批 + 进项税（3 新表 + invoices 进项字段） ----
+
+ALEMBIC_0015 = ROOT / "alembic" / "versions" / "0015_payment_approval.py"
+
+W1112_TABLES = ("approvals", "payment_requests", "payment_settlements")
+
+
+def test_schema_sql_w1112_tables_and_invoice_fields():
+    sql = _read(SCHEMA_SQL)
+    for t in W1112_TABLES:
+        assert f"CREATE TABLE {t}" in sql
+    assert "certification_status" in sql and "certification_date" in sql
+    assert "'未认证','已认证','已抵扣'" in sql
+    assert "idx_payset_device" in sql  # 逐台分摊索引
+    assert "uq_" not in "payment_settlements"  # 多对多无唯一约束（同发票可多行：逐台拆分）
+
+
+def test_alembic_0015_creates_and_drops_all():
+    code = _read(ALEMBIC_0015)
+    assert 'revision = "0015_payment_approval"' in code
+    assert 'down_revision = "0014_contract_ext"' in code
+    for t in W1112_TABLES:
+        assert f"CREATE TABLE {t}" in code
+        assert f"DROP TABLE IF EXISTS {t}" in code.split("def downgrade")[1]
+    assert "ALTER TABLE invoices ADD COLUMN certification_status" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP COLUMN IF EXISTS certification_status" in down
+    assert "DROP COLUMN IF EXISTS certification_date" in down

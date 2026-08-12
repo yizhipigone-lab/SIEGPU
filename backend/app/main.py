@@ -8,8 +8,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.endpoints import (
-    acceptances, auth, assets, billings, capital, confirmations, contracts, dashboard, devices, ebs, excel, files, funding, health,
-    invoices, leasing, master, notifications, ocr, orders, projects, repayments, reports, sales_orders, workflows,
+    acceptances, auth, assets, billings, capital, confirmations, contracts, currencies, dashboard, devices, ebs, excel, files, funding, health,
+    insurance, invoices, leasing, master, notifications, ocr, orders, payments, prepayments, projects, repayments, reports, sales_orders, workflows,
 )
 from app.core.db import SessionLocal
 
@@ -142,3 +142,7 @@ app.include_router(funding.router, tags=["funding"])
 app.include_router(workflows.router, tags=["workflows"])
 # 二期 W1-2 新增：EBS 接口 Mock（业财一体化出站骨架）
 app.include_router(ebs.router, prefix="/api/ebs", tags=["ebs"])
+app.include_router(currencies.router, prefix="/api", tags=["currency"])
+app.include_router(insurance.router, prefix="/api/insurance", tags=["insurance"])
+app.include_router(prepayments.router, prefix="/api", tags=["prepayments"])
+app.include_router(payments.router, prefix="/api", tags=["payments"])

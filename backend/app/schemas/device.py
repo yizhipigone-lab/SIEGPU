@@ -58,6 +58,7 @@ class DeviceOut(BaseModel):
     status: str
     ownership: str | None
     prepayment_settled: bool = False  # W7-8：回租出售后置位（决策 3，仅标记）
+    prepayment_settled_amount: Decimal | None = None  # 二期 W9-10：累计已结转/冲抵（D2 单源）
     model_config = {"from_attributes": True}
 
 
