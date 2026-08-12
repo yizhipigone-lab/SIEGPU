@@ -145,6 +145,15 @@ test('营收全链路串烧：立项→销售合同→采购→设备点亮→�
 
   // ============ UI 收口（端到端验证铁律）：cfo 浏览器看对账单渲染本链数据 ============
   await uiLogin(page, 'cfo')
+  // 债④补充（2026-08-12）：waitForResponse 提前到 goto 前注册。CustomerStatementView onMounted
+  // 会自动选中 summary 第一个客户（gap_uncollected 倒序）并立即查明细；dev 库全体客户未回款并列 0 时
+  // 第一名顺序不定，若恰是本链客户，请求在点选「之前」发出、点选后 selectedId 无变化不再发请求
+  // → 晚注册必超时（本 run 实测踩中，页面数据其实已正确渲染）。提前注册后两种时序都能捕获。
+  const stmtResp = page.waitForResponse(
+    (r) => r.url().includes('/reports/customer-statement')
+         && r.url().includes(`customer_id=${cust.id}`)
+         && r.request().method() === 'GET',
+  )
   await page.goto('/customer-statement')
   await expect(page.getByRole('heading', { name: '客户对账单' })).toBeVisible()
 
@@ -162,16 +171,9 @@ test('营收全链路串烧：立项→销售合同→采购→设备点亮→�
   // 债④根治（2026-08-10，同债③ sn 锚点手法）：选客户 → setSelectedId → watch → loadStatement →
   // GET /reports/customer-statement?customer_id=<id>（CustomerStatementView.vue:46 watch + :35 GET，无查询按钮，
   // 选即触发）。并发负载下该查询可达数秒，期间 stmt 仍显示上一客户旧值 → 旧版裸等 30s 偶发命中旧值超时（债④ flake）。
-  // 修法：点选「之前」注册 waitForResponse，谓词钉死 customer_id=cust.id（UUID 全局唯一，绝不误中别 worker
-  // 的客户查询——同「按 sn 定位我的设备」原理）；点选后等「本客户的」查询响应到达且 ok，此时 stmt 已切到
-  // 本客户数据 → 再断言流水明细 DOM（既是加载完成信号又是正确性断言）。
-  // 旧注释「曾试 waitForResponse 谓词偶发不匹配→弃用」根因=谓词没钉 customer_id（或注册晚于请求）；
-  // 钉死唯一 customer_id + 选前注册后此问题消除。
-  const stmtResp = page.waitForResponse(
-    (r) => r.url().includes('/reports/customer-statement')
-         && r.url().includes(`customer_id=${cust.id}`)
-         && r.request().method() === 'GET',
-  )
+  // 修法：waitForResponse 谓词钉死 customer_id=cust.id（UUID 全局唯一，绝不误中别 worker 的客户查询），
+  // 且注册点已前移到 goto 前（见上方「债④补充」——覆盖 onMounted 自动选中本客户的时序）；
+  // 等「本客户的」查询响应到达且 ok，此时 stmt 已切到本客户数据 → 再断言流水明细 DOM。
   await myOption.click()
   await waitForMenu(page, false)
   const resp = await stmtResp
