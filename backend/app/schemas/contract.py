@@ -32,6 +32,13 @@ class ContractCreate(BaseModel):
     # 二期 W5-6：外币合同（currency_code NULL=人民币；booked_rate=签约日记账汇率）
     currency_code: str | None = None
     booked_rate: Decimal | None = Field(None, gt=0)
+    # 二期 W9-10：合同深化（全可选）
+    purchase_type: str | None = None
+    delivery_terms: str | None = None
+    warranty_terms: str | None = None
+    penalty_terms: str | None = None
+    prepayment_ratio: Decimal | None = Field(None, ge=0)
+    collection_account_type: Literal["监管户", "一般户"] | None = None
 
 
 class ContractUpdate(BaseModel):
@@ -47,6 +54,12 @@ class ContractUpdate(BaseModel):
     principal_role: PrincipalRole | None = None
     currency_code: str | None = None
     booked_rate: Decimal | None = Field(None, gt=0)
+    purchase_type: str | None = None
+    delivery_terms: str | None = None
+    warranty_terms: str | None = None
+    penalty_terms: str | None = None
+    prepayment_ratio: Decimal | None = Field(None, ge=0)
+    collection_account_type: Literal["监管户", "一般户"] | None = None
 
 
 class MethodConfirmIn(BaseModel):
@@ -128,4 +141,10 @@ class ContractOut(BaseModel):
     method_confirmed_at: datetime | None = None
     currency_code: str | None = None
     booked_rate: Decimal | None = None
+    purchase_type: str | None = None
+    delivery_terms: str | None = None
+    warranty_terms: str | None = None
+    penalty_terms: str | None = None
+    prepayment_ratio: Decimal | None = None
+    collection_account_type: str | None = None
     model_config = {"from_attributes": True}

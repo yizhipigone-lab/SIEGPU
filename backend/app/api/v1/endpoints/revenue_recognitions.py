@@ -17,9 +17,15 @@ router = APIRouter()
 @router.get("/revenue-recognitions")
 def list_recognitions(project_id: UUID | None = None, status: str | None = None,
                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.models.project import Project
     rows = svc.list_recognitions(db, project_id=project_id, status=status)
-    return {"items": [RecognitionOut.model_validate(r).model_dump(mode="json") for r in rows],
-            "total": len(rows)}
+    items = []
+    for r in rows:
+        d = RecognitionOut.model_validate(r).model_dump(mode="json")
+        proj = db.get(Project, r.project_id)
+        d["project_name"] = proj.name if proj else None  # 展示/定位锚点
+        items.append(d)
+    return {"items": items, "total": len(items)}
 
 
 @router.post("/revenue-recognitions/generate")

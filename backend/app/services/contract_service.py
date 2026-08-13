@@ -12,7 +12,9 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
                     tax_rate, monthly_rent=None, contract_no=None, start_date=None,
                     end_date=None, parent_contract_id=None, file_path=None,
                     leasing_mode=None, pricing_authority=None, inventory_risk_bearer=None,
-                    principal_role=None, currency_code=None, booked_rate=None, actor_id=None) -> Contract:
+                    principal_role=None, currency_code=None, booked_rate=None, actor_id=None,
+                    purchase_type=None, delivery_terms=None, warranty_terms=None,
+                    penalty_terms=None, prepayment_ratio=None, collection_account_type=None) -> Contract:
     proj = db.get(Project, project_id)
     if not proj or proj.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "项目不存在", 404)
@@ -34,6 +36,9 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
         leasing_mode=leasing_mode,
         pricing_authority=pricing_authority, inventory_risk_bearer=inventory_risk_bearer,
         principal_role=principal_role, currency_code=currency_code, booked_rate=booked_rate,
+        purchase_type=purchase_type, delivery_terms=delivery_terms, warranty_terms=warranty_terms,
+        penalty_terms=penalty_terms, prepayment_ratio=prepayment_ratio,
+        collection_account_type=collection_account_type,
     )
     db.add(c)
     db.flush()
@@ -49,7 +54,8 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
 # 二期 W3-4：合同编辑可改字段白名单（金额/类型/项目等核心字段不可改）
 _UPDATEABLE = ("contract_no", "monthly_rent", "start_date", "end_date", "file_path",
                "leasing_mode", "pricing_authority", "inventory_risk_bearer", "principal_role",
-               "currency_code", "booked_rate")
+               "currency_code", "booked_rate", "purchase_type", "delivery_terms",
+               "warranty_terms", "penalty_terms", "prepayment_ratio", "collection_account_type")
 
 
 def update_contract(db: Session, cid, *, actor_id=None, **fields) -> Contract:

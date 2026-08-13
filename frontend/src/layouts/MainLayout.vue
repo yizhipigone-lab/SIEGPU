@@ -10,7 +10,7 @@ import {
   Eye, EyeOff,
   FileSignature, FileText, FolderKanban, GitCompareArrows, HelpCircle, Landmark, LayoutDashboard, LogOut, Package, Receipt,
   Share2, ShieldCheck, ShoppingCart, TrendingUp, User, Users, Wallet,
-  BadgeCheck, BookCheck, PiggyBank,
+  BadgeCheck, BookCheck, PiggyBank, Scale,
   Server,
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
@@ -53,6 +53,7 @@ const allMenuOptions = [
   { label: '预付款', key: '/prepayments', icon: renderIcon(PiggyBank) },
   { label: '付款管控', key: '/payments', icon: renderIcon(BadgeCheck) },
   { label: '收入确认', key: '/revenue-recognitions', icon: renderIcon(BookCheck) },
+  { label: '对账中心', key: '/reconciliation-center', icon: renderIcon(Scale) },
   { label: '主数据', key: 'g1', type: 'group' as const, children: [
     { label: '供应商', key: '/master/suppliers', icon: renderIcon(Building2) },
     { label: '客户', key: '/master/customers', icon: renderIcon(Users) },
@@ -109,6 +110,7 @@ const TITLE_MAP: Record<string, string> = {
   '/prepayments': '预付款台账',
   '/payments': '付款管控',
   '/revenue-recognitions': '收入确认',
+  '/reconciliation-center': '对账中心',
   '/master/suppliers': '供应商',
   '/master/customers': '客户',
   '/master/equipment': '设备型号',

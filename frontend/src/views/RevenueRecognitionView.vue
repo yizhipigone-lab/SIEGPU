@@ -63,6 +63,7 @@ const statusType = (s: string) => ({ 草稿: 'warning', 已确认: 'info', 已�
     <n-card title="收入确认单（计费自动出草稿；审批中心通过后出凭证并同步 EBS）" size="small" style="margin-bottom:14px">
       <n-data-table size="small" :bordered="false" striped :pagination="{ pageSize: 10 }"
         :columns="[
+          { title: '项目', key: 'project_name', width: 140, render: (r: any) => r.project_name || '—' },
           { title: '期间', key: 'period_label', width: 90 },
           { title: '确认日', key: 'recognition_date', width: 110 },
           { title: '金额(不含税)', key: 'amount', align: 'right' as const, render: (r: any) => money(r.amount) },

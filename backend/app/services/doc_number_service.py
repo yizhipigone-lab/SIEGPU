@@ -72,8 +72,14 @@ def ensure_rule(db: Session, doc_type: str) -> DocNumberRule:
 
 
 def next_number(db: Session, doc_type: str) -> str:
-    """生成下一个编号（推进规则行流水；同事务随业务 commit）。跨日期段流水归零。"""
+    """生成下一个编号（推进规则行流水；同事务随业务 commit）。跨日期段流水归零。
+    并发安全：规则行 SELECT FOR UPDATE 行锁串行化 + populate_existing 强制刷新
+    （身份映射缓存不刷新会读到等锁前的旧 last_seq → 并发重号撞 SN 唯一约束，实测复现）。"""
     rule = ensure_rule(db, doc_type)
+    rule = db.execute(
+        select(DocNumberRule).where(DocNumberRule.id == rule.id)
+        .with_for_update().execution_options(populate_existing=True)
+    ).scalar_one()
     period = _period_of(rule.date_format, date.today())
     if period != (rule.current_period or ""):
         rule.current_period = period

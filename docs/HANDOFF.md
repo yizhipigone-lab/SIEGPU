@@ -1,9 +1,9 @@
 # SIEGPU ERP 开发接力（Handoff）
 
 > **最后更新**：2026-08-13
-> **最近里程碑**：二期全部收官（W13-14 全链联调）+ **三期启动：收入确认管理（§4.2）完成**——pytest 359 绿 / e2e 58 绿 / 浏览器真点 :8088；二期改动已分类提交（4 笔 commit）
-> **当前分支**：`main`　**工作区状态**：收入确认阶段改动未提交（等验收后提交），其余已全部入库
-> **给接手者**：先读「§3 当前进度」和「§4 铁律」。二期 7 阶段全部完成、15 张新表落地；三期 §4.2 收入确认已完成（见 §3.9）。
+> **最近里程碑**：二期收官 + 三期 §4.2 收入确认 + §4.3 对账中心（7 维）完成——pytest 367 绿 / e2e 59 绿 / 浏览器真点 :8088；改动分类提交入库
+> **当前分支**：`main`　**工作区状态**：三期 §4.3 改动验收后提交；工作区另有 `e2e/fetch-doubao.js`（来源待确认，勿提交）
+> **给接手者**：先读「§3 当前进度」和「§4 铁律」。二期 7 阶段全部完成；三期进度见 §3.9（收入确认）/§3.10（对账中心）。
 
 ---
 
@@ -23,14 +23,14 @@ SIEGPU —— **算力租赁 ERP**（GPU 服务器租给客户、走金租融资
 # 起全栈（db / backend :8000 / frontend :8088）
 docker compose up -d
 
-# 后端测试（当前 359 条）
+# 后端测试（当前 367 条）
 docker compose exec backend pytest app/tests/ -q
 
 # 前端类型检查 + 构建（host 上有 node_modules，可直接跑）
 cd frontend && npm run build          # = vue-tsc + vite build
 # 注意：vue-tsc 查不出 Vue 模板标签错误，靠 vite build 才抓得到（已踩过）
 
-# e2e（Playwright，当前 58 条；baseURL 走 :8088）
+# e2e（Playwright，当前 59 条；baseURL 走 :8088）
 cd e2e && npx playwright test
 # 单跑某条：cd e2e && npx playwright test tests/ebs.spec.ts
 ```
@@ -227,6 +227,25 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 
 **踩坑**：`approvals.submitted_by` 是硬 FK——老测试用随机 UUID 作 actor 直接撞外键；submit 改为「用户不存在降级 NULL」（同 audit_service 范式）。
 
+### 3.10 三期 §4.3 对账中心（刚完成，✅ 已端到端验证）
+
+**1 维 → 7 维对账**（父计划 §4.3）：`services/reconciliation_service.py` + `endpoints/reconciliation.py`（`/api/reconciliation-center/*`）+ `views/ReconciliationCenterView.vue`（有差异整行标红 `.diff-row`）。
+
+| 维度 | 内容 | 差异标记 |
+| --- | --- | --- |
+| 1 销售全链路 | 合同额→计费→开票→收款→**已确认收入**（revenue_recognitions 已确认/已同步EBS Σ） | 已计未开/已开未收/已收未开/已确认未开/确认超计费 |
+| 2 采购四单 | 合同→发票→付款（旧链接+新核销行两路合计）+ 预付款核销核对（总额/已结转/余额） | 已付未开票/已开未付/预付款核销超额 |
+| 3 资产交付 | 采购→入库→到货→转固→点亮（单台计数） | 采购≠入库/转固≠到货/点亮超转固 |
+| 4 监管账户 | 监管户合同：租金已回款−还款支出 vs 最低留存（leasing_rule_configs `supervised_min_retention`） | 留存不足 |
+| 5 汇兑损益 | 入账金额 vs 设备分摊行合计 | 分摊不平/未分摊到设备 |
+| 6 业财一致性 | SIEGPU vs EBS（Mock 镜像）：应收/应付/资产/资金净头寸；`inject_demo=true` 注入 3 条模拟差异（父计划验收标准，验证展示-标红-定位管道） | 业财差异 |
+| 7 三流差异明细 | 只列有差异行，按客户/供应商筛选 | 继承 1/2 维 flags |
+
+**顺手补齐**：合同深化 6 字段（purchase_type/…/collection_account_type）此前只到模型层，本次接入 ContractCreate/Update/Out + create_contract/_UPDATEABLE（dim4 监管户依赖它）。
+**验证证据**：pytest 367 全绿（+8 各维 golden）/ e2e 59 全绿 / 浏览器真点（注入 3 条标红截图 `e2e/screenshots/p3-reconciliation-center.png`）。本期无新迁移（复用 0014/0016 字段）。
+
+**踩坑（本期实测）**：① SN 并发重号——规则行 `SELECT FOR UPDATE` 不加 `populate_existing=True` 时 SQLAlchemy 身份映射返回等锁前的旧 `last_seq` → 并发重号撞唯一约束（10 并发压测复现，修复后 10/10 唯一）。② 收入确认页期间+金额撞并发 spec → 列表加「项目」列作唯一锚点（也顺手提升了对账定位体验）。③ 对账卡片分页（pageSize 8）会把 e2e 锚点行藏到第 2 页——锚点行所在卡（维度 1/7）关分页全量渲染。
+
 **二期 5 项裁定（v1.2 全定稿，接手勿推翻）**：① 立即开工从 W1-2 起 ② R1 规则用 `'经营租赁'`（schema CHECK 不动，零迁移）③ 债④ 现在就修（已修）④ W11-12 重排（doc_number/leasing_rule 前移 W9-10）⑤ D2 预付款复用 devices 字段、不建 prepayments 表（二期 16→15 表）。
 
 ## 4. 铁律（必读，违反会出事）
@@ -285,6 +304,7 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 | 坑 | 说明 / 规避 |
 | --- | --- |
 | **audit_logs.action 是 VARCHAR(20)+CHECK 枚举** | 新 audit 动作名 ≤20 字符，且必须同步扩 CHECK（schema.sql + alembic 双写，含全部旧枚举只扩不收窄）；downgrade 收窄前先 DELETE 新动作行（0007 guard 范式），否则存量行让 ADD CONSTRAINT 失败 |
+| **SN 并发重号（FOR UPDATE 无效陷阱）** | 规则行加行锁还不够——SQLAlchemy 身份映射会返回缓存的旧 `last_seq`（等锁前的值）→ 并发重号撞唯一约束；必须 `with_for_update() + execution_options(populate_existing=True)` 强制刷新。10 并发实测复现→修复后 10/10 唯一 |
 | **宿主 :8080 是野 uvicorn，前端在 :8088** | curl/MCP 验证前端一律 :8088；判别看 `server:` header（nginx vs uvicorn）。详见 §2 |
 | **改前端 restart/up 不带 --build 不生效** | nginx 构建时烤 dist，无 source mount；必须 `up -d --build frontend` |
 | **pytest 绿 ≠ 生产对（autoflush 铁律）** | 生产 `SessionLocal autoflush=False`；ORM 关系字段设值后须显式 flush 才被同事务查询命中（债①根因） |
@@ -296,15 +316,15 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 
 ## 7. 给下一步的建议
 
-**下一棒建议（二期已收官，三期 §4.2 已完成）**：
+**下一棒建议（三期进行中）**：
 
-1. **三期 §4.3 对账中心完善（1 维 → 7 维）**：销售全链路穿透（合同→计费→开票→收款→**已确认收入**）、采购四单、资产交付、监管账户、汇兑损益、业财一致性（Mock 下手动注入 3 条模拟差异验证展示管道）、三流差异明细。
-2. **三期 §4.4 采购退货 + 合同终止（设备粒度）**：`return_orders` / `return_order_devices`。
+1. **三期 §4.4 采购退货 + 合同终止（设备粒度）**：`return_orders` / `return_order_devices`（到货不合格/压测不通过/合同终止；退货申请→出库确认→供应商收货→红字发票→退款核销/预付款冲回）。
+2. **三期其余**：监管账户强化（§4.1）、预算管控、资金池预测（§4.5+，见父计划 §4 全表）。
 3. **顺手待办**：「发 EBS 接口规范申请函」（外部流程，W1 起挂着）；`e2e/fetch-doubao.js` 来源待确认，勿盲目提交。
 
 **接手者第一件事**：跟用户确认走哪条。**不要未经确认就开新实现**（规则1：先问清楚）。
 
-> 工作区现状提示：二期已全部入库（4 笔 commit）；三期 §4.2 收入确认改动待验收后提交。
+> 工作区现状提示：二期已全部入库（4 笔 commit）+ 三期 §4.2 已入库；§4.3 对账中心改动验收后提交。
 
 ## 8. 跨会话 memory（`~/.claude/projects/e--1target-SIEGPU/memory/`）
 
@@ -320,4 +340,4 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 
 ---
 
-> **文档版本**：2026-08-13（二期收官 + 三期 §4.2 收入确认版）｜**下一状态**：三期 §4.3 对账中心 / §4.4 退货链路（等用户拍板）
+> **文档版本**：2026-08-13（二期收官 + 三期 §4.2/§4.3 版）｜**下一状态**：三期 §4.4 退货链路 / §4.1 监管账户强化（等用户拍板）

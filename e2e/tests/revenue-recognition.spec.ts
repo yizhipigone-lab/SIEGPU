@@ -66,13 +66,14 @@ test('收入确认：计费出草稿 → 审批通过 → Mock 凭证 → 已同
     description_template: '确认{period}经营租赁收入',
   }, '科目映射')
 
-  // ---- UI：收入确认页草稿可见（期间 2026-09 + 不含税金额 + 经营租赁）----
+  // ---- UI：收入确认页草稿可见（项目列锚定本 spec 行，防并发撞同期间同额行）----
   await uiLogin(page)
   await page.goto('/revenue-recognitions')
   await expect(page.getByRole('heading', { name: '收入确认', exact: true })).toBeVisible()
-  const row = page.locator('.n-data-table-tr', { hasText: '2026-09' }).filter({ hasText: '经营租赁' }).first()
+  const row = page.locator('.n-data-table-tr', { hasText: `E2E-确认-${RUN}` })
   await expect(row).toBeVisible({ timeout: 8000 })
   await expect(row).toContainText('草稿')
+  await expect(row).toContainText('经营租赁')
 
   // ---- 审批中心通过（锚点=项目名，防并发撞标题）----
   await page.goto('/payments')
@@ -81,11 +82,11 @@ test('收入确认：计费出草稿 → 审批通过 → Mock 凭证 → 已同
   await tag.getByRole('button', { name: '通过' }).click()
   await expect(page.locator('.n-message', { hasText: '已通过' })).toBeVisible({ timeout: 8000 })
 
-  // ---- UI：状态 已同步EBS + 凭证弹窗追值 ----
+  // ---- UI：行状态 已同步EBS + 点行开凭证弹窗追值 ----
   await page.goto('/revenue-recognitions')
-  const doneTag = page.locator('.n-tag', { hasText: '2026-09 已同步EBS' })
-  await expect(doneTag).toBeVisible({ timeout: 8000 })
-  await doneTag.click()
+  const myRow = page.locator('.n-data-table-tr', { hasText: `E2E-确认-${RUN}` })
+  await expect(myRow).toContainText('已同步EBS', { timeout: 8000 })
+  await myRow.click()
   const voucherModal = page.locator('.n-modal').filter({ hasText: 'Mock 凭证' })
   await voucherModal.waitFor()
   await expect(voucherModal).toContainText('1122.01')
