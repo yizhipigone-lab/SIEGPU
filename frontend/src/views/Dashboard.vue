@@ -24,19 +24,21 @@ const alerts = ref<any[]>([])
 const overview = ref<any[]>([])
 const months = ref<any[]>([])
 const myTasks = ref<any[]>([])
+const board = ref<any>(null)  // 三期 §4.5 经营看板
 
 async function refresh() {
   try {
-    const [s, a, o, m, t] = await Promise.all([
+    const [s, a, o, m, t, b] = await Promise.all([
       api.get('/capital/summary'), api.get('/dashboard/alerts'),
       api.get('/reports/project-overview'), api.get('/reports/capital-monthly'),
-      api.get('/workflows/my-tasks'),
+      api.get('/workflows/my-tasks'), api.get('/dashboard/business'),
     ])
     summary.value = s.data
     alerts.value = a.data.items
     overview.value = o.data.items
     months.value = (m.data.items || []).slice(-12)
     myTasks.value = t.data || []
+    board.value = b.data
   } catch { msg.error('加载失败') }
 }
 
@@ -218,6 +220,56 @@ const ovCols: DataTableColumns = [
         <span style="color:#64748B">暂无待办，一切就绪</span>
       </n-card>
 
+      <!-- ===== 三期 §4.5 经营看板（总监/管理员视角） ===== -->
+      <template v-if="board">
+        <n-card title="经营看板" style="margin-top:16px" data-testid="business-board">
+          <div class="metrics">
+            <div class="metric"><div class="m-label">当期合同额</div><div class="num m-val">{{ money(board.metrics.contract_amount_current) }}</div></div>
+            <div class="metric"><div class="m-label">累计回款</div><div class="num m-val">{{ money(board.metrics.total_received) }}</div></div>
+            <div class="metric"><div class="m-label">开票金额</div><div class="num m-val">{{ money(board.metrics.invoiced_total) }}</div></div>
+            <div class="metric"><div class="m-label">确认收入</div><div class="num m-val">{{ money(board.metrics.recognized_total) }}</div></div>
+            <div class="metric"><div class="m-label">融资余额</div><div class="num m-val">{{ money(board.metrics.leasing_balance) }}</div></div>
+            <div class="metric"><div class="m-label">资金池余额</div><div class="num m-val">{{ money(board.metrics.pool_balance) }}</div></div>
+            <div class="metric"><div class="m-label">监管账户余额</div><div class="num m-val">{{ money(board.metrics.supervised_balance) }}</div></div>
+            <div class="metric"><div class="m-label">设备交付进度</div><div class="num m-val">{{ board.metrics.device_lit }}/{{ board.metrics.device_total }} 点亮</div></div>
+          </div>
+        </n-card>
+
+        <div class="grid3">
+          <n-card title="待办中心" data-testid="todo-center">
+            <n-space vertical :size="6">
+              <div v-for="t in board.todo_center" :key="t.kind" class="todo-row" @click="router.push(t.route)">
+                <span>{{ t.kind }}</span>
+                <n-tag size="small" :bordered="false"
+                  :type="t.level === '高危' ? 'error' : t.level === '警告' ? 'warning' : 'success'">
+                  {{ t.count }}
+                </n-tag>
+              </div>
+            </n-space>
+          </n-card>
+          <n-card title="资金预测概览（未来 3 个月·简易版）">
+            <n-data-table size="small" :bordered="false"
+              :columns="[
+                { title: '月份', key: 'month' },
+                { title: '流入', key: 'inflow', align: 'right' as const, render: (r: any) => money(r.inflow) },
+                { title: '流出', key: 'outflow', align: 'right' as const, render: (r: any) => money(r.outflow) },
+                { title: '期末', key: 'closing', align: 'right' as const, render: (r: any) => money(r.closing) },
+              ]"
+              :data="board.forecast"
+              :row-class-name="(r: any) => (r.gap ? 'gap-row' : '')" />
+            <div class="tiny" style="color:#94A3B8;margin-top:6px">流入=执行中销售合同月租；流出=当月到期还款+未付采购发票。红行=缺口。接 §4.6 引擎后升级为多场景。</div>
+          </n-card>
+          <n-card title="EBS 同步状态">
+            <n-space vertical :size="6">
+              <div class="todo-row"><span>成功</span><n-tag size="small" type="success" :bordered="false">{{ board.ebs.success }}</n-tag></div>
+              <div class="todo-row"><span>失败</span><n-tag size="small" :type="board.ebs.failed ? 'error' : 'success'" :bordered="false">{{ board.ebs.failed }}</n-tag></div>
+              <div class="todo-row"><span>最近同步</span><span class="tiny">{{ board.ebs.last_synced_at ? String(board.ebs.last_synced_at).slice(0, 19).replace('T', ' ') : '—' }}</span></div>
+            </n-space>
+            <n-button size="small" quaternary style="margin-top:8px" @click="router.push('/ebs')">进 EBS 监控</n-button>
+          </n-card>
+        </div>
+      </template>
+
       <div class="grid">
         <n-card title="资金月度趋势" class="span2">
           <EChart :option="monthlyOption" height="300px" />
@@ -266,6 +318,12 @@ const ovCols: DataTableColumns = [
 <style scoped>
 .kpi { flex: 1; min-width: 160px; }
 .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-top: 16px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 16px; margin-top: 16px; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.metric .m-label { font-size: 12px; color: #94A3B8; }
+.metric .m-val { font-size: 18px; font-weight: 600; }
+.todo-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; cursor: pointer; border-bottom: 1px dashed #F1F5F9; }
+:deep(.gap-row td) { background: #FEF2F2 !important; color: #B91C1C; }
 .span2 { grid-row: span 1; }
 @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
 :deep(.num) { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
