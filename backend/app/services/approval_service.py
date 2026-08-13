@@ -18,6 +18,12 @@ from app.models.payment import Approval
 def submit(db: Session, *, biz_type: str, biz_id=None, title: str,
            submitted_by: uuid.UUID | None = None) -> Approval:
     """提交审批（一单同时只允一条待审批）。返回审批行。"""
+    # submitted_by 硬 FK：不存在的用户降级为 NULL（同 audit_service 范式，不阻断主流程——
+    # 老测试/系统调用常用随机 UUID 作 actor）
+    if submitted_by is not None:
+        from app.models.user import User
+        if db.get(User, submitted_by) is None:
+            submitted_by = None
     if biz_id is not None:
         pending = db.execute(select(Approval).where(
             Approval.biz_type == biz_type, Approval.biz_id == biz_id,
@@ -83,6 +89,10 @@ def _cascade(db: Session, a: Approval, *, approved: bool, actor_id=None) -> None
         if pr is not None:
             pr.status = "已批准" if approved else "已驳回"
             db.flush()
+    elif a.biz_type == "收入确认" and a.biz_id:
+        # 三期 §4.2：通过 → 已确认 + Mock 凭证 + EBS 出站；驳回 → 保持草稿
+        from app.services import revenue_recognition_service as _rr
+        _rr.on_approval_result(db, a.biz_id, approved=approved, actor_id=actor_id)
 
 
 def list_approvals(db: Session, *, biz_type=None, status=None) -> list[Approval]:

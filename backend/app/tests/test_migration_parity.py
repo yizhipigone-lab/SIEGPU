@@ -383,3 +383,27 @@ def test_alembic_0015_creates_and_drops_all():
     down = code.split("def downgrade")[1]
     assert "DROP COLUMN IF EXISTS certification_status" in down
     assert "DROP COLUMN IF EXISTS certification_date" in down
+
+
+# ---- 0016 三期 §4.2：收入确认 + 科目映射（2 新表，纯加法） ----
+
+ALEMBIC_0016 = ROOT / "alembic" / "versions" / "0016_revenue_recognition.py"
+
+
+def test_schema_sql_revenue_recognition_tables():
+    sql = _read(SCHEMA_SQL)
+    assert "CREATE TABLE revenue_recognitions" in sql
+    assert "CREATE TABLE gl_account_mappings" in sql
+    assert "uq_revrec_billing" in sql  # 同 billing 幂等
+    assert "status IN ('草稿','已确认','已同步EBS')" in sql
+    assert "uq_glam_event_method" in sql
+
+
+def test_alembic_0016_creates_and_drops_all():
+    code = _read(ALEMBIC_0016)
+    assert 'revision = "0016_revenue_recognition"' in code
+    assert 'down_revision = "0015_payment_approval"' in code
+    down = code.split("def downgrade")[1]
+    for t in ("revenue_recognitions", "gl_account_mappings"):
+        assert f"CREATE TABLE {t}" in code
+        assert f"DROP TABLE IF EXISTS {t}" in down

@@ -143,6 +143,19 @@ def purge_e2e(db) -> dict:
     # dev-DB Mock 期视为测试配置全清（demo 未配置；残留会让自动投保在后续 run 误触发）
     res = db.execute(text("DELETE FROM insurance_configs"))
     deleted["insurance_configs"] = res.rowcount
+    # 三期 §4.2：gl_account_mappings 同理全清（event+method 唯一约束防残留撞 409）；
+    # approvals（收入确认 biz_id→revenue_recognitions）+ ebs_sync_logs（revenue_recognition 实体）孤儿行
+    res = db.execute(text("DELETE FROM gl_account_mappings"))
+    deleted["gl_account_mappings"] = res.rowcount
+    res = db.execute(text(
+        "DELETE FROM approvals WHERE biz_type = '收入确认' AND biz_id NOT IN (SELECT id FROM revenue_recognitions)"
+    ))
+    deleted["approvals(revenue_orphan)"] = res.rowcount
+    res = db.execute(text(
+        "DELETE FROM ebs_sync_logs WHERE entity_type = 'revenue_recognition'"
+        " AND entity_id NOT IN (SELECT id::text FROM revenue_recognitions)"
+    ))
+    deleted["ebs_sync_logs(revenue_orphan)"] = res.rowcount
 
     # 5) 主数据（客户/供应商/型号）—— 引用它们的子表已清，可安全删
     for tbl, col, pat in [("customers", "name", _CUST_RE),

@@ -75,6 +75,9 @@ def generate_billing(db: Session, *, order_id, contract_id, period_index: int, b
     )
     db.add(b)
     db.flush()
+    # 三期 §4.2：计费生成 → 自动出收入确认草稿（订单维：无 device，合同级草稿）
+    from app.services import revenue_recognition_service as _rr
+    _rr.generate_draft_for_billing(db, b, actor_id=created_by)
     from app.services import workflow_service as _wf
     _wf.after_action(db, o.project_id)
     return b
@@ -173,6 +176,9 @@ def generate_billing_device(db: Session, *, device_id, contract_id, period_index
     # 二期 W9-10（D2）：按台计费生成 → 预付款按月直线结转（无预付款/已结清/无合同月数自动跳过）
     from app.services import prepayment_service as _pp
     _pp.settle_for_billing(db, b, actor_id=created_by)
+    # 三期 §4.2：计费生成 → 自动出收入确认草稿（billing_id 幂等）
+    from app.services import revenue_recognition_service as _rr
+    _rr.generate_draft_for_billing(db, b, actor_id=created_by)
     from app.services import workflow_service as _wf
     _wf.after_action(db, d.project_id)
     return b

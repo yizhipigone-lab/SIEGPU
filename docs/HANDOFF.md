@@ -1,9 +1,9 @@
 # SIEGPU ERP 开发接力（Handoff）
 
 > **最后更新**：2026-08-13
-> **最近里程碑**：**二期全部收官**——W13-14 全链联调完成（`phase2-chain.spec.ts` 一条 journey 串全链），pytest 349 绿 / e2e 57 绿 / 浏览器真点 :8088
-> **当前分支**：`main`　**工作区状态**：大量未提交改动（一期遗留 + 二期全部 7 阶段），**未 git commit（用户铁律：未经授权不提交）**
-> **给接手者**：先读「§3 当前进度」和「§4 铁律」。二期 7 阶段全部完成、15 张新表全部落地；下一棒建议见 §7（提交收口 or 三期规划）。
+> **最近里程碑**：二期全部收官（W13-14 全链联调）+ **三期启动：收入确认管理（§4.2）完成**——pytest 359 绿 / e2e 58 绿 / 浏览器真点 :8088；二期改动已分类提交（4 笔 commit）
+> **当前分支**：`main`　**工作区状态**：收入确认阶段改动未提交（等验收后提交），其余已全部入库
+> **给接手者**：先读「§3 当前进度」和「§4 铁律」。二期 7 阶段全部完成、15 张新表落地；三期 §4.2 收入确认已完成（见 §3.9）。
 
 ---
 
@@ -23,14 +23,14 @@ SIEGPU —— **算力租赁 ERP**（GPU 服务器租给客户、走金租融资
 # 起全栈（db / backend :8000 / frontend :8088）
 docker compose up -d
 
-# 后端测试（当前 349 条）
+# 后端测试（当前 359 条）
 docker compose exec backend pytest app/tests/ -q
 
 # 前端类型检查 + 构建（host 上有 node_modules，可直接跑）
 cd frontend && npm run build          # = vue-tsc + vite build
 # 注意：vue-tsc 查不出 Vue 模板标签错误，靠 vite build 才抓得到（已踩过）
 
-# e2e（Playwright，当前 57 条；baseURL 走 :8088）
+# e2e（Playwright，当前 58 条；baseURL 走 :8088）
 cd e2e && npx playwright test
 # 单跑某条：cd e2e && npx playwright test tests/ebs.spec.ts
 ```
@@ -210,7 +210,22 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 | W11-12 | 付款三重管控 + 通用审批 + 进项税 | 3 | ✅ |
 | W13-14 | 全链联调 + golden 算例 + 端到端串烧 | 0 | ✅ |
 
-**期外里程碑（未做，父计划 §0.3）**：EBS 真对接（Mock→真规范映射可能返工，已接受折中；「发 EBS 接口规范申请函」外部动作仍挂起）、外币重估、收入确认动作（三期 §4.2）、EBS 入站。
+**期外里程碑（未做，父计划 §0.3）**：EBS 真对接（Mock→真规范映射可能返工，已接受折中；「发 EBS 接口规范申请函」外部动作仍挂起）、外币重估、EBS 入站。
+
+### 3.9 三期 §4.2 收入确认管理（刚完成，✅ 已端到端验证）
+
+**收入确认 + 科目映射**：计费自动出确认**草稿**（不含税权责口径，单台粒度，`billing_id` 幂等）→ 通用审批（`收入确认` biz_type，审批中心通过/驳回）→ 通过 → 已确认 + 按 `gl_account_mappings` 生成 Mock 凭证（方法精确映射优先，通用兜底，缺映射标 `mapping_missing` 不静默错账）→ EBS 出站 → 已同步EBS。
+
+| 层 | 内容 | 关键文件 |
+| --- | --- | --- |
+| 新表（2） | `revenue_recognitions`（uq_revrec_billing 幂等）/ `gl_account_mappings`（event+method 唯一） | `models/revenue.py`、`alembic/versions/0016_revenue_recognition.py` |
+| 服务 | 计费钩子（device/order 两维都挂）+ 审批级联（approval_service._cascade 加「收入确认」分支）+ 凭证生成 + EBS `entity_type='revenue_recognition'` | `services/revenue_recognition_service.py`、`billing_service.py` 钩子 |
+| 前端 | RevenueRecognitionView：确认单列表 + 凭证弹窗（借贷科目）+ 科目映射卡 + 存量补草稿 | `views/RevenueRecognitionView.vue`、`router`（`/revenue-recognitions`） |
+| 测试 | `test_revenue_recognition.py` 8 条（草稿自动生成/方法快照/凭证 golden 1122.01→6001.01/通用兜底/缺映射标记/驳回保草稿/补建幂等/映射防重）；e2e `tests/revenue-recognition.spec.ts` | — |
+
+**验证证据**：pytest 359 全绿 / e2e 58 全绿 / 迁移 up→down→up 实测 / 浏览器真点（截图 `e2e/screenshots/p3-revenue-recognition.png`）。
+
+**踩坑**：`approvals.submitted_by` 是硬 FK——老测试用随机 UUID 作 actor 直接撞外键；submit 改为「用户不存在降级 NULL」（同 audit_service 范式）。
 
 **二期 5 项裁定（v1.2 全定稿，接手勿推翻）**：① 立即开工从 W1-2 起 ② R1 规则用 `'经营租赁'`（schema CHECK 不动，零迁移）③ 债④ 现在就修（已修）④ W11-12 重排（doc_number/leasing_rule 前移 W9-10）⑤ D2 预付款复用 devices 字段、不建 prepayments 表（二期 16→15 表）。
 
@@ -281,15 +296,15 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 
 ## 7. 给下一步的建议
 
-**下一棒建议（二期已收官）**：
+**下一棒建议（二期已收官，三期 §4.2 已完成）**：
 
-1. **提交收口（推荐优先）**：工作区积攒一期遗留 + 二期 7 阶段全部改动，请用户拍板后按 `git status` + `git diff --stat` 分类提交（别 `git add -A`；`e2e/fetch-doubao.js` 来源待确认，勿盲目提交）。
-2. **三期规划**（父计划 §4）：收入确认（`revenue_recognitions`，承接 W3-4 判定快照）、EBS 真对接（先等接口规范申请函回音）、外币重估。
-3. **顺手待办**：「发 EBS 接口规范申请函」（外部流程，W1 起挂着）。
+1. **三期 §4.3 对账中心完善（1 维 → 7 维）**：销售全链路穿透（合同→计费→开票→收款→**已确认收入**）、采购四单、资产交付、监管账户、汇兑损益、业财一致性（Mock 下手动注入 3 条模拟差异验证展示管道）、三流差异明细。
+2. **三期 §4.4 采购退货 + 合同终止（设备粒度）**：`return_orders` / `return_order_devices`。
+3. **顺手待办**：「发 EBS 接口规范申请函」（外部流程，W1 起挂着）；`e2e/fetch-doubao.js` 来源待确认，勿盲目提交。
 
 **接手者第一件事**：跟用户确认走哪条。**不要未经确认就开新实现**（规则1：先问清楚）。
 
-> 工作区现状提示：除二期全部改动外，还有一批一期遗留未提交的改动（多个 e2e spec 微调、`docker-compose.yml` 8088 端口、`playwright.config.ts` baseURL、`e2e/fetch-doubao.js`〔来源待确认，勿盲目提交〕）。
+> 工作区现状提示：二期已全部入库（4 笔 commit）；三期 §4.2 收入确认改动待验收后提交。
 
 ## 8. 跨会话 memory（`~/.claude/projects/e--1target-SIEGPU/memory/`）
 
@@ -305,4 +320,4 @@ pytest 249 → **349**（+100）；e2e 50 → **57**（+7 条二期主干 + 全�
 
 ---
 
-> **文档版本**：2026-08-13（**二期收官版**）｜**下一状态**：二期全部完成——提交收口 or 三期规划（等用户拍板）
+> **文档版本**：2026-08-13（二期收官 + 三期 §4.2 收入确认版）｜**下一状态**：三期 §4.3 对账中心 / §4.4 退货链路（等用户拍板）
