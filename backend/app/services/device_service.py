@@ -426,6 +426,9 @@ def advance_device_stage(db: Session, *, device_id, stage, status,
     返回 (device, stage_row)。点亮验收→已完成 在 W3-4 仅置完成（按台资产/计费在 W5-6）。
     """
     d = get_device_or_404(db, device_id)
+    # 三期 §4.4：已退货设备不可再推进（退货出库即脱离状态机）
+    if d.status == "已退货":
+        raise BusinessError("ILLEGAL_TRANSITION", f"设备 {d.sn} 已退货，不可再推进节点", 409)
     if stage not in DEVICE_STAGES:
         raise BusinessError("BAD_REQUEST", f"未知设备节点：{stage}", 400)
     stages = _ensure_device_stages(db, d.id)

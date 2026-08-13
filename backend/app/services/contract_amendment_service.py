@@ -76,6 +76,15 @@ def terminate_contract(db: Session, contract_id, *, termination_date: date,
     if c.status == "已终止":
         raise BusinessError("DUPLICATE", "合同已终止", 409)
     c.status = "已终止"
+    # 三期 §4.4 合同终止结算：销售终止 → 资源释放（设备摘下销售合同，回退为可租/可用）
+    released = 0
+    if c.type == "SALES":
+        from app.models.device import Device
+        for d in db.execute(select(Device).where(
+                Device.sales_contract_id == c.id, Device.deleted_at.is_(None))).scalars().all():
+            d.sales_contract_id = None
+            released += 1
+        db.flush()
     row = ContractTermination(contract_id=c.id, termination_date=termination_date,
                               reason=reason, settlement_note=settlement_note,
                               created_by=actor_id)
@@ -83,7 +92,7 @@ def terminate_contract(db: Session, contract_id, *, termination_date: date,
     db.flush()
     from app.services import audit_service as _audit
     _audit.log(db, user_id=actor_id, action="UPDATE", target_type="contract",
-               target_id=c.id, after_json={"status": "已终止", "reason": reason})
+               target_id=c.id, after_json={"status": "已终止", "reason": reason, "released_devices": released})
     from app.services import ebs_sync_service as _ebs
     try:
         _ebs.sync_contract(db, c.id, sync_type="update")

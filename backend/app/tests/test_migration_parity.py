@@ -407,3 +407,31 @@ def test_alembic_0016_creates_and_drops_all():
     for t in ("revenue_recognitions", "gl_account_mappings"):
         assert f"CREATE TABLE {t}" in code
         assert f"DROP TABLE IF EXISTS {t}" in down
+
+
+# ---- 0017 三期 §4.4：采购退货（2 新表 + devices.status CHECK 扩'已退货'） ----
+
+ALEMBIC_0017 = ROOT / "alembic" / "versions" / "0017_return_orders.py"
+
+
+def test_schema_sql_return_orders():
+    sql = _read(SCHEMA_SQL)
+    assert "CREATE TABLE return_orders" in sql
+    assert "CREATE TABLE return_order_devices" in sql
+    assert "uq_return_device" in sql
+    assert "'已退货'" in sql  # devices.status CHECK 扩枚举
+    assert "return_type IN ('到货不合格','压测不通过','合同终止')" in sql
+
+
+def test_alembic_0017_creates_and_drops_all():
+    code = _read(ALEMBIC_0017)
+    assert 'revision = "0017_return_orders"' in code
+    assert 'down_revision = "0016_revenue_recognition"' in code
+    down = code.split("def downgrade")[1]
+    for t in ("return_orders", "return_order_devices"):
+        assert f"CREATE TABLE {t}" in code
+        assert f"DROP TABLE IF EXISTS {t}" in down
+    # CHECK 只扩不收窄 + downgrade 先清'已退货'行 guard
+    assert "'点亮验收','已退货'" in code.split("def downgrade")[0]
+    assert "DELETE FROM devices WHERE status = '已退货'" in down
+    assert "'已退货'" not in down.split("ADD CONSTRAINT")[1]  # 旧 CHECK 不含已退货

@@ -62,6 +62,7 @@ _STANDALONE = [
     ("devices", "sn", r"^GPU-"),
     ("contracts", "contract_no", r"^HT-F"),
     ("invoices", "invoice_no", r"^INV-"),
+    ("invoices", "invoice_no", r"^红字-"),  # 三期 §4.4：退货红字发票
     ("notifications", "body", r"E2E-F1-"),
     # 二期 W5-6：币种/汇率/科目规则（无 project_id，不走级联；e2e 用 E2 前缀币种码 + E2E场景 前缀）
     ("currencies", "code", r"^E2"),
@@ -156,6 +157,11 @@ def purge_e2e(db) -> dict:
         " AND entity_id NOT IN (SELECT id::text FROM revenue_recognitions)"
     ))
     deleted["ebs_sync_logs(revenue_orphan)"] = res.rowcount
+    # 三期 §4.4：return_order_devices 无 project_id → 退货单被级联删后扫孤儿行
+    res = db.execute(text(
+        "DELETE FROM return_order_devices WHERE return_order_id NOT IN (SELECT id FROM return_orders)"
+    ))
+    deleted["return_order_devices(orphan)"] = res.rowcount
 
     # 5) 主数据（客户/供应商/型号）—— 引用它们的子表已清，可安全删
     for tbl, col, pat in [("customers", "name", _CUST_RE),

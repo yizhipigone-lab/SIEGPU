@@ -22,6 +22,7 @@ from app.models.project import Contract, Project
 from app.models.project_workflow import ProjectWorkflow
 from app.models.repayment import Repayment
 from app.models.revenue import GlAccountMapping, RevenueRecognition
+from app.models.return_order import ReturnOrder, ReturnOrderDevice
 from app.models.sales_order import SalesOrder
 from app.models.service_confirmation import ServiceConfirmation
 from app.models.step_audit_log import StepAuditLog
@@ -43,6 +44,7 @@ __all__ = [
     "ContractAmendment", "ContractTermination", "DocNumberRule", "LeasingRuleConfig",
     "Approval", "PaymentRequest", "PaymentSettlement",
     "RevenueRecognition", "GlAccountMapping",
+    "ReturnOrder", "ReturnOrderDevice",
     "FundingReplacement",
     "Order", "DeliveryStage",
     "Device", "BatchDevice", "DeviceStage", "OffBalanceRegister",

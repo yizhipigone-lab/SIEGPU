@@ -25,6 +25,7 @@
 -- 修订：二期W11-12 — 新增3表(approvals/payment_requests/payment_settlements)
 --            扩展 invoices(+certification_status+certification_date)（迁移0015）
 -- 修订：三期—收入确认 — 新增2表(revenue_recognitions/gl_account_mappings, 迁移0016)
+-- 修订：三期§4.4 — 新增2表(return_orders/return_order_devices) devices.status CHECK+已退货（迁移0017）
 -- ===========================================================================
 
 -- updated_at 自动维护
@@ -425,7 +426,7 @@ CREATE TABLE devices (
     leasing_mode VARCHAR(20) CHECK (leasing_mode IS NULL OR leasing_mode IN ('自有','直租','售后回租')),
     purchase_value DECIMAL(18,2) CHECK (purchase_value IS NULL OR purchase_value >= 0),
     prepayment_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (prepayment_amount >= 0),
-    status VARCHAR(20) NOT NULL DEFAULT '订货' CHECK (status IN ('订货','在途','到货','己方压测','上架','客户压测','点亮验收')),
+    status VARCHAR(20) NOT NULL DEFAULT '订货' CHECK (status IN ('订货','在途','到货','己方压测','上架','客户压测','点亮验收','已退货')),
     ownership VARCHAR(20) CHECK (ownership IS NULL OR ownership IN ('表内自有','金租表外','转售表外')),
     prepayment_settled BOOLEAN NOT NULL DEFAULT FALSE,  -- 一期 W7-8：售后回租预付款结转标记
     prepayment_settled_amount DECIMAL(18,2) CHECK (prepayment_settled_amount IS NULL OR prepayment_settled_amount >= 0),  -- 二期 W9-10：累计已结转（D2 复用 devices 单源，迁移 0014）
@@ -1036,6 +1037,42 @@ CREATE INDEX idx_payset_invoice ON payment_settlements(invoice_id) WHERE deleted
 CREATE INDEX idx_payset_device ON payment_settlements(device_id) WHERE deleted_at IS NULL AND device_id IS NOT NULL;
 CREATE TRIGGER trg_payset_updated BEFORE UPDATE ON payment_settlements FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ============================ 采购退货（三期 §4.4 新增） ============================
+-- 与 alembic 0017 双写一致。链路：退货申请→出库确认(设备置'已退货')→供应商收货(财务联动)
+-- →红字发票→退款登记→退款核销/预付款冲回。
+CREATE TABLE return_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    original_order_id UUID REFERENCES orders(id),
+    original_invoice_id UUID REFERENCES invoices(id),
+    return_type VARCHAR(30) NOT NULL CHECK (return_type IN ('到货不合格','压测不通过','合同终止')),
+    status VARCHAR(30) NOT NULL DEFAULT '退货申请' CHECK (status IN ('退货申请','已出库','供应商已收货','已开红字发票','已退款核销','预付款已冲回')),
+    total_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+    prepayment_recover DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (prepayment_recover >= 0),
+    reason TEXT,
+    red_invoice_id UUID REFERENCES invoices(id),
+    refund_txn_id UUID REFERENCES capital_transactions(id),
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_return_project ON return_orders(project_id, status) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_return_updated BEFORE UPDATE ON return_orders FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE return_order_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    return_order_id UUID NOT NULL REFERENCES return_orders(id),
+    device_id UUID NOT NULL REFERENCES devices(id),
+    amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_return_device ON return_order_devices(return_order_id, device_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_returndev_device ON return_order_devices(device_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_returndev_updated BEFORE UPDATE ON return_order_devices FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- ============================ 收入确认 + 科目映射（三期 §4.2 新增） ============================
 -- 与 alembic 0016 双写一致。口径：billings=应收计费（含税，对客户）；revenue_recognitions=权责收入
 -- （不含税，对核算）；与开票/收款解耦；billing_id 关联不强制一一对应（可先确认后开票）。
@@ -1080,7 +1117,7 @@ CREATE TABLE gl_account_mappings (
 CREATE UNIQUE INDEX uq_glam_event_method ON gl_account_mappings(business_event, COALESCE(revenue_method, '')) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_glam_updated BEFORE UPDATE ON gl_account_mappings FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- ============================ 完成：50 张表 ============================
+-- ============================ 完成：52 张表 ============================
 -- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
 -- projects, contracts, leasing_processes, leasing_nodes,
 -- capital_transactions, invoices, capital_allocations,

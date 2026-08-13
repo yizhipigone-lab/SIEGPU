@@ -35,6 +35,7 @@ export const ROLE_MENU: Record<string, readonly string[]> = {
     '/payments', // 二期 W11-12：付款管控+审批中心
     '/revenue-recognitions', // 三期 §4.2：收入确认
     '/reconciliation-center', // 三期 §4.3：对账中心
+    '/returns', // 三期 §4.4：退货管理
   ],
   // 采购对接人（兼商务）：设备 / 项目 / 合同 / 订单 + 主数据维护（供应商/客户/设备型号）
   PROCUREMENT: [

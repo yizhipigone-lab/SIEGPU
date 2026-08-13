@@ -31,6 +31,7 @@ const router = createRouter({
         { path: 'payments', name: 'payments', component: () => import('../views/PaymentView.vue') },
         { path: 'revenue-recognitions', name: 'revenue-recognitions', component: () => import('../views/RevenueRecognitionView.vue') },
         { path: 'reconciliation-center', name: 'reconciliation-center', component: () => import('../views/ReconciliationCenterView.vue') },
+        { path: 'returns', name: 'returns', component: () => import('../views/ReturnView.vue') },
         { path: 'projects/:id/workspace', name: 'workspace', component: () => import('../views/ProjectWorkspace.vue') },
         { path: 'master/:module', name: 'crud', component: () => import('../views/CrudPage.vue') },
       ],
