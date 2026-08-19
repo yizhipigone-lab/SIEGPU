@@ -101,6 +101,8 @@ def get_workflow(db: Session, project_id: uuid.UUID) -> ProjectWorkflow | None:
     ).scalar_one_or_none()
     if not wf:
         wf = infer_workflow(db, project_id)
+    if wf:
+        _attach_step_entity_refs(db, wf)
     return wf
 
 
@@ -416,6 +418,38 @@ def infer_workflow(db: Session, project_id: uuid.UUID) -> ProjectWorkflow | None
 
 
 # —— 内部辅助 ——
+
+def _attach_step_entity_refs(db: Session, wf: ProjectWorkflow) -> None:
+    """为可跳转步骤补对应实体 id + 数量（步骤导航深链数据源）。
+
+    按步骤 name 匹配而非 seq：模板会重编号（seed.py 15 步模板重排 seq），
+    但 name 在三个模板中稳定（销售合同/采购合同/批次订单）。
+    订单步在标准模板中名为「采购订单」（roleGuide.ts aliases 亦列出），一并覆盖。
+    只在读取路径原地补字段，不 flag_modified——引用是计算产物，不落库。
+    """
+    pid = wf.project_id
+
+    def entities(model, **where):
+        q = select(model).where(model.project_id == pid, model.deleted_at.is_(None))
+        for k, v in where.items():
+            q = q.where(getattr(model, k) == v)
+        return db.execute(q.order_by(model.created_at.asc())).scalars().all()
+
+    sales = entities(Contract, type="SALES")
+    purchases = entities(Contract, type="PURCHASE")
+    orders = entities(Order)
+    for s in wf.steps:
+        name = s.get("name")
+        if name == "销售合同" and sales:
+            s["sales_contract_id"] = str(sales[0].id)
+            s["sales_contract_count"] = len(sales)
+        elif name == "采购合同" and purchases:
+            s["purchase_contract_id"] = str(purchases[0].id)
+            s["purchase_contract_count"] = len(purchases)
+        elif name in ("批次订单", "采购订单") and orders:
+            s["order_id"] = str(orders[0].id)
+            s["order_count"] = len(orders)
+
 
 def _step_by_seq(steps: list[dict], seq: int) -> dict | None:
     return next((s for s in steps if s.get("seq") == seq), None)
