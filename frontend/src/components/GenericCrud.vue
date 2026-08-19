@@ -275,7 +275,14 @@ async function submit() {
     payload[f.key] = v
   })
   try {
-    if (editing.value) await R.updateRes(props.config.apiPath, editing.value.id, payload)
+    if (editing.value) {
+      const updated = await R.updateRes(props.config.apiPath, editing.value.id, payload)
+      // 规则3：销售合同金额/条款变更后，后端返回被参照采购合同数，提示用户复核（仅编辑路径；仅销售合同会带非零值）
+      const cnt = (updated as any)?.referenced_purchase_count
+      if (typeof cnt === 'number' && cnt > 0) {
+        msg.warning(`该销售合同已被 ${cnt} 份采购合同参照，请复核采购合同金额是否需调整`)
+      }
+    }
     else await R.createRes(props.config.apiPath, payload)
     showModal.value = false; msg.success('已保存'); await refresh()
   } catch (e: any) {
