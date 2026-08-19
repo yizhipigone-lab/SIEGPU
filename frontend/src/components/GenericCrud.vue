@@ -37,7 +37,8 @@ const searchTerm = ref('')
 const remoteOpts = reactive<Record<string, { label: string; value: string }[]>>({})
 async function loadRemoteOptions() {
   for (const f of props.config.fields) {
-    if (!f.remoteOptions) continue
+    // dependsOn 字段由下方 watcher 按依赖值动态拉取，这里跳过（避免无过滤的全量加载）
+    if (!f.remoteOptions || f.remoteOptions.dependsOn) continue
     const { endpoint, label, value, tags } = f.remoteOptions
     const endpoints = Array.isArray(endpoint) ? endpoint : [endpoint]
     try {
@@ -49,6 +50,27 @@ async function loadRemoteOptions() {
     } catch { remoteOpts[f.key] = [] }
   }
 }
+
+// 依赖式远程下拉：选项随 dependsOn 字段（如 project_id）变化重新拉取，依赖值作为同名查询参数追加。
+// 与上面的静态 loadRemoteOptions 共存：无 dependsOn 的字段仍只在挂载/模块切换时加载一次。
+watch(
+  () => props.config.fields.map((f) => (f.remoteOptions?.dependsOn ? form[f.remoteOptions.dependsOn] : null)),
+  async () => {
+    for (const f of props.config.fields) {
+      const ro = f.remoteOptions
+      if (!ro?.dependsOn || Array.isArray(ro.endpoint)) continue
+      const depVal = form[ro.dependsOn]
+      if (!depVal) { remoteOpts[f.key] = []; continue }
+      const sep = ro.endpoint.includes('?') ? '&' : '?'
+      const url = `${ro.endpoint}${sep}${ro.dependsOn}=${depVal}`
+      try {
+        const r = await api.get(url)
+        remoteOpts[f.key] = (r.data.items || r.data || []).map((it: any) => ({ label: it[ro.label], value: it[ro.value] }))
+      } catch { remoteOpts[f.key] = [] }
+    }
+  },
+  { deep: true, immediate: true },
+)
 
 // 详情抽屉
 const showDetail = ref(false)
@@ -216,9 +238,9 @@ async function advanceStage(stage: any, status: '进行中' | '已完成') {
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 async function submit() {
-  // 必填前端校验（缺必填给中文提示）
+  // 必填前端校验（缺必填给中文提示）；showWhen 隐藏的字段不参与校验（如销售合同不校验参照销售合同）
   const missing = props.config.fields
-    .filter((f) => f.required && (form[f.key] === null || form[f.key] === undefined || form[f.key] === ''))
+    .filter((f) => f.required && (!f.showWhen || f.showWhen(form)) && (form[f.key] === null || form[f.key] === undefined || form[f.key] === ''))
     .map((f) => f.label)
   if (missing.length) { msg.warning(`请填写必填项：${missing.join('、')}`); return }
   // 百分数字段：显示百分数（13）→ 提交小数（0.13）；showWhen 隐藏的字段不提交（如非算力租赁时不带租期）
