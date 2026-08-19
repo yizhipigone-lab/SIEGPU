@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   NButton, NCard, NDataTable, NDatePicker, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag,
   useDialog, useMessage,
@@ -31,6 +32,7 @@ const STATUS_TAG: Record<string, 'default' | 'info' | 'warning' | 'success'> = {
 
 const msg = useMessage()
 const dialog = useDialog()
+const route = useRoute()
 const items = ref<Device[]>([])
 const loading = ref(false)
 
@@ -50,7 +52,8 @@ const invTotals = computed(() => inventory.value.reduce((acc: any, r: any) => ({
 }), { available: 0, rented: 0, pending: 0 }))
 
 // 筛选（型号/金租模式后端暂不支持，前端过滤）
-const fProject = ref<string | null>(null)
+// 步骤导航实体级跳转：?project_id=<pid> 时初始化项目筛选（fProject 走服务端过滤，见 load()）。
+const fProject = ref<string | null>((route.query.project_id as string) || null)
 const fBatch = ref<string | null>(null)
 const fModel = ref<string | null>(null)
 const fStatus = ref<string | null>(null)

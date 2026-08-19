@@ -123,7 +123,21 @@ function blankForm() {
 }
 const loadFailed = ref(false)
 // W4：列表顶部 Tab（如合同按 type、验收按 acceptance_type 切换；''=全部）
-const activeTab = ref<string>('')
+// 步骤导航实体级跳转：?<listParamKey>=<value>（如合同 ?type=SALES）→ 初始定位到对应 Tab。
+function queryTab(): string {
+  const key = props.config.listParamKey
+  const v = key ? route.query[key] : null
+  const s = (Array.isArray(v) ? v[0] : v) ?? ''
+  return props.config.listTabs?.some((t) => t.value === s) ? String(s) : ''
+}
+const activeTab = ref<string>(queryTab())
+// 步骤导航实体级跳转：?project_id=<pid> 时按项目过滤列表（仅模块有 project_id 字段时生效；
+// 相关后端端点 /contracts /orders 等均支持 project_id 查询参数，服务端过滤）。
+function queryProjectId(): string | null {
+  const v = route.query.project_id
+  const s = Array.isArray(v) ? v[0] : v
+  return s && props.config.fields.some((f) => f.key === 'project_id') ? String(s) : null
+}
 async function refresh() {
   loading.value = true
   loadFailed.value = false
@@ -132,6 +146,8 @@ async function refresh() {
     if (props.config.listParamKey && activeTab.value) {
       params[props.config.listParamKey] = activeTab.value
     }
+    const qpid = queryProjectId()
+    if (qpid) params.project_id = qpid
     const d = await R.listRes(props.config.apiPath, params)
     items.value = d.items
   } catch { loadFailed.value = true; msg.error('加载失败') }
@@ -147,8 +163,10 @@ function writeSearch(v: string): void {
 }
 watch(searchTerm, writeSearch)
 watch(activeTab, refresh)
+// ?project_id 变化（如同页内步骤导航跳到另一项目的过滤列表）→ 重新拉取
+watch(() => route.query.project_id, () => refresh())
 onMounted(() => { searchTerm.value = readSearch(); refresh(); loadRemoteOptions() })
-watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = readSearch(); activeTab.value = ''; refresh(); loadRemoteOptions() })
+watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = readSearch(); activeTab.value = queryTab(); refresh(); loadRemoteOptions() })
 
 // 步骤导航实体级跳转：?detail=<id> 时自动打开对应实体的详情抽屉。
 // 列表可能尚未加载完，先挂起 pendingDetailId，待 items 就绪后再打开。

@@ -44,16 +44,16 @@ function stepTarget(s: any): string | null {
   if (name === '销售合同')
     return s.sales_contract_count === 1
       ? `/master/contracts?detail=${s.sales_contract_id}`
-      : (s.sales_contract_count ? `/master/contracts?project=${pid}&type=SALES` : null)
+      : (s.sales_contract_count ? `/master/contracts?project_id=${pid}&type=SALES` : null)
   if (name === '采购合同')
     return s.purchase_contract_count === 1
       ? `/master/contracts?detail=${s.purchase_contract_id}`
-      : (s.purchase_contract_count ? `/master/contracts?project=${pid}&type=PURCHASE` : null)
+      : (s.purchase_contract_count ? `/master/contracts?project_id=${pid}&type=PURCHASE` : null)
   if (name === '批次订单' || name === '采购订单')
     return s.order_count === 1
       ? `/orders?detail=${s.order_id}`
-      : (s.order_count ? `/orders?project=${pid}` : null)
-  if (name === '设备导入' || name === '设备到货' || name === '设备上架') return `/devices?project=${pid}`
+      : (s.order_count ? `/orders?project_id=${pid}` : null)
+  if (name === '设备导入' || name === '设备到货' || name === '设备上架') return `/devices?project_id=${pid}`
   return null
 }
 

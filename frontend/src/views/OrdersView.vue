@@ -11,7 +11,13 @@ import SalesOrdersView from './SalesOrdersView.vue'
 
 const route = useRoute()
 const router = useRouter()
-const tab = ref<string>(route.query.tab === 'sales' ? 'sales' : 'purchase')
+// 步骤导航实体级跳转：订单步骤目标是采购订单列表。
+// ?detail=<id> 由下方 GenericCrud 的 pending-detail 机制打开采购订单详情抽屉（Task 6），
+// ?project_id=<pid> 由 GenericCrud 作为列表过滤消费（GET /orders?project_id=，后端支持）。
+// 带这两个参数时强制落在采购订单页签（即使带 ?tab=sales 也以实体跳转意图为准）。
+const tab = ref<string>(
+  route.query.tab === 'sales' && !route.query.detail && !route.query.project_id ? 'sales' : 'purchase',
+)
 
 watch(tab, (t) => {
   router.replace({ query: { ...route.query, tab: t } })
