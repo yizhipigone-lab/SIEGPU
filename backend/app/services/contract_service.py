@@ -121,13 +121,23 @@ def update_contract(db: Session, cid, *, actor_id=None, **fields) -> Contract:
     return c
 
 
-def list_contracts(db: Session, project_id=None, type=None):
+def list_contracts(db: Session, project_id=None, type=None, parent_contract_id=None):
     stmt = select(Contract).order_by(Contract.created_at.desc())
     if project_id:
         stmt = stmt.where(Contract.project_id == project_id)
     if type:
         stmt = stmt.where(Contract.type == type)
-    return db.execute(stmt).scalars().all()
+    if parent_contract_id:
+        stmt = stmt.where(Contract.parent_contract_id == parent_contract_id)
+    rows = db.execute(stmt).scalars().all()
+    # 附加 parent_contract_no（展示用瞬态属性，批量查一次避免 N+1）
+    parent_ids = {r.parent_contract_id for r in rows if r.parent_contract_id}
+    if parent_ids:
+        parents = {p.id: p for p in db.execute(select(Contract).where(Contract.id.in_(parent_ids))).scalars().all()}
+        for r in rows:
+            p = parents.get(r.parent_contract_id)
+            r.parent_contract_no = p.contract_no if p else None
+    return rows
 
 
 def get_contract_or_404(db: Session, cid) -> Contract:

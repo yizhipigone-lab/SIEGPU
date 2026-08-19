@@ -140,6 +140,7 @@ class ContractOut(BaseModel):
     start_date: date | None
     end_date: date | None
     parent_contract_id: UUID | None
+    parent_contract_no: str | None = None  # 参照合同编号（list 时瞬态附加，展示用）
     status: str
     file_path: str | None = None
     leasing_mode: str | None = None

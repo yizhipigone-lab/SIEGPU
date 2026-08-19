@@ -23,8 +23,9 @@ router = APIRouter()
 
 @router.get("")
 def list_contracts(project_id: UUID | None = None, type: str | None = None,
+                   parent_contract_id: UUID | None = None,
                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = svc.list_contracts(db, project_id=project_id, type=type)
+    rows = svc.list_contracts(db, project_id=project_id, type=type, parent_contract_id=parent_contract_id)
     return {"items": [ContractOut.model_validate(c).model_dump(mode="json") for c in rows], "total": len(rows)}
 
 

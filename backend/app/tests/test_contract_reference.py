@@ -85,3 +85,16 @@ def test_update_sales_returns_reference_count(db):
         amount_incl_tax=Decimal("220"), parent_contract_id=sales.id)
     updated = svc.update_contract(db, sales.id, amount_incl_tax=Decimal("1500"))
     assert getattr(updated, "referenced_purchase_count", None) == 2
+
+
+def test_list_by_parent_and_parent_no(db):
+    proj = _proj(db); cust, sup = _party(db)
+    sales = svc.create_contract(db, project_id=proj.id, type="SALES", party_id=cust.id,
+        amount=Decimal("900"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("1000"), contract_no="S-1")
+    svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("100"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("110"), parent_contract_id=sales.id)
+    children = svc.list_contracts(db, parent_contract_id=sales.id)
+    assert len(children) == 1
+    assert getattr(children[0], "parent_contract_no", None) == "S-1"
