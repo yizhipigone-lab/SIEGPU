@@ -107,7 +107,7 @@ export function TickerBar(): React.ReactElement {
               <span style={styles.quoteName}>{q.name}</span>
               <span style={styles.quotePrice}>{q.price.toFixed(2)}</span>
               <span style={changeStyle(q.changePct)}>
-                {q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '—'} {q.changePct >= 0 ? '+' : ''}{q.changePct.toFixed(2)}%
+                {q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '—'} {q.changePct > 0 ? '+' : ''}{q.changePct.toFixed(2)}%
               </span>
             </div>
           ))}
