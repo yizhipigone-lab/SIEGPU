@@ -45,3 +45,30 @@ def test_parent_must_be_same_project_sales(db):
         svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
             amount=Decimal("100"), tax_rate=Decimal("0.13"),
             amount_incl_tax=Decimal("110"), parent_contract_id=sales_other.id)
+
+
+def test_purchase_total_capped_by_sales(db):
+    proj = _proj(db); cust, sup = _party(db)
+    sales = _sales(db, proj, cust, incl=Decimal("1000"))
+    svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("500"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("600"), parent_contract_id=sales.id)
+    with pytest.raises(BusinessError) as e:
+        svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+            amount=Decimal("500"), tax_rate=Decimal("0.13"),
+            amount_incl_tax=Decimal("500"), parent_contract_id=sales.id)
+    assert "额度" in str(e.value) or "超过" in str(e.value)
+
+
+def test_purchase_total_fallback_to_net_amount(db):
+    """销售合同无含税金额时退回不含税口径对比。"""
+    proj = _proj(db); cust, sup = _party(db)
+    sales = svc.create_contract(db, project_id=proj.id, type="SALES", party_id=cust.id,
+        amount=Decimal("1000"), tax_rate=Decimal("0.13"), amount_incl_tax=None)
+    svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("800"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=None, parent_contract_id=sales.id)
+    with pytest.raises(BusinessError):
+        svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+            amount=Decimal("300"), tax_rate=Decimal("0.13"),
+            amount_incl_tax=None, parent_contract_id=sales.id)

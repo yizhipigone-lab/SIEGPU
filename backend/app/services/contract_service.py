@@ -1,11 +1,20 @@
 """合同服务。type 决定 direction 与 party_type（SALES→RECEIVABLE/customer，PURCHASE→PAYABLE/supplier）。"""
-from sqlalchemy import select
+from decimal import Decimal
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
 from app.models.master import Customer, Supplier
 from app.models.project import Project
 from app.models.project import Contract
+
+
+def _incl_amount(c) -> Decimal | None:
+    """合同的对比口径金额：优先含税 amount_incl_tax，NULL 退回不含税 amount。"""
+    if c.amount_incl_tax is not None:
+        return c.amount_incl_tax
+    return c.amount
 
 
 def create_contract(db: Session, *, project_id, type: str, party_id, amount,
@@ -40,6 +49,22 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
             raise BusinessError("BAD_REQUEST", "参照的销售合同必须属于本项目", 400)
         if parent.type != "SALES":
             raise BusinessError("BAD_REQUEST", "参照合同必须是销售合同", 400)
+        # 总额硬校验：同销售合同下所有采购合同金额合计 + 本份 ≤ 销售合同额（同侧口径）
+        cap = _incl_amount(parent)
+        if cap is not None:
+            # 逐行 COALESCE(amount_incl_tax, amount)：含税为 NULL 的兄弟合同退回不含税口径
+            siblings = db.execute(
+                select(func.coalesce(func.sum(func.coalesce(Contract.amount_incl_tax, Contract.amount)), 0))
+                .where(Contract.parent_contract_id == parent.id)
+                .where(Contract.deleted_at.is_(None))
+            ).scalar() or Decimal("0")
+            this_incl = amount_incl_tax if amount_incl_tax is not None else amount
+            if Decimal(str(siblings)) + Decimal(str(this_incl)) > Decimal(str(cap)):
+                raise BusinessError(
+                    "AMOUNT_EXCEEDED",
+                    f"超过销售合同额度：已用 {siblings} + 本份 {this_incl} > 销售额 {cap}",
+                    400,
+                )
     c = Contract(
         project_id=project_id, contract_no=contract_no, type=type, party_type=party_type,
         party_id=party_id, direction=direction, amount=amount, tax_rate=tax_rate,
