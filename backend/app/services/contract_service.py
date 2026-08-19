@@ -17,6 +17,25 @@ def _incl_amount(c) -> Decimal | None:
     return c.amount
 
 
+def _check_purchase_cap(db: Session, *, parent: Contract, this_incl, exclude_id=None) -> None:
+    """采购总额硬校验：同销售合同下所有采购合同金额合计（排除 exclude_id 自身）+ 本份 ≤ 销售合同额。"""
+    cap = _incl_amount(parent)
+    if cap is None:
+        return
+    # 逐行 COALESCE(amount_incl_tax, amount)：含税为 NULL 的兄弟合同退回不含税口径
+    q = select(func.coalesce(func.sum(func.coalesce(Contract.amount_incl_tax, Contract.amount)), 0)) \
+        .where(Contract.parent_contract_id == parent.id, Contract.deleted_at.is_(None))
+    if exclude_id is not None:
+        q = q.where(Contract.id != exclude_id)
+    siblings = db.execute(q).scalar() or Decimal("0")
+    if Decimal(str(siblings)) + Decimal(str(this_incl)) > Decimal(str(cap)):
+        raise BusinessError(
+            "AMOUNT_EXCEEDED",
+            f"超过销售合同额度：已用 {siblings} + 本份 {this_incl} > 销售额 {cap}",
+            400,
+        )
+
+
 def create_contract(db: Session, *, project_id, type: str, party_id, amount,
                     tax_rate, monthly_rent=None, contract_no=None, start_date=None,
                     end_date=None, parent_contract_id=None, file_path=None,
@@ -50,21 +69,8 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
         if parent.type != "SALES":
             raise BusinessError("BAD_REQUEST", "参照合同必须是销售合同", 400)
         # 总额硬校验：同销售合同下所有采购合同金额合计 + 本份 ≤ 销售合同额（同侧口径）
-        cap = _incl_amount(parent)
-        if cap is not None:
-            # 逐行 COALESCE(amount_incl_tax, amount)：含税为 NULL 的兄弟合同退回不含税口径
-            siblings = db.execute(
-                select(func.coalesce(func.sum(func.coalesce(Contract.amount_incl_tax, Contract.amount)), 0))
-                .where(Contract.parent_contract_id == parent.id)
-                .where(Contract.deleted_at.is_(None))
-            ).scalar() or Decimal("0")
-            this_incl = amount_incl_tax if amount_incl_tax is not None else amount
-            if Decimal(str(siblings)) + Decimal(str(this_incl)) > Decimal(str(cap)):
-                raise BusinessError(
-                    "AMOUNT_EXCEEDED",
-                    f"超过销售合同额度：已用 {siblings} + 本份 {this_incl} > 销售额 {cap}",
-                    400,
-                )
+        _check_purchase_cap(db, parent=parent,
+                            this_incl=(amount_incl_tax if amount_incl_tax is not None else amount))
     c = Contract(
         project_id=project_id, contract_no=contract_no, type=type, party_type=party_type,
         party_id=party_id, direction=direction, amount=amount, tax_rate=tax_rate,
@@ -101,6 +107,16 @@ _UPDATEABLE = ("contract_no", "monthly_rent", "start_date", "end_date", "file_pa
 def update_contract(db: Session, cid, *, actor_id=None, **fields) -> Contract:
     """编辑合同（白名单字段）+ 保存后重判（同创建门槛）。"""
     c = get_contract_or_404(db, cid)
+    # C1 修复：编辑采购合同金额（amount / amount_incl_tax）时同样做总额硬校验，排除自身
+    if c.type == "PURCHASE" and c.parent_contract_id \
+            and any(fields.get(k) is not None for k in ("amount", "amount_incl_tax")):
+        new_incl_tax = fields["amount_incl_tax"] if fields.get("amount_incl_tax") is not None else c.amount_incl_tax
+        new_amount = fields["amount"] if fields.get("amount") is not None else c.amount
+        this_incl = new_incl_tax if new_incl_tax is not None else new_amount
+        if this_incl is not None:
+            parent = db.get(Contract, c.parent_contract_id)
+            if parent is not None and parent.deleted_at is None:
+                _check_purchase_cap(db, parent=parent, this_incl=this_incl, exclude_id=c.id)
     for k, v in fields.items():
         if k in _UPDATEABLE and v is not None:
             setattr(c, k, v)

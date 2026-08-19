@@ -87,6 +87,37 @@ def test_update_sales_returns_reference_count(db):
     assert getattr(updated, "referenced_purchase_count", None) == 2
 
 
+def test_update_purchase_amount_rechecked_against_cap(db):
+    """C1 修复：编辑采购合同金额也受 cap 约束（排除自身）。"""
+    proj = _proj(db); cust, sup = _party(db)
+    sales = _sales(db, proj, cust, incl=Decimal("1000"))
+    p = svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("100"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("110"), parent_contract_id=sales.id)
+    # 编辑把金额提到超过 cap（110 → 1100 > 1000 cap）应被拦
+    with pytest.raises(BusinessError):
+        svc.update_contract(db, p.id, amount_incl_tax=Decimal("1100"))
+    # 编辑到 cap 以内（110 → 900 ≤ 1000）应通过
+    svc.update_contract(db, p.id, amount_incl_tax=Decimal("900"))
+
+
+def test_update_purchase_cap_excludes_self(db):
+    """编辑排除自身：同销售合同下两份采购，编辑其中一份时只算另一份。"""
+    proj = _proj(db); cust, sup = _party(db)
+    sales = _sales(db, proj, cust, incl=Decimal("1000"))
+    svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("400"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("450"), parent_contract_id=sales.id)
+    p2 = svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("400"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("450"), parent_contract_id=sales.id)
+    # 450(另一份) + 编辑到 550 = 1000 ≤ 1000 cap：应通过（若没排除自身会算成 450+450+550 超）
+    svc.update_contract(db, p2.id, amount_incl_tax=Decimal("550"))
+    # 450(另一份) + 编辑到 600 = 1050 > 1000 cap：应被拦
+    with pytest.raises(BusinessError):
+        svc.update_contract(db, p2.id, amount_incl_tax=Decimal("600"))
+
+
 def test_list_by_parent_and_parent_no(db):
     proj = _proj(db); cust, sup = _party(db)
     sales = svc.create_contract(db, project_id=proj.id, type="SALES", party_id=cust.id,
