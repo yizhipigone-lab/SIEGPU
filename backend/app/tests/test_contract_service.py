@@ -27,9 +27,13 @@ def test_sales_contract_direction_and_party(db):
 
 def test_purchase_contract(db):
     p = _project(db)
+    cust = Customer(name="客户P"); db.add(cust); db.flush()
     sup = Supplier(name="供应商A", type="设备供应商"); db.add(sup); db.flush()
+    parent = svc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
+                                 amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
     c = svc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                            amount=Decimal("500000"), tax_rate=Decimal("0.13"))
+                            amount=Decimal("500000"), tax_rate=Decimal("0.13"),
+                            parent_contract_id=parent.id)
     assert c.direction == "PAYABLE" and c.party_type == "supplier"
 
 

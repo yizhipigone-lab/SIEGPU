@@ -1,0 +1,47 @@
+"""采购合同参照销售合同：强制参照 + 总额硬校验。"""
+import uuid
+from decimal import Decimal
+
+import pytest
+
+from app.core.exceptions import BusinessError
+from app.models.master import Customer, Supplier
+from app.models.project import Contract, Project
+from app.services import contract_service as svc
+
+
+def _proj(db):
+    p = Project(name=f"p{uuid.uuid4().hex[:6]}", status="进行中")
+    db.add(p); db.flush()
+    return p
+
+
+def _party(db):
+    c = Customer(name=f"c{uuid.uuid4().hex[:6]}")
+    s = Supplier(name=f"s{uuid.uuid4().hex[:6]}", type="设备供应商")
+    db.add_all([c, s]); db.flush()
+    return c, s
+
+
+def _sales(db, proj, cust, incl=Decimal("1000")):
+    return svc.create_contract(db, project_id=proj.id, type="SALES", party_id=cust.id,
+        amount=Decimal("900"), tax_rate=Decimal("0.13"), amount_incl_tax=incl)
+
+
+def test_purchase_requires_sales_parent(db):
+    proj = _proj(db); cust, sup = _party(db)
+    with pytest.raises(BusinessError) as e:
+        svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+            amount=Decimal("100"), tax_rate=Decimal("0.13"), amount_incl_tax=Decimal("110"))
+    assert "参照" in str(e.value)
+
+
+def test_parent_must_be_same_project_sales(db):
+    proj = _proj(db); cust, sup = _party(db)
+    other = _proj(db)
+    sales_other = svc.create_contract(db, project_id=other.id, type="SALES", party_id=cust.id,
+        amount=Decimal("900"), tax_rate=Decimal("0.13"), amount_incl_tax=Decimal("1000"))
+    with pytest.raises(BusinessError):
+        svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+            amount=Decimal("100"), tax_rate=Decimal("0.13"),
+            amount_incl_tax=Decimal("110"), parent_contract_id=sales_other.id)

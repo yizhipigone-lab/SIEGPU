@@ -117,8 +117,10 @@ def test_purchase_contract_not_judged(db):
     sup = Supplier(name=f"判定供应商-{uuid.uuid4().hex[:6]}", type="设备供应商")
     db.add(sup)
     db.flush()
+    parent = _sales_contract(db, p)  # 参照同项目销售合同
     c = csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                             amount=Decimal("100"), tax_rate=Decimal("0.13"))
+                             amount=Decimal("100"), tax_rate=Decimal("0.13"),
+                             parent_contract_id=parent.id)
     assert c.revenue_method is None
     r = rules.judge_revenue_method(business_type="经营租赁", leasing_mode="自有", contract_type="PURCHASE")
     assert r.method is None and r.rule == "N/A"

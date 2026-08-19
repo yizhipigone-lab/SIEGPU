@@ -60,7 +60,8 @@ def test_forecast_three_months(db):
     sup = Supplier(name=f"S-{uuid.uuid4().hex[:6]}", type="设备供应商")
     db.add(sup); db.flush()
     pc = csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                              amount=Decimal("10000000"), tax_rate=Decimal("0.13"))
+                              amount=Decimal("10000000"), tax_rate=Decimal("0.13"),
+                              parent_contract_id=c.id)  # 参照同项目销售合同
     today = date.today()
     ny, nm = (today.year, today.month + 1) if today.month < 12 else (today.year + 1, 1)
     isvc.create_invoice(db, contract_id=pc.id, amount=Decimal("1130"),

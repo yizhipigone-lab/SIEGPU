@@ -29,6 +29,17 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
         sup = db.get(Supplier, party_id)
         if not sup:
             raise BusinessError("BAD_REQUEST", "采购合同的 party 必须是已存在的供应商", 400)
+    # 采购合同必须参照同项目的一份销售合同（1 销售 : N 采购，创建后锁定）
+    if type == "PURCHASE":
+        if not parent_contract_id:
+            raise BusinessError("BAD_REQUEST", "采购合同必须选择参照的销售合同", 400)
+        parent = db.get(Contract, parent_contract_id)
+        if not parent or parent.deleted_at is not None:
+            raise BusinessError("BAD_REQUEST", "参照的销售合同不存在", 400)
+        if parent.project_id != project_id:
+            raise BusinessError("BAD_REQUEST", "参照的销售合同必须属于本项目", 400)
+        if parent.type != "SALES":
+            raise BusinessError("BAD_REQUEST", "参照合同必须是销售合同", 400)
     c = Contract(
         project_id=project_id, contract_no=contract_no, type=type, party_type=party_type,
         party_id=party_id, direction=direction, amount=amount, tax_rate=tax_rate,

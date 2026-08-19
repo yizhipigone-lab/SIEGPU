@@ -50,7 +50,8 @@ def test_sales_order_create_advances_step4(db):
     c1 = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
                               amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
     csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                         amount=Decimal("800000"), tax_rate=Decimal("0.13"))
+                         amount=Decimal("800000"), tax_rate=Decimal("0.13"),
+                         parent_contract_id=c1.id)
     assert wf.current_step == 4  # Step2/3 已由合同埋点推进
     sosvc.create_sales_order(db, project_id=p.id, contract_id=c1.id, equipment_model_id=eq.id,
                              quantity=10, monthly_rent_per_unit=Decimal("1000"),
@@ -65,7 +66,8 @@ def test_leasing_create_process_advances_step9(db):
     c1 = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
                               amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
     csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                         amount=Decimal("800000"), tax_rate=Decimal("0.13"))
+                         amount=Decimal("800000"), tax_rate=Decimal("0.13"),
+                         parent_contract_id=c1.id)
     sosvc.create_sales_order(db, project_id=p.id, contract_id=c1.id, equipment_model_id=eq.id,
                              quantity=10, monthly_rent_per_unit=Decimal("1000"),
                              total_monthly_rent=Decimal("10000"))
@@ -91,7 +93,8 @@ def test_after_action_loops_through_multiple_steps(db):
     c1 = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
                               amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
     csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                         amount=Decimal("800000"), tax_rate=Decimal("0.13"))
+                         amount=Decimal("800000"), tax_rate=Decimal("0.13"),
+                         parent_contract_id=c1.id)
     sosvc.create_sales_order(db, project_id=p.id, contract_id=c1.id, equipment_model_id=eq.id,
                              quantity=10, monthly_rent_per_unit=Decimal("1000"),
                              total_monthly_rent=Decimal("10000"))
@@ -149,7 +152,8 @@ def test_after_action_exception_does_not_break_business(db, monkeypatch):
     c1 = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
                               amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
     csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                         amount=Decimal("800000"), tax_rate=Decimal("0.13"))
+                         amount=Decimal("800000"), tax_rate=Decimal("0.13"),
+                         parent_contract_id=c1.id)
 
     def _boom(*a, **kw):
         raise RuntimeError("check exploded")
