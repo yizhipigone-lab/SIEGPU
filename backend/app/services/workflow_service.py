@@ -94,14 +94,19 @@ def create_workflow(db: Session, *, project_id: uuid.UUID, template_id: uuid.UUI
     return wf
 
 
-def get_workflow(db: Session, project_id: uuid.UUID) -> ProjectWorkflow | None:
-    """获取项目流程，不存在则尝试推断生成。"""
+def get_workflow(db: Session, project_id: uuid.UUID, *, with_refs: bool = True) -> ProjectWorkflow | None:
+    """获取项目流程，不存在则尝试推断生成。
+
+    with_refs=True（读路径，默认）：为步骤导航附加实体引用（计算产物，不落库）。
+    with_refs=False（写路径）：skip/mark_done/update_config/refresh 等随后会
+    flag_modified + flush 的调用方必须传 False，避免 refs 泄漏进 JSONB（I4）。
+    """
     wf = db.execute(
         select(ProjectWorkflow).where(ProjectWorkflow.project_id == project_id)
     ).scalar_one_or_none()
     if not wf:
         wf = infer_workflow(db, project_id)
-    if wf:
+    if wf and with_refs:
         _attach_step_entity_refs(db, wf)
     return wf
 
@@ -227,7 +232,7 @@ def check_completion(db: Session, project_id: uuid.UUID, step: dict) -> bool:
 
 def refresh_all_steps(db: Session, project_id: uuid.UUID) -> ProjectWorkflow:
     """全量重检：逐步骤检测完成状态，支持红冲回退。skip 为终态不参与回退。"""
-    wf = get_workflow(db, project_id)
+    wf = get_workflow(db, project_id, with_refs=False)
     if not wf:
         raise BusinessError("NOT_FOUND", "项目流程不存在", 404)
 
@@ -259,8 +264,11 @@ def refresh_all_steps(db: Session, project_id: uuid.UUID) -> ProjectWorkflow:
 
     if changed:
         # steps 是 JSONB 列，原地改 dict 不会触发脏检查，必须显式标记
+        _strip_step_entity_refs(wf.steps)  # I4：refs 是读取期计算产物，不落库
         flag_modified(wf, "steps")
         db.flush()
+    # 响应仍需携带 refs：flush 之后的原地挂载不被 ORM 脏检查追踪，endpoint commit 不会落库
+    _attach_step_entity_refs(db, wf)
     return wf
 
 
@@ -272,7 +280,7 @@ def skip_step(db: Session, project_id: uuid.UUID, seq: int, reason: str, operato
     if not user:
         raise BusinessError("NOT_FOUND", "用户不存在", 404)
 
-    wf = get_workflow(db, project_id)
+    wf = get_workflow(db, project_id, with_refs=False)
     if not wf:
         raise BusinessError("NOT_FOUND", "项目流程不存在", 404)
 
@@ -287,6 +295,7 @@ def skip_step(db: Session, project_id: uuid.UUID, seq: int, reason: str, operato
     step["completed_at"] = datetime.utcnow().isoformat()
     step["completed_by"] = str(operator_id)
     _advance_current(wf)
+    _strip_step_entity_refs(wf.steps)  # I4：refs 不落库
     flag_modified(wf, "steps")  # JSONB 原地修改需显式标记脏
 
     db.add(StepAuditLog(
@@ -305,7 +314,7 @@ def mark_step_done(db: Session, project_id: uuid.UUID, seq: int, note: str | Non
     if user.role not in ("FINANCE_DIRECTOR", "ADMIN"):
         raise BusinessError("FORBIDDEN", "需要 FINANCE_DIRECTOR 或 ADMIN 权限", 403)
 
-    wf = get_workflow(db, project_id)
+    wf = get_workflow(db, project_id, with_refs=False)
     if not wf:
         raise BusinessError("NOT_FOUND", "项目流程不存在", 404)
 
@@ -317,6 +326,7 @@ def mark_step_done(db: Session, project_id: uuid.UUID, seq: int, note: str | Non
     step["completed_at"] = datetime.utcnow().isoformat()
     step["completed_by"] = str(operator_id)
     _advance_current(wf)
+    _strip_step_entity_refs(wf.steps)  # I4：refs 不落库
     flag_modified(wf, "steps")  # JSONB 原地修改需显式标记脏
 
     db.add(StepAuditLog(
@@ -360,7 +370,7 @@ def portfolio(db: Session) -> list[dict]:
 
 def update_step_config(db: Session, project_id: uuid.UUID, seq: int, **kwargs):
     """调整步骤配置。仅 ADMIN。"""
-    wf = get_workflow(db, project_id)
+    wf = get_workflow(db, project_id, with_refs=False)
     if not wf:
         raise BusinessError("NOT_FOUND", "项目流程不存在", 404)
     step = _step_by_seq(wf.steps, seq)
@@ -369,6 +379,7 @@ def update_step_config(db: Session, project_id: uuid.UUID, seq: int, **kwargs):
     for k, v in kwargs.items():
         if v is not None:
             step[k] = v
+    _strip_step_entity_refs(wf.steps)  # I4：refs 不落库
     flag_modified(wf, "steps")  # JSONB 原地修改需显式标记脏
     db.flush()
 
@@ -419,6 +430,22 @@ def infer_workflow(db: Session, project_id: uuid.UUID) -> ProjectWorkflow | None
 
 # —— 内部辅助 ——
 
+# 步骤导航实体引用键（读取期计算产物，不落库 —— I4）
+_STEP_REF_KEYS = (
+    "sales_contract_id", "sales_contract_count",
+    "purchase_contract_id", "purchase_contract_count",
+    "order_id", "order_count",
+)
+
+
+def _strip_step_entity_refs(steps: list[dict]) -> None:
+    """剥离步骤上的实体引用键。写库前必调：refs 是读取期计算产物，
+    持久化后会过期（实体删除后仍深链跳转），JSONB 里不允许存在（I4）。"""
+    for s in steps:
+        for k in _STEP_REF_KEYS:
+            s.pop(k, None)
+
+
 def _attach_step_entity_refs(db: Session, wf: ProjectWorkflow) -> None:
     """为可跳转步骤补对应实体 id + 数量（步骤导航深链数据源）。
 
@@ -426,6 +453,7 @@ def _attach_step_entity_refs(db: Session, wf: ProjectWorkflow) -> None:
     但 name 在三个模板中稳定（销售合同/采购合同/批次订单）。
     订单步在标准模板中名为「采购订单」（roleGuide.ts aliases 亦列出），一并覆盖。
     只在读取路径原地补字段，不 flag_modified——引用是计算产物，不落库。
+    先剥离旧 refs 再挂载：保证实体删除后重读不会残留过期引用（I4）。
     """
     pid = wf.project_id
 
@@ -435,6 +463,7 @@ def _attach_step_entity_refs(db: Session, wf: ProjectWorkflow) -> None:
             q = q.where(getattr(model, k) == v)
         return db.execute(q.order_by(model.created_at.asc())).scalars().all()
 
+    _strip_step_entity_refs(wf.steps)
     sales = entities(Contract, type="SALES")
     purchases = entities(Contract, type="PURCHASE")
     orders = entities(Order)
@@ -469,6 +498,7 @@ def _mark_done(db: Session, wf: ProjectWorkflow, step: dict, operator_id: uuid.U
     step["completed_at"] = datetime.utcnow().isoformat()
     step["completed_by"] = str(operator_id) if operator_id else None
     _advance_current(wf)
+    _strip_step_entity_refs(wf.steps)  # I4：refs 不落库（兼容历史脏数据行）
     flag_modified(wf, "steps")  # JSONB 原地修改需显式标记脏
     db.add(StepAuditLog(
         project_workflow_id=wf.id, step_seq=step["seq"],
