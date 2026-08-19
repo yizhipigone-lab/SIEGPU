@@ -39,8 +39,11 @@ export function TickerBar(): React.ReactElement {
       if (pausedRef.current || !alive) return
       const r = await fetchQuotes()
       if (!alive) return
-      setQuotes(r.quotes)
-      setQuotesAt(r.fetchedAt)
+      // 成功才覆盖；失败保留上次值（设计 §5：失败保留上次值并显示 stale 标记）
+      if (r.ok && r.quotes.length > 0) {
+        setQuotes(r.quotes)
+        setQuotesAt(r.fetchedAt)
+      }
       setQuotesOk(r.ok)
       scheduleQuotes()
     }
@@ -140,9 +143,9 @@ export function TickerBar(): React.ReactElement {
 }
 
 function changeStyle(pct: number): React.CSSProperties {
-  if (pct > 0) return { ...styles.quotePct, color: '#ef4444' }
-  if (pct < 0) return { ...styles.quotePct, color: '#22c55e' }
-  return { ...styles.quotePct, color: '#9ca3af' }
+  if (pct > 0) return { ...styles.quotePct, color: 'var(--dsh-up, #ef4444)' }
+  if (pct < 0) return { ...styles.quotePct, color: 'var(--dsh-down, #22c55e)' }
+  return { ...styles.quotePct, color: 'var(--dsw-alias-label-secondary, #9ca3af)' }
 }
 
 const styles: Record<string, React.CSSProperties> = {

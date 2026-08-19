@@ -29,12 +29,24 @@ export interface NewsResult {
   error?: string
 }
 
+/**
+ * 拉取新闻。host 在抓取失败时会返回 ok:false 但携带上次成功快照（stale=true），
+ * 这里把该快照透出（ok 仍为 false），让 UI 能显示"上次数据"。
+ */
 export async function fetchNews(signal?: AbortSignal): Promise<NewsResult> {
   try {
     const res = await fetch('/live-ticker/news', { signal })
     if (!res.ok) return { snapshot: null, ok: false, error: `HTTP ${res.status}` }
     const body = await res.json() as { ok: boolean; items: unknown[]; fetchedAt: number; stale: boolean; error?: string }
-    if (!body.ok) return { snapshot: null, ok: false, error: body.error }
+    if (!body.ok) {
+      return {
+        snapshot: Array.isArray(body.items) && body.items.length > 0
+          ? { items: body.items as never, fetchedAt: body.fetchedAt ?? 0, stale: true }
+          : null,
+        ok: false,
+        error: body.error,
+      }
+    }
     return {
       snapshot: { items: body.items as never, fetchedAt: body.fetchedAt, stale: body.stale },
       ok: true,

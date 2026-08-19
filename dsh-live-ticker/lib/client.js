@@ -86,7 +86,13 @@ window.__ModuleLoader__.load({
         const res = await fetch("/live-ticker/news", { signal });
         if (!res.ok) return { snapshot: null, ok: false, error: `HTTP ${res.status}` };
         const body = await res.json();
-        if (!body.ok) return { snapshot: null, ok: false, error: body.error };
+        if (!body.ok) {
+          return {
+            snapshot: Array.isArray(body.items) && body.items.length > 0 ? { items: body.items, fetchedAt: body.fetchedAt ?? 0, stale: true } : null,
+            ok: false,
+            error: body.error
+          };
+        }
         return {
           snapshot: { items: body.items, fetchedAt: body.fetchedAt, stale: body.stale },
           ok: true
@@ -124,8 +130,10 @@ window.__ModuleLoader__.load({
           if (pausedRef.current || !alive) return;
           const r = await fetchQuotes();
           if (!alive) return;
-          setQuotes(r.quotes);
-          setQuotesAt(r.fetchedAt);
+          if (r.ok && r.quotes.length > 0) {
+            setQuotes(r.quotes);
+            setQuotesAt(r.fetchedAt);
+          }
           setQuotesOk(r.ok);
           scheduleQuotes();
         }
@@ -214,9 +222,9 @@ window.__ModuleLoader__.load({
       ] });
     }
     function changeStyle(pct) {
-      if (pct > 0) return { ...styles.quotePct, color: "#ef4444" };
-      if (pct < 0) return { ...styles.quotePct, color: "#22c55e" };
-      return { ...styles.quotePct, color: "#9ca3af" };
+      if (pct > 0) return { ...styles.quotePct, color: "var(--dsh-up, #ef4444)" };
+      if (pct < 0) return { ...styles.quotePct, color: "var(--dsh-down, #22c55e)" };
+      return { ...styles.quotePct, color: "var(--dsw-alias-label-secondary, #9ca3af)" };
     }
     var styles = {
       root: { fontSize: 13, color: "var(--dsw-alias-label-primary, #e5e7eb)" },

@@ -1,57 +1,62 @@
-﻿{
-    "name":  "dsh-live-ticker",
-    "version":  "0.1.0",
-    "description":  "DSH plugin: collapsible live index quotes + scrolling finance news under the composer (conversation.composer.dock).",
-    "type":  "module",
-    "main":  "src/index.ts",
-    "files":  [
-                  "src",
-                  "lib",
-                  "scripts",
-                  "cordis.patch.yml",
-                  "README.md"
-              ],
-    "scripts":  {
-                    "build:client":  "node scripts/build-client.mjs",
-                    "test":  "node --test \"tests/**/*.test.mjs\""
-                },
-    "dependencies":  {
-                         "@deepseek-ai/cordis":  "^4.0.1",
-                         "@deepseek-ai/dsh-tools":  "^0.1.0-rc.6"
-                     },
-    "peerDependencies":  {
-                             "@deepseek-ai/cordis":  "*",
-                             "@deepseek-ai/dsh-tools":  "*",
-                             "@deepseek-ai/dsh-client-connection":  "^0.1.0-rc.6",
-                             "@deepseek-ai/dsh-client-ui-slots":  "^0.1.0-rc.6"
-                         },
-    "peerDependenciesMeta":  {
-                                 "@deepseek-ai/dsh-client-connection":  {
-                                                                            "optional":  true
-                                                                        },
-                                 "@deepseek-ai/dsh-client-ui-slots":  {
-                                                                          "optional":  true
-                                                                      }
-                             },
-    "keywords":  [
-                     "dsh",
-                     "dsh-plugin",
-                     "deepseek-harness",
-                     "finance",
-                     "quotes",
-                     "ticker"
-                 ],
-    "license":  "MIT",
-    "dsh":  {
-                "bundle":  {
-                               "patch":  "./cordis.patch.yml"
-                           },
-                "client":  {
-                               "platform":  "web",
-                               "inject":  [
-                                              "@deepseek-ai/dsh-client-connection",
-                                              "@deepseek-ai/dsh-client-ui-slots"
-                                          ]
-                           }
-            }
+{
+  "name": "dsh-live-ticker",
+  "version": "0.1.0",
+  "description": "DSH plugin: collapsible live index quotes + scrolling finance news under the composer (conversation.composer.dock).",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "test": "node --test \"tests/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "finance",
+    "quotes",
+    "ticker"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  }
 }
