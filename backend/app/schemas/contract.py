@@ -163,4 +163,5 @@ class ContractOut(BaseModel):
     biz_type: str | None = None
     amount_incl_tax: Decimal | None = None
     lease_months: int | None = None
+    referenced_purchase_count: int | None = None
     model_config = {"from_attributes": True}

@@ -72,3 +72,16 @@ def test_purchase_total_fallback_to_net_amount(db):
         svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
             amount=Decimal("300"), tax_rate=Decimal("0.13"),
             amount_incl_tax=None, parent_contract_id=sales.id)
+
+
+def test_update_sales_returns_reference_count(db):
+    proj = _proj(db); cust, sup = _party(db)
+    sales = _sales(db, proj, cust, incl=Decimal("1000"))
+    svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("100"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("110"), parent_contract_id=sales.id)
+    svc.create_contract(db, project_id=proj.id, type="PURCHASE", party_id=sup.id,
+        amount=Decimal("200"), tax_rate=Decimal("0.13"),
+        amount_incl_tax=Decimal("220"), parent_contract_id=sales.id)
+    updated = svc.update_contract(db, sales.id, amount_incl_tax=Decimal("1500"))
+    assert getattr(updated, "referenced_purchase_count", None) == 2

@@ -108,6 +108,16 @@ def update_contract(db: Session, cid, *, actor_id=None, **fields) -> Contract:
     from app.services import revenue_judge_service as _judge
     if _judge.should_auto_judge(db, c):
         _judge.judge_and_record(db, c, actor_id=actor_id)
+    # 销售合同金额/条款变更后：提示其下被参照的采购合同数（前端据此提示复核）
+    if c.type == "SALES":
+        from sqlalchemy import func
+        cnt = db.execute(
+            select(func.count(Contract.id)).where(
+                Contract.parent_contract_id == c.id,
+                Contract.deleted_at.is_(None),
+            )
+        ).scalar() or 0
+        c.referenced_purchase_count = cnt  # 瞬态属性，仅本次响应携带，不落库
     return c
 
 
