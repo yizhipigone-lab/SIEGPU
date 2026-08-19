@@ -53,6 +53,7 @@ export function TickerBar(): React.ReactElement {
         setNews(r.snapshot.items as { title: string; showTime: string; url: string }[])
         setNewsStale(r.snapshot.stale)
         setNewsAt(r.snapshot.fetchedAt)
+        setNewsErr('')
       }
       if (!r.ok && r.error) setNewsErr(r.error)
       scheduleNews()
@@ -81,7 +82,16 @@ export function TickerBar(): React.ReactElement {
   const fmtTime = (t: number | null) => (t ? new Date(t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '')
 
   return (
-    <div className="lt-ticker" style={styles.root}>
+    <>
+      <style>{`
+        .lt-ticker-inner { animation: lt-ticker-scroll 40s linear infinite; }
+        .lt-ticker-scroll:hover .lt-ticker-inner { animation-play-state: paused; }
+        @keyframes lt-ticker-scroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+      `}</style>
+      <div className="lt-ticker" style={styles.root}>
       <details open>
         <summary style={styles.summary}>
           <span style={styles.summaryTitle}>行情</span>
@@ -97,7 +107,7 @@ export function TickerBar(): React.ReactElement {
               <span style={styles.quoteName}>{q.name}</span>
               <span style={styles.quotePrice}>{q.price.toFixed(2)}</span>
               <span style={changeStyle(q.changePct)}>
-                {q.changePct >= 0 ? '▲' : '▼'} {q.changePct >= 0 ? '+' : ''}{q.changePct.toFixed(2)}%
+                {q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '—'} {q.changePct >= 0 ? '+' : ''}{q.changePct.toFixed(2)}%
               </span>
             </div>
           ))}
@@ -115,16 +125,17 @@ export function TickerBar(): React.ReactElement {
         <div style={styles.tickerWrap} className="lt-ticker-scroll">
           <div style={styles.tickerInner} className="lt-ticker-inner">
             {news.length === 0 && <span style={styles.empty}>暂无新闻</span>}
-            {news.map((n, i) => (
+            {[...news, ...news].map((n, i) => (
               <a key={`${n.url}-${i}`} href={n.url} target="_blank" rel="noreferrer" title={n.title} style={styles.tickerItem}>
                 <span style={styles.tickerTime}>{n.showTime.slice(11)}</span>
-                <span style={styles.tickerText}>{n.title}</span>
+                <span>{n.title}</span>
               </a>
             ))}
           </div>
         </div>
       </details>
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -145,9 +156,8 @@ const styles: Record<string, React.CSSProperties> = {
   quotePrice: { fontWeight: 700, fontVariantNumeric: 'tabular-nums' },
   quotePct: { fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
   tickerWrap: { overflow: 'hidden', paddingBottom: 4 },
-  tickerInner: { display: 'flex', gap: 20, whiteSpace: 'nowrap', animation: 'lt-ticker-scroll 40s linear infinite' },
+  tickerInner: { display: 'flex', gap: 20, whiteSpace: 'nowrap' },
   tickerItem: { display: 'inline-flex', gap: 6, alignItems: 'baseline', color: 'var(--dsw-alias-label-primary, #e5e7eb)', textDecoration: 'none', fontSize: 12 },
   tickerTime: { color: 'var(--dsw-alias-label-secondary, #9ca3af)', fontVariantNumeric: 'tabular-nums' },
-  tickerText: {},
   empty: { color: 'var(--dsw-alias-label-secondary, #9ca3af)' },
 }
