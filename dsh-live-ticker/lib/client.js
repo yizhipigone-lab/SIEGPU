@@ -45,38 +45,14 @@ window.__ModuleLoader__.load({
     // src/client/TickerBar.tsx
     var import_react = require("react");
     
-    // src/quotes.ts
-    var INDEX_SECIDS = ["1.000001", "0.399006", "1.000688", "1.000510"];
-    var QUOTES_URL = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${INDEX_SECIDS.join(",")}&fields=f2,f3,f12,f14`;
-    function toNumber(v) {
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-      if (typeof v === "string") {
-        const n = Number(v.replace(/,/g, ""));
-        return Number.isFinite(n) ? n : null;
-      }
-      return null;
-    }
-    function parsePush2Quotes(json) {
-      const diff = json?.data?.diff;
-      if (!Array.isArray(diff)) return [];
-      const quotes = [];
-      for (const row of diff) {
-        const r = row;
-        if (typeof r.f14 !== "string" || !r.f14.trim()) continue;
-        const price = toNumber(r.f2);
-        const changePct = toNumber(r.f3);
-        if (price === null || changePct === null) continue;
-        quotes.push({ name: r.f14.trim(), price, changePct });
-      }
-      return quotes;
-    }
-    
     // src/client/fetch.ts
     async function fetchQuotes(signal) {
       try {
-        const res = await fetch(QUOTES_URL, { signal });
+        const res = await fetch("/live-ticker/quotes", { signal });
         if (!res.ok) return { quotes: [], fetchedAt: Date.now(), ok: false };
-        return { quotes: parsePush2Quotes(await res.json()), fetchedAt: Date.now(), ok: true };
+        const body = await res.json();
+        if (!body.ok) return { quotes: body.quotes ?? [], fetchedAt: Date.now(), ok: false };
+        return { quotes: body.quotes, fetchedAt: body.fetchedAt ?? Date.now(), ok: true };
       } catch {
         return { quotes: [], fetchedAt: Date.now(), ok: false };
       }

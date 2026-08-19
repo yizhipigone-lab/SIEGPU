@@ -1,5 +1,6 @@
 /**
- * 指数行情：东财 push2 ulist 批量接口。浏览器直连（CORS `*`）。
+ * 指数行情：东财 push2 ulist 批量接口。
+ * 由 host 端代理抓取（同源 /live-ticker/quotes），浏览器不直连跨域。
  * 注意：中证A500 必须用 1.000510（0.000510 是深市个股"新金路"）。
  */
 
@@ -39,4 +40,11 @@ export function parsePush2Quotes(json: unknown): Quote[] {
     quotes.push({ name: r.f14.trim(), price, changePct })
   }
   return quotes
+}
+
+/** host 端抓取东财指数并解析；失败抛错由调用方兜底。 */
+export async function fetchQuotesFromEastMoney(fetchImpl: typeof fetch = fetch): Promise<Quote[]> {
+  const res = await fetchImpl(QUOTES_URL)
+  if (!res.ok) throw new Error(`eastmoney quotes HTTP ${res.status}`)
+  return parsePush2Quotes(await res.json())
 }

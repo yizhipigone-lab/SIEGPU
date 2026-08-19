@@ -1,10 +1,11 @@
 /**
- * client 数据层：指数直连东财 push2（CORS *），新闻走同源 /live-ticker/news。
+ * client 数据层：指数与新闻均走同源 host 路由（浏览器不直连跨域）。
+ *   /live-ticker/quotes  指数（host 代理东财 push2，3s 缓存）
+ *   /live-ticker/news    新闻（host 代理东财新闻，30s 缓存）
  * 纯浏览器代码，不 import host 模块。
  */
 
 import type { Quote } from '../quotes.ts'
-import { QUOTES_URL, parsePush2Quotes } from '../quotes.ts'
 import type { NewsSnapshot } from '../news.ts'
 
 export interface QuotesResult {
@@ -15,9 +16,11 @@ export interface QuotesResult {
 
 export async function fetchQuotes(signal?: AbortSignal): Promise<QuotesResult> {
   try {
-    const res = await fetch(QUOTES_URL, { signal })
+    const res = await fetch('/live-ticker/quotes', { signal })
     if (!res.ok) return { quotes: [], fetchedAt: Date.now(), ok: false }
-    return { quotes: parsePush2Quotes(await res.json()), fetchedAt: Date.now(), ok: true }
+    const body = await res.json() as { ok: boolean; quotes: Quote[]; fetchedAt: number }
+    if (!body.ok) return { quotes: body.quotes ?? [], fetchedAt: Date.now(), ok: false }
+    return { quotes: body.quotes, fetchedAt: body.fetchedAt ?? Date.now(), ok: true }
   } catch {
     return { quotes: [], fetchedAt: Date.now(), ok: false }
   }
