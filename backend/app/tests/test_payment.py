@@ -34,9 +34,14 @@ def _project(db) -> Project:
 def _purchase_contract(db, p, currency=None):
     sup = Supplier(name=f"S-{uuid.uuid4().hex[:6]}", type="设备供应商")
     db.add(sup); db.flush()
+    cust = Customer(name=f"C-{uuid.uuid4().hex[:6]}")
+    db.add(cust); db.flush()
+    parent = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
+                                  amount=Decimal("10000000"), tax_rate=Decimal("0.13"),
+                                  currency_code=currency)
     return csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
                                 amount=Decimal("10000000"), tax_rate=Decimal("0.13"),
-                                currency_code=currency)
+                                currency_code=currency, parent_contract_id=parent.id)
 
 
 def _invoice(db, c, amount, currency=None, rate=None) -> Invoice:

@@ -23,8 +23,13 @@ def _purchase_invoice(db, amount=Decimal("1130"), p=None, c=None):
     if c is None:
         sup = Supplier(name=f"S-{uuid.uuid4().hex[:6]}", type="设备供应商")
         db.add(sup); db.flush()
+        cust = Customer(name=f"C-{uuid.uuid4().hex[:6]}")
+        db.add(cust); db.flush()
+        parent = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
+                                      amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
         c = csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-                                 amount=Decimal("10000000"), tax_rate=Decimal("0.13"))
+                                 amount=Decimal("900000"), tax_rate=Decimal("0.13"),
+                                 parent_contract_id=parent.id)
     inv = isvc.create_invoice(db, contract_id=c.id, amount=amount,
                               invoice_no=f"INV-IN-{uuid.uuid4().hex[:6]}",
                               issue_date=date(2026, 8, 1))

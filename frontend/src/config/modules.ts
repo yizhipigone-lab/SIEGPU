@@ -9,6 +9,7 @@ export interface RemoteOptions {
   label: string
   value: string
   tags?: string[]
+  dependsOn?: string  // 依赖字段 key：该字段值变化时把其值作为同名查询参数追加到 endpoint 重新拉取（如按 project_id 过滤）
 }
 
 export interface FieldConfig {
@@ -22,6 +23,7 @@ export interface FieldConfig {
   validate?: (value: any) => string | undefined  // 即时校验（小白防误填）：返回警告文案则标黄，见 utils/validators.ts
   section?: string            // 分组标题：表单中在该字段前渲染分割线（如「核算判定信息」）
   showWhen?: (form: Record<string, any>) => boolean  // 条件显示（如租期仅算力租赁）
+  disabledWhen?: (form: Record<string, any>, editing: any | null) => boolean  // 条件禁用（如参照合同创建后不可改：编辑态只读展示当前值）
   calc?: (form: Record<string, any>) => number | null  // 自动计算（如 不含税=含税/(1+税率)），可手工改
   calcDeps?: string[]                                  // calc 依赖字段，变化时重算本字段
   percent?: boolean           // 百分数输入：显示×100、提交/100（税率 13% ↔ 0.13）
@@ -171,6 +173,9 @@ export const MODULES: Record<string, CrudConfig> = {
     listParamKey: 'type',
     revenueJudge: true, auditEntity: 'contract',
     detailTabs: [
+      { label: '被参照采购合同', endpoint: '/contracts', paramKey: 'parent_contract_id',
+        columns: ['contract_no', 'amount_incl_tax', 'status'],
+        labels: { contract_no: '合同号', amount_incl_tax: '金额(含税)', status: '状态' } },
       { label: '发票', endpoint: '/invoices', paramKey: 'contract_id', columns: ['invoice_no', 'amount', 'status'], labels: { invoice_no: '发票号', amount: '金额', status: '状态' } },
       { label: '计费单', endpoint: '/billings', paramKey: 'contract_id', columns: ['period_label', 'amount', 'status'], labels: { period_label: '期间', amount: '金额(含税)', status: '状态' } },
       { label: '变更记录', endpoint: '/contracts/amendments', paramKey: 'contract_id', columns: ['amendment_date', 'change_type', 'reason'], labels: { amendment_date: '变更日', change_type: '类型', reason: '原因' } },
@@ -209,6 +214,11 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE, required: true },
       { key: 'biz_type', label: '合同类型', type: 'select', options: BIZ_TYPE, hint: '业务性质：算力租赁（出租算力收租金）/ 转售（买断转卖）/ 服务（收服务费）' },
       { key: 'party_id', label: '对方(客户/供应商)', required: true, remoteOptions: { endpoint: ['/customers', '/suppliers'], label: 'name', value: 'id', tags: ['客户', '供应商'] } },
+      { key: 'parent_contract_id', label: '参照销售合同', type: 'select', required: true,
+        showWhen: (form) => form.type === 'PURCHASE',
+        disabledWhen: (_form, editing) => !!editing,  // M1：后端锁定创建后不可改，编辑态只读展示当前值（避免"可改但不生效"假象）
+        hint: '本采购合同参照的销售合同（必选，创建后不可改）；采购总额不得超过该销售合同额',
+        remoteOptions: { endpoint: '/contracts?type=SALES', label: 'contract_no', value: 'id', dependsOn: 'project_id' } },
       { key: 'amount_incl_tax', label: '合同金额(含税,元)', type: 'number', required: true, hint: '合同上写的含税总额（客户实际要付的钱）', validate: validators.positiveAmount },
       { key: 'tax_rate', label: '税率%', type: 'number', percent: true, default: 13, hint: '增值税率，填百分数（如 13 表示 13%）' },
       // 不含税金额：默认按 含税/(1+税率) 自动算，仍可手工改（后端 amount 列=不含税口径，下游核算不变）

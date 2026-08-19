@@ -162,9 +162,11 @@ def test_payable_direction_reversed(db):
     sup = Supplier(name=f"FX供应商-{uuid.uuid4().hex[:6]}", type="设备供应商")
     db.add(sup)
     db.flush()
+    parent = _usd_contract(db, p)  # 参照同项目销售合同
     c = contract_service.create_contract(
         db, project_id=p.id, type="PURCHASE", party_id=sup.id,
-        amount=Decimal("1000000"), tax_rate=Decimal("0.13"), currency_code="USD")
+        amount=Decimal("1000000"), tax_rate=Decimal("0.13"), currency_code="USD",
+        parent_contract_id=parent.id)
     inv = _usd_invoice(db, c, "7.20")
     assert inv.direction == "PAYABLE"
     txn = _usd_txn(db, p, "7.10", direction="OUT")

@@ -37,7 +37,8 @@ const searchTerm = ref('')
 const remoteOpts = reactive<Record<string, { label: string; value: string }[]>>({})
 async function loadRemoteOptions() {
   for (const f of props.config.fields) {
-    if (!f.remoteOptions) continue
+    // dependsOn 字段由下方 watcher 按依赖值动态拉取，这里跳过（避免无过滤的全量加载）
+    if (!f.remoteOptions || f.remoteOptions.dependsOn) continue
     const { endpoint, label, value, tags } = f.remoteOptions
     const endpoints = Array.isArray(endpoint) ? endpoint : [endpoint]
     try {
@@ -49,6 +50,44 @@ async function loadRemoteOptions() {
     } catch { remoteOpts[f.key] = [] }
   }
 }
+
+// 回填抑制标志：编辑回填(openEdit)/新建初始化(blankForm)期间置 true，
+// 供 calc 重算 watcher 与下方 dependsOn watcher 共用（防覆盖回填值）。声明须早于所有用到它的 watcher（TDZ）。
+let suppressCalc = false
+
+// 依赖式远程下拉：选项随 dependsOn 字段（如 project_id）变化重新拉取，依赖值作为同名查询参数追加。
+// 与上面的静态 loadRemoteOptions 共存：无 dependsOn 的字段仍只在挂载/模块切换时加载一次。
+// flush:'sync'：回填逐字段赋值时本回调在 suppressCalc=true 窗口内同步触发（判定在首个 await 前捕获），
+// 因此回填只拉选项、不清空刚回填的值；用户切换依赖时才清理过期选择（M2）。
+watch(
+  () => props.config.fields.map((f) => (f.remoteOptions?.dependsOn ? form[f.remoteOptions.dependsOn] : null)),
+  async () => {
+    const suppressed = suppressCalc
+    for (const f of props.config.fields) {
+      const ro = f.remoteOptions
+      if (!ro?.dependsOn || Array.isArray(ro.endpoint)) continue
+      const depVal = form[ro.dependsOn]
+      if (!depVal) {
+        remoteOpts[f.key] = []
+        if (!suppressed) form[f.key] = null  // 依赖被清空 → 级联清空已选值
+        continue
+      }
+      const sep = ro.endpoint.includes('?') ? '&' : '?'
+      const url = `${ro.endpoint}${sep}${ro.dependsOn}=${depVal}`
+      try {
+        const r = await api.get(url)
+        const opts = (r.data.items || r.data || []).map((it: any) => ({ label: it[ro.label], value: it[ro.value] }))
+        remoteOpts[f.key] = opts
+        // M2：用户切换依赖（如换项目）后，已选值不在新选项里即过期，清空防后端 400；回填期间不清
+        if (!suppressed && form[f.key] !== null && form[f.key] !== undefined && form[f.key] !== ''
+          && !opts.some((o: any) => String(o.value) === String(form[f.key]))) {
+          form[f.key] = null
+        }
+      } catch { remoteOpts[f.key] = [] }
+    }
+  },
+  { deep: true, immediate: true, flush: 'sync' },
+)
 
 // 详情抽屉
 const showDetail = ref(false)
@@ -65,6 +104,11 @@ const ACTION_LABELS: Record<string, string> = {
   ALLOCATE: '调配', ALLOCATE_RETURN: '调配归还', SUPERSEDE: '置换', LEASEBACK_SALE: '回租出售',
 }
 function auditLabel(a: string): string { return ACTION_LABELS[a] ?? a }
+
+// 跳转到合同列表并打开指定合同的详情抽屉（参照销售合同链接用）
+function goContract(id: string) {
+  router.push({ path: '/master/contracts', query: { detail: id } })
+}
 // 操作记录仅管理层可见（与后端 /audit 的 require_role 口径一致）
 const canViewAudit = computed(() => auth.role === 'ADMIN' || auth.role === 'FINANCE_DIRECTOR')
 
@@ -74,8 +118,7 @@ const activeAction = ref<DetailAction | null>(null)
 const actionForm = reactive<Record<string, any>>({})
 
 // 自动计算字段（如 不含税=含税/(1+税率)）：仅当「依赖字段」变化时重算；calc 字段本身可手工改（不在依赖里）。
-// suppressCalc：编辑回填/新建初始化期间抑制重算，防覆盖存量值/默认值（flush:sync 保证回填逐字段触发时被挡住）。
-let suppressCalc = false
+// suppressCalc（声明见上方 dependsOn watcher 前）：编辑回填/新建初始化期间抑制重算，防覆盖存量值/默认值（flush:sync 保证回填逐字段触发时被挡住）。
 const calcFields = computed(() => props.config.fields.filter((f) => f.calc && f.calcDeps?.length))
 const calcDepsValues = computed(() => calcFields.value.flatMap((f) => f.calcDeps!.map((k) => form[k])))
 watch(calcDepsValues, () => {
@@ -96,7 +139,21 @@ function blankForm() {
 }
 const loadFailed = ref(false)
 // W4：列表顶部 Tab（如合同按 type、验收按 acceptance_type 切换；''=全部）
-const activeTab = ref<string>('')
+// 步骤导航实体级跳转：?<listParamKey>=<value>（如合同 ?type=SALES）→ 初始定位到对应 Tab。
+function queryTab(): string {
+  const key = props.config.listParamKey
+  const v = key ? route.query[key] : null
+  const s = (Array.isArray(v) ? v[0] : v) ?? ''
+  return props.config.listTabs?.some((t) => t.value === s) ? String(s) : ''
+}
+const activeTab = ref<string>(queryTab())
+// 步骤导航实体级跳转：?project_id=<pid> 时按项目过滤列表（仅模块有 project_id 字段时生效；
+// 相关后端端点 /contracts /orders 等均支持 project_id 查询参数，服务端过滤）。
+function queryProjectId(): string | null {
+  const v = route.query.project_id
+  const s = Array.isArray(v) ? v[0] : v
+  return s && props.config.fields.some((f) => f.key === 'project_id') ? String(s) : null
+}
 async function refresh() {
   loading.value = true
   loadFailed.value = false
@@ -105,6 +162,8 @@ async function refresh() {
     if (props.config.listParamKey && activeTab.value) {
       params[props.config.listParamKey] = activeTab.value
     }
+    const qpid = queryProjectId()
+    if (qpid) params.project_id = qpid
     const d = await R.listRes(props.config.apiPath, params)
     items.value = d.items
   } catch { loadFailed.value = true; msg.error('加载失败') }
@@ -120,8 +179,25 @@ function writeSearch(v: string): void {
 }
 watch(searchTerm, writeSearch)
 watch(activeTab, refresh)
+// ?project_id 变化（如同页内步骤导航跳到另一项目的过滤列表）→ 重新拉取
+watch(() => route.query.project_id, () => refresh())
 onMounted(() => { searchTerm.value = readSearch(); refresh(); loadRemoteOptions() })
-watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = readSearch(); activeTab.value = ''; refresh(); loadRemoteOptions() })
+watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = readSearch(); activeTab.value = queryTab(); refresh(); loadRemoteOptions() })
+
+// 步骤导航实体级跳转：?detail=<id> 时自动打开对应实体的详情抽屉。
+// 列表可能尚未加载完，先挂起 pendingDetailId，待 items 就绪后再打开。
+const pendingDetailId = ref<string | null>(null)
+function tryOpenPendingDetail() {
+  const id = pendingDetailId.value
+  if (!id) return
+  const row = items.value.find((r: any) => String(r.id) === id)
+  if (row) { openDetail(row); pendingDetailId.value = null }
+}
+watch(() => route.query.detail, (id) => {
+  pendingDetailId.value = id ? String(id) : null
+  if (pendingDetailId.value) tryOpenPendingDetail()
+}, { immediate: true })
+watch(items, () => { if (pendingDetailId.value) tryOpenPendingDetail() })
 
 // 搜索过滤
 const filteredItems = computed(() => {
@@ -201,9 +277,9 @@ async function advanceStage(stage: any, status: '进行中' | '已完成') {
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 async function submit() {
-  // 必填前端校验（缺必填给中文提示）
+  // 必填前端校验（缺必填给中文提示）；showWhen 隐藏的字段不参与校验（如销售合同不校验参照销售合同）
   const missing = props.config.fields
-    .filter((f) => f.required && (form[f.key] === null || form[f.key] === undefined || form[f.key] === ''))
+    .filter((f) => f.required && (!f.showWhen || f.showWhen(form)) && (form[f.key] === null || form[f.key] === undefined || form[f.key] === ''))
     .map((f) => f.label)
   if (missing.length) { msg.warning(`请填写必填项：${missing.join('、')}`); return }
   // 百分数字段：显示百分数（13）→ 提交小数（0.13）；showWhen 隐藏的字段不提交（如非算力租赁时不带租期）
@@ -215,7 +291,14 @@ async function submit() {
     payload[f.key] = v
   })
   try {
-    if (editing.value) await R.updateRes(props.config.apiPath, editing.value.id, payload)
+    if (editing.value) {
+      const updated = await R.updateRes(props.config.apiPath, editing.value.id, payload)
+      // 规则3：销售合同金额/条款变更后，后端返回被参照采购合同数，提示用户复核（仅编辑路径；仅销售合同会带非零值）
+      const cnt = (updated as any)?.referenced_purchase_count
+      if (typeof cnt === 'number' && cnt > 0) {
+        msg.warning(`该销售合同已被 ${cnt} 份采购合同参照，请复核采购合同金额是否需调整`)
+      }
+    }
     else await R.createRes(props.config.apiPath, payload)
     showModal.value = false; msg.success('已保存'); await refresh()
   } catch (e: any) {
@@ -441,8 +524,8 @@ const tableColumns = computed(() => {
             </n-tooltip>
           </template>
           <div style="width:100%">
-            <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
-            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" clearable />
+            <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" :disabled="!!f.disabledWhen?.(form, editing)" />
+            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" clearable :disabled="!!f.disabledWhen?.(form, editing)" />
             <MoneyInput v-else-if="f.type === 'number'" v-model:value="form[f.key]" :status="fieldWarn(f) ? 'warning' : undefined" />
             <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
               :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />
@@ -478,6 +561,14 @@ const tableColumns = computed(() => {
             <span v-else>{{ detailRow[f.key] ?? '-' }}</span>
           </n-descriptions-item>
         </n-descriptions>
+
+        <!-- 采购合同：参照的销售合同（可点跳转） -->
+        <div v-if="detailRow?.parent_contract_id" style="margin-top:12px">
+          <div class="muted tiny">参照销售合同</div>
+          <n-button text type="primary" @click="goContract(detailRow.parent_contract_id)">
+            {{ detailRow.parent_contract_no || detailRow.parent_contract_id }}
+          </n-button>
+        </div>
 
         <!-- 二期 W3-4：核算判定信息（判定依据 + 确认留痕） -->
         <div v-if="config.revenueJudge && detailRow?.revenue_method" style="margin-top:20px" data-testid="judge-detail">
