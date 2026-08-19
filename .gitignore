@@ -46,3 +46,10 @@ pgdata/
 /*.png
 /*.pdf
 /test-results/
+
+# DSH 会话临时产物（不进仓库）
+.dsh-vision-router/
+_audit/
+e2e/manual-screenshots.js
+e2e/manual-to-pdf.js
+e2e/verify-palette.js
