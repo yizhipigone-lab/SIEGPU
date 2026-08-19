@@ -18,9 +18,11 @@ const nodes = ref<any[]>([])
 const repayments = ref<any[]>([])
 const showDrawer = ref(false)
 
-// 放款表单
-const disburseForm = ref({ actual_disbursement_amount: null as number | null, disbursement_date: '', note: '' })
-const showDisburse = ref(false)
+// 放款记录（分次放款）
+const disbursements = ref<any[]>([])
+const acceptances = ref<any[]>([])
+const showAddDisb = ref(false)
+const addDisbForm = ref({ amount: null as number | null, disbursement_date: '', note: '', acceptance_id: '' as string })
 // 还款确认表单
 const confirmTarget = ref<any | null>(null)
 const confirmForm = ref({ actual_principal: 0, actual_interest: 0, paid_date: '' })
@@ -119,30 +121,45 @@ async function doStuck() {
 
 async function openDetail(row: any) {
   try {
-    const [{ data: d }, { data: r }] = await Promise.all([
+    const [{ data: d }, { data: r }, { data: ds }, { data: ac }] = await Promise.all([
       api.get(`/leasing/processes/${row.id}`),
       api.get('/repayments', { params: { leasing_process_id: row.id } }),
+      api.get(`/leasing/processes/${row.id}/disbursements`),
+      api.get('/acceptances', { params: { project_id: row.project_id, acceptance_type: '采购验收' } }),
     ])
     detail.value = d
     nodes.value = d.nodes || []
     repayments.value = r.items || []
+    disbursements.value = ds.items || []
+    acceptances.value = (ac || []).filter((a: any) => a.status === '已通过')
     showDrawer.value = true
   } catch { msg.error('加载详情失败') }
 }
 
-async function doDisburse() {
+function accLabel(id: string | null): string {
+  if (!id) return ''
+  const a = acceptances.value.find((x: any) => x.id === id)
+  return a ? `验收 ${a.acceptance_date || ''} · ${a.quantity_accepted}台` : '验收'
+}
+
+function openAddDisb() {
+  addDisbForm.value = { amount: null, disbursement_date: '', note: '', acceptance_id: '' }
+  showAddDisb.value = true
+}
+
+async function doAddDisb() {
   if (!detail.value) return
-  if (!disburseForm.value.actual_disbursement_amount || !disburseForm.value.disbursement_date) {
-    msg.warning('请填金额和放款日期'); return
-  }
+  const f = addDisbForm.value
+  if (!f.acceptance_id) { msg.warning('请选择本次放款对应的采购验收'); return }
+  if (!f.amount || !f.disbursement_date) { msg.warning('请填放款额和实际放款日'); return }
   try {
-    await api.post(`/leasing/processes/${detail.value.id}/disburse`, disburseForm.value)
-    msg.success(`放款成功，已生成 ${detail.value.term_periods} 期还款计划`)
-    showDisburse.value = false
-    await refresh()
-    if (processes.value.find((p) => p.id === detail.value?.id)) {
-      await openDetail(processes.value.find((p) => p.id === detail.value!.id)!)
-    }
+    await api.post(`/leasing/processes/${detail.value.id}/disbursements`, {
+      amount: f.amount, disbursement_date: f.disbursement_date,
+      acceptance_id: f.acceptance_id, note: f.note || null,
+    })
+    msg.success('放款已登记，已生成该笔还款计划')
+    showAddDisb.value = false
+    if (detail.value) await openDetail(detail.value)
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
@@ -244,21 +261,22 @@ const repayCols = [
             </div>
           </div>
 
-          <!-- 放款 -->
-          <template v-if="detail.status !== '已放款' && detail.status !== '已拒绝'">
-            <div class="section-title">放款操作</div>
-            <n-space align="center">
-              <n-form-item label="实际放款额(元)" :show-feedback="false">
-                <n-input-number v-model:value="disburseForm.actual_disbursement_amount" placeholder="金额" :show-button="false" style="width:160px" />
-              </n-form-item>
-              <n-form-item label="放款日" :show-feedback="false">
-                <n-date-picker type="date" :value="ymdToTs(disburseForm.disbursement_date)"
-                  @update:value="(ts: number | null) => disburseForm.disbursement_date = tsToYmd(ts)" style="width:150px" />
-              </n-form-item>
-              <n-button type="primary" @click="doDisburse" :disabled="!disburseForm.actual_disbursement_amount">确认放款</n-button>
-            </n-space>
-            <div class="muted tiny" style="margin-top:6px">放款将自动生成 {{ detail.term_periods }} 期还款计划 + 1 条资金入金流水</div>
-          </template>
+          <!-- 放款记录（分次放款） -->
+          <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>放款记录（{{ disbursements.length }} 笔）</span>
+            <n-button size="small" type="primary" @click="openAddDisb">新增放款</n-button>
+          </div>
+          <div v-if="disbursements.length === 0" class="muted tiny" style="padding:8px 0">暂无放款记录。完成采购验收后点「新增放款」登记到账</div>
+          <div v-else>
+            <div v-for="dd in disbursements" :key="dd.id" style="padding:8px 0;border-bottom:1px dashed #F1F5F9">
+              <n-space align="center">
+                <span class="num" style="font-weight:600">{{ money(dd.amount) }}</span>
+                <n-tag size="tiny" :bordered="false" type="success">{{ dd.disbursement_date }}</n-tag>
+                <n-tag v-if="dd.acceptance_id" size="tiny" :bordered="false">{{ accLabel(dd.acceptance_id) }}</n-tag>
+                <span class="muted tiny">{{ dd.note || '' }}</span>
+              </n-space>
+            </div>
+          </div>
 
           <!-- 还款计划 -->
           <template v-if="repayments.length">
@@ -282,6 +300,20 @@ const repayCols = [
       <template #footer><n-space justify="end"><n-button @click="confirmTarget = null">取消</n-button><n-button type="primary" @click="doConfirm">确认</n-button></n-space></template>
     </n-modal>
 
+    <!-- 新增放款 -->
+    <n-modal v-model:show="showAddDisb" preset="card" title="新增放款" style="width:400px">
+      <n-space vertical :size="12">
+        <n-form-item label="对应采购验收">
+          <n-select v-model:value="addDisbForm.acceptance_id" filterable placeholder="选择本次放款对应的验收批次"
+            :options="acceptances.map((a: any) => ({ label: `采购验收 ${a.acceptance_date || ''} · ${a.quantity_accepted}台`, value: a.id }))" />
+        </n-form-item>
+        <n-form-item label="放款额(元)"><n-input-number v-model:value="addDisbForm.amount" :show-button="false" style="width:100%" /></n-form-item>
+        <n-form-item label="实际放款日"><n-date-picker type="date" style="width:100%" :value="ymdToTs(addDisbForm.disbursement_date)" @update:value="(ts: number | null) => addDisbForm.disbursement_date = tsToYmd(ts)" /></n-form-item>
+        <n-form-item label="备注"><n-input v-model:value="addDisbForm.note" /></n-form-item>
+      </n-space>
+      <template #footer><n-space justify="end"><n-button @click="showAddDisb = false">取消</n-button><n-button type="primary" @click="doAddDisb">确认放款</n-button></n-space></template>
+    </n-modal>
+
     <!-- 新建金租申请 -->
     <n-modal v-model:show="showCreate" preset="card" title="新建金租申请" style="width:520px;max-width:94vw">
       <n-space vertical :size="12">
@@ -303,7 +335,7 @@ const repayCols = [
           <n-form-item label="还款方式">
             <n-select v-model:value="createForm.repayment_method" :options="[{ label: '等额本息', value: '等额本息' }, { label: '等额本金', value: '等额本金' }]" style="width:120px" />
           </n-form-item>
-          <n-form-item label="开始日期">
+          <n-form-item label="预计放款日">
             <n-date-picker type="date" :value="ymdToTs(createForm.start_date)"
               @update:value="(ts: number | null) => createForm.start_date = tsToYmd(ts)" style="width:150px" />
           </n-form-item>
@@ -351,6 +383,6 @@ const repayCols = [
 .tl-seq { font-size: 10px; color: var(--c-text-3); }
 .tl-name { font-size: 11px; line-height: 1.2; margin-bottom: 2px; }
 .tl-date { font-size: 9px; color: var(--c-text-3); margin-bottom: 2px; }
-.tl-ops { display: flex; gap: 2px; margin-top: 2px; }
+.tl-ops { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
 :deep(.num) { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 </style>

@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { isMenuAllowed, readShowAllMenus } from '../utils/roleMenu'
+import { COMMANDS } from '../utils/commands'
+import { pushRecent } from '../utils/recents'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -18,7 +20,10 @@ const router = createRouter({
         { path: 'invoices', name: 'invoices', component: () => import('../views/InvoicesView.vue') },
         { path: 'leasing', name: 'leasing', component: () => import('../views/LeasingView.vue') },
         { path: 'profit', name: 'profit', component: () => import('../views/ProfitView.vue') },
-        { path: 'sales-orders', name: 'sales-orders', component: () => import('../views/SalesOrdersView.vue') },
+        { path: 'orders', name: 'orders', component: () => import('../views/OrdersView.vue') },
+        // 旧路由重定向到统一订单页对应 Tab（工作台/命令面板/角色导航深链兼容）
+        { path: 'sales-orders', redirect: '/orders?tab=sales' },
+        { path: 'master/orders', redirect: '/orders?tab=purchase' },
         { path: 'devices', name: 'devices', component: () => import('../views/DevicesView.vue') },
         { path: 'acceptances', name: 'acceptances', component: () => import('../views/AcceptancesView.vue') },
         { path: 'confirmations', name: 'confirmations', component: () => import('../views/ConfirmationsView.vue') },
@@ -47,6 +52,12 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && auth.token && to.name !== 'workspace') {
     if (!isMenuAllowed(auth.role, to.path, readShowAllMenus())) return { path: '/' }
   }
+})
+
+// 记录最近访问（命令面板「最近访问」快捷区；首页/登录页/工作台不入最近）
+router.afterEach((to) => {
+  const cmd = COMMANDS.find((c) => c.route === to.path)
+  if (cmd) pushRecent(to.path, cmd.title)
 })
 
 export default router

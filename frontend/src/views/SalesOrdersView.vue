@@ -2,11 +2,14 @@
 import { h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  NButton, NDataTable, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag, useMessage,
+  NButton, NCheckbox, NDataTable, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag, useMessage,
 } from 'naive-ui'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
 import EmptyState from '../components/EmptyState.vue'
+
+// embedded=true 时由订单中心 OrdersView 内嵌（隐藏自带 h2，避免与 Tab 标签重复）
+defineProps<{ embedded?: boolean }>()
 
 interface SalesOrder {
   id: string; project_id: string; contract_id: string
@@ -14,6 +17,7 @@ interface SalesOrder {
   monthly_rent_per_unit: number; total_monthly_rent: number
   start_date: string | null; end_date: string | null
   status: string; notes: string | null
+  is_batch: boolean; batch_name: string | null
   created_at: string
 }
 
@@ -34,6 +38,7 @@ const form = ref({
   quantity: null as number | null, monthly_rent_per_unit: null as number | null,
   total_monthly_rent: null as number | null,
   start_date: '', end_date: '', notes: '',
+  is_batch: false, batch_name: '',
 })
 
 // 数量或单价变化时自动算总月租（可手改）
@@ -56,6 +61,7 @@ const equipName = (id: string) => equipModels.value.find((m: any) => m.id === id
 const columns = [
   { title: '项目', key: 'project_id', render: (r: any) => projectName(r.project_id) },
   { title: '合同', key: 'contract_id', width: 130, render: (r: any) => contractNo(r.contract_id) },
+  { title: '批次', key: 'batch_name', width: 130, render: (r: any) => r.is_batch ? (r.batch_name || r.id.slice(0, 8)) : '-' },
   { title: '设备型号', key: 'equipment_model_id', render: (r: any) => equipName(r.equipment_model_id) },
   { title: '数量', key: 'quantity', width: 70 },
   { title: '月租/台', key: 'monthly_rent_per_unit', align: 'right' as const, render: (r: any) => r.monthly_rent_per_unit?.toLocaleString() },
@@ -83,7 +89,7 @@ function openCreate() {
   form.value = {
     project_id: (route.query.project_id as string) || '', contract_id: '', equipment_model_id: '',
     quantity: null, monthly_rent_per_unit: null, total_monthly_rent: null,
-    start_date: '', end_date: '', notes: '',
+    start_date: '', end_date: '', notes: '', is_batch: false, batch_name: '',
   }
   showCreate.value = true
 }
@@ -98,8 +104,9 @@ async function submitCreate() {
       quantity: f.quantity, monthly_rent_per_unit: f.monthly_rent_per_unit,
       total_monthly_rent: f.total_monthly_rent ?? f.quantity * f.monthly_rent_per_unit,
       start_date: f.start_date || null, end_date: f.end_date || null, notes: f.notes || null,
+      is_batch: f.is_batch, batch_name: f.is_batch ? (f.batch_name || null) : null,
     })
-    msg.success('销售订单已创建')
+    msg.success(f.is_batch ? '销售批次已创建' : '销售订单已创建')
     showCreate.value = false
     await load()
   } catch (e: any) { msg.error(errMsg(e)) }
@@ -111,7 +118,8 @@ onMounted(load)
 <template>
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="margin:0">销售订单</h2>
+      <h2 v-if="!embedded" style="margin:0">销售订单</h2>
+      <span v-else />
       <n-button type="primary" @click="openCreate">新增销售订单</n-button>
     </div>
     <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false">
@@ -141,6 +149,12 @@ onMounted(load)
           <n-form-item label="止租日"><n-input v-model:value="form.end_date" placeholder="YYYY-MM-DD" style="width:140px" /></n-form-item>
         </n-space>
         <n-form-item label="备注"><n-input v-model:value="form.notes" type="textarea" :rows="2" /></n-form-item>
+        <n-form-item label="销售批次">
+          <n-checkbox v-model:checked="form.is_batch">按批次（创建为销售批次）</n-checkbox>
+        </n-form-item>
+        <n-form-item v-if="form.is_batch" label="批次名">
+          <n-input v-model:value="form.batch_name" placeholder="如 销售批次1" />
+        </n-form-item>
       </n-space>
       <template #footer>
         <n-space justify="end">

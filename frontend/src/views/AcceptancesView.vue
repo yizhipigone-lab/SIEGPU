@@ -2,7 +2,8 @@
 import { computed, h, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  NButton, NDataTable, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag, useMessage,
+  NButton, NCheckbox, NDataTable, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace,
+  NTabPane, NTabs, NTag, useMessage,
 } from 'naive-ui'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
@@ -13,6 +14,7 @@ interface Acceptance {
   order_id: string | null; sales_order_id: string | null
   status: string; inspector: string | null; acceptance_date: string | null
   quantity_accepted: number; quantity_rejected: number
+  shelve: boolean
 }
 
 const msg = useMessage()
@@ -25,12 +27,17 @@ const projects = ref<any[]>([])
 const orders = ref<any[]>([])
 const salesOrders = ref<any[]>([])
 
+// W4：采购验收 / 销售验收 Tab 切换
+const activeType = ref<'采购验收' | '销售验收'>('采购验收')
+const filteredItems = computed(() => items.value.filter((a) => a.acceptance_type === activeType.value))
+
 // 新建表单
 const showCreate = ref(false)
 const form = ref({
   project_id: '' as string, acceptance_type: '采购验收' as string,
   order_id: null as string | null, sales_order_id: null as string | null,
   inspector: '', quantity_accepted: 0, quantity_rejected: 0, notes: '',
+  shelve: false,
 })
 
 // 驳回弹窗
@@ -42,13 +49,27 @@ const showReject = computed({
 })
 
 const projectOpts = () => projects.value.map((p: any) => ({ label: p.name, value: p.id }))
+// W4：按批次验收——下拉清晰标注「批次」与批次名
 const orderOpts = () => orders.value.map((o: any) => ({
-  label: `采购单 ${o.id.slice(0, 8)}… · ${o.quantity}台`, value: o.id,
+  label: o.is_batch
+    ? `批次 ${o.batch_name || o.id.slice(0, 8)} · ${o.quantity ?? '?'}台`
+    : `采购单 ${o.id.slice(0, 8)} · ${o.quantity}台`,
+  value: o.id,
 }))
 const salesOrderOpts = () => salesOrders.value.map((s: any) => ({
-  label: `销售单 ${s.id.slice(0, 8)}… · ${s.quantity}台`, value: s.id,
+  label: s.is_batch
+    ? `销售批次 ${s.batch_name || s.id.slice(0, 8)} · ${s.quantity}台`
+    : `销售单 ${s.id.slice(0, 8)} · ${s.quantity}台`,
+  value: s.id,
 }))
 const projectName = (id: string) => projects.value.find((p: any) => p.id === id)?.name || id.slice(0, 8) + '…'
+const batchLabel = (r: Acceptance) => {
+  const id = r.acceptance_type === '采购验收' ? r.order_id : r.sales_order_id
+  if (!id) return '—'
+  const list = r.acceptance_type === '采购验收' ? orders.value : salesOrders.value
+  const o = list.find((x: any) => x.id === id)
+  return o ? (o.batch_name || o.id.slice(0, 8)) : id.slice(0, 8) + '…'
+}
 
 async function approve(row: Acceptance) {
   try {
@@ -74,6 +95,7 @@ async function submitReject() {
 const columns = [
   { title: '项目', key: 'project_id', render: (r: any) => projectName(r.project_id) },
   { title: '类型', key: 'acceptance_type', width: 100, render: (r: any) => h(NTag, { type: r.acceptance_type === '采购验收' ? 'info' : 'success', size: 'small' }, () => r.acceptance_type) },
+  { title: '批次', key: 'order_id', width: 150, render: (r: Acceptance) => batchLabel(r) },
   { title: '状态', key: 'status', width: 90, render: (r: any) => h(NTag, { type: statusTagType(r.status) as any, size: 'small' }, () => r.status) },
   { title: '验收人', key: 'inspector', width: 100 },
   { title: '合格', key: 'quantity_accepted', width: 70 },
@@ -104,9 +126,9 @@ async function load() {
 
 function openCreate() {
   form.value = {
-    project_id: (route.query.project_id as string) || '', acceptance_type: '采购验收',
+    project_id: (route.query.project_id as string) || '', acceptance_type: activeType.value,
     order_id: null, sales_order_id: null,
-    inspector: '', quantity_accepted: 0, quantity_rejected: 0, notes: '',
+    inspector: '', quantity_accepted: 0, quantity_rejected: 0, notes: '', shelve: false,
   }
   showCreate.value = true
 }
@@ -124,6 +146,7 @@ async function submitCreate() {
       inspector: f.inspector || null,
       quantity_accepted: f.quantity_accepted, quantity_rejected: f.quantity_rejected,
       notes: f.notes || null,
+      shelve: f.acceptance_type === '销售验收' ? f.shelve : false,
     })
     msg.success('验收单已创建')
     showCreate.value = false
@@ -140,9 +163,15 @@ onMounted(load)
       <h2 style="margin:0">验收管理</h2>
       <n-button type="primary" @click="openCreate">新建验收</n-button>
     </div>
-    <n-dataTable :columns="columns" :data="items" :loading="loading" :bordered="false">
+
+    <n-tabs v-model:value="activeType" type="line" style="margin-bottom:12px" data-testid="acceptance-tabs">
+      <n-tab-pane name="采购验收" tab="采购验收" />
+      <n-tab-pane name="销售验收" tab="销售验收" />
+    </n-tabs>
+
+    <n-dataTable :columns="columns" :data="filteredItems" :loading="loading" :bordered="false">
       <template #empty>
-        <EmptyState description="还没有验收记录，点击右上角「新建验收」，设备到货后即可登记验收" />
+        <EmptyState description="还没有验收记录，点击右上角「新建验收」，设备到货/交付后即可按批次登记验收" />
       </template>
     </n-dataTable>
 
@@ -155,17 +184,22 @@ onMounted(load)
         <n-form-item label="验收类型">
           <n-select v-model:value="form.acceptance_type" :options="[{ label: '采购验收', value: '采购验收' }, { label: '销售验收', value: '销售验收' }]" />
         </n-form-item>
-        <n-form-item v-if="form.acceptance_type === '采购验收'" label="关联采购订单">
-          <n-select v-model:value="form.order_id" :options="orderOpts()" placeholder="选采购订单" filterable />
+        <n-form-item v-if="form.acceptance_type === '采购验收'" label="关联采购批次">
+          <n-select v-model:value="form.order_id" :options="orderOpts()" placeholder="选采购批次订单" filterable />
         </n-form-item>
-        <n-form-item v-else label="关联销售订单">
-          <n-select v-model:value="form.sales_order_id" :options="salesOrderOpts()" placeholder="选销售订单" filterable />
+        <n-form-item v-else label="关联销售批次">
+          <n-select v-model:value="form.sales_order_id" :options="salesOrderOpts()" placeholder="选销售批次" filterable />
         </n-form-item>
         <n-space>
           <n-form-item label="验收人"><n-input v-model:value="form.inspector" style="width:130px" /></n-form-item>
           <n-form-item label="合格数(台)"><n-input-number v-model:value="form.quantity_accepted" :min="0" style="width:100px" /></n-form-item>
           <n-form-item label="不合格数(台)"><n-input-number v-model:value="form.quantity_rejected" :min="0" style="width:100px" /></n-form-item>
         </n-space>
+        <n-form-item v-if="form.acceptance_type === '销售验收'" label="上架">
+          <n-checkbox v-model:checked="form.shelve">
+            勾选后，验收通过时同步把该批次订单的上架标记为完成
+          </n-checkbox>
+        </n-form-item>
         <n-form-item label="备注"><n-input v-model:value="form.notes" type="textarea" :rows="2" /></n-form-item>
       </n-space>
       <template #footer>

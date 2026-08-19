@@ -3,11 +3,14 @@ import { computed } from 'vue'
 import { NDrawer, NDrawerContent, NEmpty, useMessage } from 'naive-ui'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
+import { roleName } from '../utils/role'
 import CapitalForm from './step-forms/CapitalForm.vue'
 import AcceptanceForm from './step-forms/AcceptanceForm.vue'
 import BillingForm from './step-forms/BillingForm.vue'
 import ConfirmationForm from './step-forms/ConfirmationForm.vue'
 import InvoiceForm from './step-forms/InvoiceForm.vue'
+
+interface WfStep { seq: number; name: string; status: string; doer_role: string }
 
 const props = defineProps<{ show: boolean; projectId: string; step: any }>()
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void; (e: 'done'): void }>()
@@ -40,9 +43,17 @@ const showModel = computed({
 })
 
 async function onSuccess() {
-  // 提交成功后刷新工作流进度，再通知父组件 reload
+  // 提交成功后刷新工作流进度，并给「下一步预告」：办完不迷路，告诉用户接下来做什么、轮到谁。
   try {
-    await http.post(`/workflows/${props.projectId}/refresh`)
+    const { data } = await http.post(`/workflows/${props.projectId}/refresh`)
+    const steps: WfStep[] = data?.steps || []
+    if (data?.status === '已完成') {
+      msg.success('🎉 项目全流程已完成')
+    } else {
+      const next = steps.find((s) => s.seq === data?.current_step && s.status === 'pending')
+      if (next) msg.success(`已完成 · 下一步：${next.name}（${roleName(next.doer_role)} 负责）`)
+      else msg.success('已保存')
+    }
   } catch (e: any) { msg.warning(errMsg(e)) }
   showModel.value = false
   emit('done')

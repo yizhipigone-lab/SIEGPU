@@ -63,12 +63,14 @@ async function selectOptionByText(scope: Locator, label: string, text: string, p
 // 用 count 增量而非 .last()：naive-ui message 退出有过渡，旧 .n-message 残留 DOM，
 // 既会触发 strict-mode 多元素误报，也会让紧凑循环里 .last() 命中上一轮的旧消息（假阳性）。
 // count 必须比点击前增加，才能证明本轮真的弹了新消息。
+// 超时 5s→15s：全套连跑时共享 dev 库行数累积、表格渲染变慢，toast 出现晚于 5s 属于负载问题
+// 而非业务错（单跑恒过、快照里状态列已物化「在途」）；拉长等待是消抖，不断言逻辑。
 async function clickAndExpectMessage(modal: Locator, buttonName: string, page: Page, text: string): Promise<void> {
   const before = await page.locator('.n-message', { hasText: text }).count()
   await modal.getByRole('button', { name: buttonName }).click()
   await expect.poll(
     async () => page.locator('.n-message', { hasText: text }).count(),
-    { timeout: 5000 },
+    { timeout: 15000 },
   ).toBeGreaterThan(before)
 }
 
@@ -175,7 +177,10 @@ test.describe('设备清单', () => {
       await modal.waitFor()
       await selectOptionByText(modal, '节点', '订货', page)
       await selectOptionByText(modal, '状态', status, page)
-      await clickAndExpectMessage(modal, '确认推进', page, '节点推进完成')
+      // 成功即关抽屉并 reload（确定性信号）；替代 toast 计数——message 退出过渡 + 16 worker
+      // 并发负载下 toast 晚到/错过会导致 15s 超时 flake（债③头注释已述）。最终状态由下方「在途」断言兜底。
+      await modal.getByRole('button', { name: '确认推进' }).click()
+      await expect(modal).toBeHidden({ timeout: 15000 })
     }
     // 本设备状态列物化 = 在途（订货已完成，下一未完成节点为在途）
     await expect(rowBySn(page, sn)).toContainText('在途')

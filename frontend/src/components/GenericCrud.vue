@@ -3,7 +3,7 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NDatePicker, NDescriptions, NDescriptionsItem, NDrawer, NDrawerContent, NEmpty,
-  NAlert, NDivider, NForm, NFormItem, NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace,
+  NAlert, NDivider, NForm, NFormItem, NIcon, NInput, NModal, NPopconfirm, NSelect, NSpace,
   NTabPane, NTabs, NTag, NTooltip, NUpload, useMessage,
 } from 'naive-ui'
 import { Eye, FileText, HelpCircle, Pencil, Plus, Trash2, Workflow } from 'lucide-vue-next'
@@ -12,12 +12,15 @@ import { money, statusTagType, tsToYmd, ymdToTs } from '../utils/format'
 import { errMsg } from '../utils/errMsg'
 import { api } from '../api/client'
 import type { CrudConfig, DetailAction, FieldConfig } from '../config/modules'
+import { useAuthStore } from '../stores/auth'
 import WorkflowProgress from './WorkflowProgress.vue'
+import MoneyInput from './MoneyInput.vue'
 
 const props = defineProps<{ config: CrudConfig }>()
 const msg = useMessage()
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const items = ref<any[]>([])
 const loading = ref(false)
 const showModal = ref(false)
@@ -52,26 +55,73 @@ const showDetail = ref(false)
 const detailRow = ref<any | null>(null)
 const tabData = ref<Record<string, any[]>>({})
 const stages = ref<any[]>([])
+interface AuditRow { id: number; action: string; user_name: string; at: string | null }
+const auditRows = ref<AuditRow[]>([])
+// 操作记录：后端 action 枚举 → 中文（新手可读）
+const ACTION_LABELS: Record<string, string> = {
+  CREATE: '创建', UPDATE: '变更', DELETE: '删除', REVERSE: '红冲', RECONCILE: '核销',
+  LIGHT_ON: '点亮', DISBURSE: '放款', CAPITAL_TXN: '记账', ACCEPT_APPROVE: '验收审批',
+  CONFIRM_UPLOAD: '确认上传', REVENUE_JUDGE: '收入判定', REVENUE_OVERRIDE: '核算覆盖',
+  ALLOCATE: '调配', ALLOCATE_RETURN: '调配归还', SUPERSEDE: '置换', LEASEBACK_SALE: '回租出售',
+}
+function auditLabel(a: string): string { return ACTION_LABELS[a] ?? a }
+// 操作记录仅管理层可见（与后端 /audit 的 require_role 口径一致）
+const canViewAudit = computed(() => auth.role === 'ADMIN' || auth.role === 'FINANCE_DIRECTOR')
 
 // 业务操作弹窗
 const showActionModal = ref(false)
 const activeAction = ref<DetailAction | null>(null)
 const actionForm = reactive<Record<string, any>>({})
 
+// 自动计算字段（如 不含税=含税/(1+税率)）：仅当「依赖字段」变化时重算；calc 字段本身可手工改（不在依赖里）。
+// suppressCalc：编辑回填/新建初始化期间抑制重算，防覆盖存量值/默认值（flush:sync 保证回填逐字段触发时被挡住）。
+let suppressCalc = false
+const calcFields = computed(() => props.config.fields.filter((f) => f.calc && f.calcDeps?.length))
+const calcDepsValues = computed(() => calcFields.value.flatMap((f) => f.calcDeps!.map((k) => form[k])))
+watch(calcDepsValues, () => {
+  if (suppressCalc) return
+  for (const f of calcFields.value) {
+    const v = f.calc!(form)
+    if (v !== null && form[f.key] !== v) form[f.key] = v
+  }
+}, { flush: 'sync' })
+
 function blankForm() {
-  // select 默认 null（非 ''）：'' 会被后端 Literal 枚举拒绝（如合同判定三字段）
-  props.config.fields.forEach((f) => { form[f.key] = (f.type === 'number' || f.type === 'select') ? null : '' })
+  // select 默认 null（非 ''）：'' 会被后端 Literal 枚举拒绝（如合同判定三字段）；支持字段级 default（如税率默认 13）
+  suppressCalc = true
+  props.config.fields.forEach((f) => {
+    form[f.key] = f.default !== undefined ? f.default : ((f.type === 'number' || f.type === 'select') ? null : '')
+  })
+  suppressCalc = false
 }
+const loadFailed = ref(false)
+// W4：列表顶部 Tab（如合同按 type、验收按 acceptance_type 切换；''=全部）
+const activeTab = ref<string>('')
 async function refresh() {
   loading.value = true
+  loadFailed.value = false
   try {
-    const d = await R.listRes(props.config.apiPath)
+    const params: Record<string, unknown> = {}
+    if (props.config.listParamKey && activeTab.value) {
+      params[props.config.listParamKey] = activeTab.value
+    }
+    const d = await R.listRes(props.config.apiPath, params)
     items.value = d.items
-  } catch { msg.error('加载失败') }
+  } catch { loadFailed.value = true; msg.error('加载失败') }
   finally { loading.value = false }
 }
-onMounted(() => { refresh(); loadRemoteOptions() })
-watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = ''; refresh(); loadRemoteOptions() })
+// 列表筛选状态记忆：searchTerm 按模块持久化，返回列表时恢复（进列表不用重设条件）
+const searchKey = computed(() => `siegpu:crud-search:${props.config.apiPath}`)
+function readSearch(): string {
+  try { return localStorage.getItem(searchKey.value) || '' } catch { return '' }
+}
+function writeSearch(v: string): void {
+  try { localStorage.setItem(searchKey.value, v) } catch { /* 隐私模式等，忽略 */ }
+}
+watch(searchTerm, writeSearch)
+watch(activeTab, refresh)
+onMounted(() => { searchTerm.value = readSearch(); refresh(); loadRemoteOptions() })
+watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = readSearch(); activeTab.value = ''; refresh(); loadRemoteOptions() })
 
 // 搜索过滤
 const filteredItems = computed(() => {
@@ -91,7 +141,19 @@ function openCreate() {
 }
 function openEdit(row: any) {
   editing.value = row
-  props.config.fields.forEach((f) => { form[f.key] = row[f.key] ?? ((f.type === 'number' || f.type === 'select') ? null : '') })
+  suppressCalc = true  // 回填期间抑制自动计算，防覆盖存量值
+  props.config.fields.forEach((f) => {
+    let v = row[f.key]
+    // W4 修复：后端 Decimal 序列化为字符串，number 组件需数字
+    if (f.type === 'number' && typeof v === 'string') {
+      const n = Number(v)
+      v = isNaN(n) ? null : n
+    }
+    // 百分数字段：存储小数（0.13）→ 显示百分数（13）
+    if (f.percent && typeof v === 'number') v = Math.round(v * 10000) / 100
+    form[f.key] = v ?? ((f.type === 'number' || f.type === 'select') ? null : '')
+  })
+  suppressCalc = false
   showModal.value = true
 }
 async function openDetail(row: any) {
@@ -99,9 +161,11 @@ async function openDetail(row: any) {
   showDetail.value = true
   tabData.value = {}
   stages.value = []
+  auditRows.value = []
   // 交付阶段（stageFlow 模块：拉详情里的 stages）
   if (props.config.stageFlow) await loadStages(row.id)
   await loadTabs(row.id)
+  if (props.config.auditEntity) await loadAudit(row.id)
 }
 async function loadTabs(rowId: string) {
   // 拉关联子表（业务操作成功后也会重拉，防 tab 展示操作前旧数据——W9-10 变更记录实测踩中）
@@ -120,6 +184,13 @@ async function loadStages(orderId: string) {
     stages.value = data.stages || []
   } catch { stages.value = [] }
 }
+async function loadAudit(rowId: string) {
+  if (!props.config.auditEntity) return
+  try {
+    const { data } = await api.get('/audit', { params: { entity_type: props.config.auditEntity, entity_id: rowId } })
+    auditRows.value = (data.items || []) as AuditRow[]
+  } catch { auditRows.value = [] }
+}
 async function advanceStage(stage: any, status: '进行中' | '已完成') {
   try {
     await api.patch(`${props.config.apiPath}/delivery-stages/${stage.id}`, {
@@ -135,9 +206,17 @@ async function submit() {
     .filter((f) => f.required && (form[f.key] === null || form[f.key] === undefined || form[f.key] === ''))
     .map((f) => f.label)
   if (missing.length) { msg.warning(`请填写必填项：${missing.join('、')}`); return }
+  // 百分数字段：显示百分数（13）→ 提交小数（0.13）；showWhen 隐藏的字段不提交（如非算力租赁时不带租期）
+  const payload: Record<string, any> = {}
+  props.config.fields.forEach((f) => {
+    if (f.showWhen && !f.showWhen(form)) return
+    let v = form[f.key]
+    if (f.percent && v !== null && v !== undefined && v !== '') v = Number(v) / 100
+    payload[f.key] = v
+  })
   try {
-    if (editing.value) await R.updateRes(props.config.apiPath, editing.value.id, { ...form })
-    else await R.createRes(props.config.apiPath, { ...form })
+    if (editing.value) await R.updateRes(props.config.apiPath, editing.value.id, payload)
+    else await R.createRes(props.config.apiPath, payload)
     showModal.value = false; msg.success('已保存'); await refresh()
   } catch (e: any) {
     msg.error(errMsg(e))
@@ -328,10 +407,21 @@ const tableColumns = computed(() => {
       </n-space>
     </div>
 
+    <n-tabs v-if="config.listTabs?.length" v-model:value="activeTab" type="line" size="small"
+      style="margin-bottom:12px" data-testid="list-tabs">
+      <n-tab-pane v-for="tab in config.listTabs" :key="tab.value" :name="tab.value" :tab="tab.label" />
+    </n-tabs>
+
     <div class="card table-wrap">
       <n-data-table :columns="tableColumns" :data="filteredItems" :loading="loading"
         :pagination="{ pageSize: 10 }" :bordered="false" size="small" striped>
-        <template #empty><n-empty :description="config.creatable !== false ? '暂无数据，点击右上角「新增」创建第一条' : '暂无数据'" style="padding:32px 0" /></template>
+        <template #empty>
+          <div v-if="loadFailed" style="padding:28px 0;text-align:center">
+            <div class="muted tiny" style="margin-bottom:8px">加载失败，请重试</div>
+            <n-button size="small" type="primary" @click="refresh">重试</n-button>
+          </div>
+          <n-empty v-else :description="config.creatable !== false ? '暂无数据，点击右上角「新增」创建第一条' : '暂无数据'" style="padding:32px 0" />
+        </template>
       </n-data-table>
     </div>
 
@@ -340,7 +430,7 @@ const tableColumns = computed(() => {
       <n-form label-placement="left" :label-width="140">
         <template v-for="f in config.fields" :key="f.key">
           <n-divider v-if="f.section" style="margin:6px 0 14px;font-size:13px">{{ f.section }}</n-divider>
-        <n-form-item :required="f.required" :show-feedback="false">
+        <n-form-item v-if="!f.showWhen || f.showWhen(form)" :required="f.required" :show-feedback="false">
           <template #label>
             {{ f.label }}
             <n-tooltip v-if="f.hint" trigger="hover">
@@ -353,7 +443,7 @@ const tableColumns = computed(() => {
           <div style="width:100%">
             <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
             <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" clearable />
-            <n-input-number v-else-if="f.type === 'number'" v-model:value="form[f.key]" :status="fieldWarn(f) ? 'warning' : undefined" style="width:100%" />
+            <MoneyInput v-else-if="f.type === 'number'" v-model:value="form[f.key]" :status="fieldWarn(f) ? 'warning' : undefined" />
             <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
               :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />
             <n-input v-else v-model:value="form[f.key]" />
@@ -456,6 +546,17 @@ const tableColumns = computed(() => {
               :data="tabData[tab.label] || []" :bordered="false" size="small" striped />
           </n-tab-pane>
         </n-tabs>
+
+        <!-- 操作记录：谁在何时改了什么（后端 audit_logs，只读，仅管理层可见） -->
+        <div v-if="config.auditEntity && canViewAudit" style="margin-top:20px" data-testid="audit-trail">
+          <div class="muted" style="margin-bottom:8px;font-weight:600">操作记录</div>
+          <div v-if="auditRows.length === 0" class="muted tiny">暂无操作记录</div>
+          <div v-for="a in auditRows" :key="a.id" class="audit-row">
+            <n-tag size="tiny" :bordered="false" type="info">{{ auditLabel(a.action) }}</n-tag>
+            <span class="audit-user">{{ a.user_name || '—' }}</span>
+            <span class="muted tiny">{{ a.at ? String(a.at).slice(0, 19).replace('T', ' ') : '' }}</span>
+          </div>
+        </div>
       </n-drawer-content>
     </n-drawer>
 
@@ -478,6 +579,9 @@ const tableColumns = computed(() => {
 .crud-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .stage-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--c-border, #e5e7eb); }
 .stage-row:last-child { border-bottom: none; }
+.audit-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed #F1F5F9; }
+.audit-row:last-child { border-bottom: none; }
+.audit-user { font-size: 13px; font-weight: 500; }
 .stage-seq { width: 18px; height: 18px; border-radius: 50%; background: var(--c-primary, #2563EB); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; }
 .stage-name { flex: 1; font-size: 13px; }
 .table-wrap { padding: 4px; overflow: hidden; }

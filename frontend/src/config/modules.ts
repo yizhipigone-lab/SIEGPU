@@ -21,6 +21,11 @@ export interface FieldConfig {
   hint?: string               // 字段术语大白话气泡（小白友好），见 utils/glossary.ts
   validate?: (value: any) => string | undefined  // 即时校验（小白防误填）：返回警告文案则标黄，见 utils/validators.ts
   section?: string            // 分组标题：表单中在该字段前渲染分割线（如「核算判定信息」）
+  showWhen?: (form: Record<string, any>) => boolean  // 条件显示（如租期仅算力租赁）
+  calc?: (form: Record<string, any>) => number | null  // 自动计算（如 不含税=含税/(1+税率)），可手工改
+  calcDeps?: string[]                                  // calc 依赖字段，变化时重算本字段
+  percent?: boolean           // 百分数输入：显示×100、提交/100（税率 13% ↔ 0.13）
+  default?: any               // 新建时默认值（如税率默认 13）
 }
 
 export interface CrudConfig {
@@ -41,6 +46,9 @@ export interface CrudConfig {
   workspaceLink?: boolean   // 行操作列加「工作台」入口，跳 /projects/{id}/workspace（项目模块用）
   pdfExport?: boolean       // 行操作列加「PDF」按钮，blob 下载 {apiPath}/{id}/pdf 实时生成（F4，不落库）
   revenueJudge?: boolean    // 二期 W3-4：合同表单「核算判定信息」区实时预览判定结果（GET /contracts/judge-preview）
+  auditEntity?: string      // 详情抽屉显示「操作记录」tab 的审计实体名（后端 audit_logs.entity_type，如 contract/order）
+  listTabs?: { label: string; value: string }[]  // W4：列表顶部 Tab（value='' = 全部），非空 value 作为 listParamKey 查询参数
+  listParamKey?: string     // Tab 对应的后端查询参数名（如 type / acceptance_type）
 }
 
 export interface DetailAction {
@@ -69,6 +77,8 @@ const SUP_TYPE = [
 ]
 const EQ_CAT = [{ label: '大卡', value: '大卡' }, { label: '小卡', value: '小卡' }, { label: '组网设备', value: '组网设备' }]
 const CONTRACT_TYPE = [{ label: '销售 SALES', value: 'SALES' }, { label: '采购 PURCHASE', value: 'PURCHASE' }]
+// 四期 W4：合同业务类型（与后端 contracts.biz_type CHECK 一致）
+const BIZ_TYPE = ['算力租赁', '转售', '服务'].map((v) => ({ label: v, value: v }))
 // 二期 W3-4：收入核算路径判定枚举（与后端 contracts CHECK / revenue_rules 一致）
 const PRICING_AUTHORITY = ['自主定价', '客户定价', '上游定价'].map((v) => ({ label: v, value: v }))
 const INVENTORY_RISK = ['我方', '客户', '上游'].map((v) => ({ label: v, value: v }))
@@ -146,18 +156,20 @@ export const MODULES: Record<string, CrudConfig> = {
     fields: [
       { key: 'name', label: '项目名称' },
       { key: 'code', label: '项目编号' },
-      { key: 'template_id', label: '流程模板', remoteOptions: { endpoint: '/workflows/templates', label: 'name', value: 'id' } },
+      { key: 'template_id', label: '流程模板', remoteOptions: { endpoint: '/workflows/templates', label: 'name', value: 'id' }, hint: '选流程模板：标准金租 18 步=完整链路（含资金入金/验收细分）；设备粒度 11 步=按设备逐台推进（更简单）。新手建议先用「设备粒度 11 步」。' },
       { key: 'total_investment', label: '总投资额(元)', type: 'number', hint: glossary('total_investment'), validate: validators.positiveAmount },
       { key: 'start_date', label: '开始日期', type: 'date' },
     ],
   },
   contracts: {
     title: '合同', apiPath: '/contracts',
-    columns: ['contract_no', 'type', 'direction', 'amount', 'status', 'revenue_method'],
-    labels: { contract_no: '合同号', type: '类型', direction: '方向', amount: '金额', status: '状态', revenue_method: '核算路径' },
-    tagKeys: ['type', 'direction', 'status', 'revenue_method'], numKeys: ['amount'],
+    columns: ['contract_no', 'type', 'biz_type', 'direction', 'amount_incl_tax', 'amount', 'status', 'revenue_method'],
+    labels: { contract_no: '合同号', type: '类型', biz_type: '合同类型', direction: '方向', amount_incl_tax: '金额(含税)', amount: '金额(不含税)', status: '状态', revenue_method: '核算路径' },
+    tagKeys: ['type', 'biz_type', 'direction', 'status', 'revenue_method'], numKeys: ['amount_incl_tax', 'amount'],
     fileUpload: true, uploadEntity: 'contracts', pdfExport: true,
-    revenueJudge: true,
+    listTabs: [{ label: '全部', value: '' }, { label: '销售合同', value: 'SALES' }, { label: '采购合同', value: 'PURCHASE' }],
+    listParamKey: 'type',
+    revenueJudge: true, auditEntity: 'contract',
     detailTabs: [
       { label: '发票', endpoint: '/invoices', paramKey: 'contract_id', columns: ['invoice_no', 'amount', 'status'], labels: { invoice_no: '发票号', amount: '金额', status: '状态' } },
       { label: '计费单', endpoint: '/billings', paramKey: 'contract_id', columns: ['period_label', 'amount', 'status'], labels: { period_label: '期间', amount: '金额(含税)', status: '状态' } },
@@ -195,8 +207,20 @@ export const MODULES: Record<string, CrudConfig> = {
     fields: [
       { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
       { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE, required: true },
+      { key: 'biz_type', label: '合同类型', type: 'select', options: BIZ_TYPE, hint: '业务性质：算力租赁（出租算力收租金）/ 转售（买断转卖）/ 服务（收服务费）' },
       { key: 'party_id', label: '对方(客户/供应商)', required: true, remoteOptions: { endpoint: ['/customers', '/suppliers'], label: 'name', value: 'id', tags: ['客户', '供应商'] } },
-      { key: 'amount', label: '合同金额(不含税,元)', type: 'number', required: true, hint: glossary('amount'), validate: validators.positiveAmount },
+      { key: 'amount_incl_tax', label: '合同金额(含税,元)', type: 'number', required: true, hint: '合同上写的含税总额（客户实际要付的钱）', validate: validators.positiveAmount },
+      { key: 'tax_rate', label: '税率%', type: 'number', percent: true, default: 13, hint: '增值税率，填百分数（如 13 表示 13%）' },
+      // 不含税金额：默认按 含税/(1+税率) 自动算，仍可手工改（后端 amount 列=不含税口径，下游核算不变）
+      { key: 'amount', label: '不含税金额(元)', type: 'number', required: true, hint: '不含税净额，默认按 含税÷(1+税率) 自动算，可手工修改', validate: validators.positiveAmount,
+        calcDeps: ['amount_incl_tax', 'tax_rate'],
+        calc: (form) => {
+          const incl = form.amount_incl_tax
+          if (incl === null || incl === undefined || incl === '') return null
+          const rate = (form.tax_rate ?? 0) / 100
+          return Math.round((incl / (1 + rate)) * 100) / 100
+        } },
+      { key: 'lease_months', label: '租期(月)', type: 'number', showWhen: (form) => form.biz_type === '算力租赁', hint: '仅算力租赁合同填写，如 36 / 60', validate: validators.positiveInt },
       { key: 'monthly_rent', label: '月租(含税,销售,元/月)', type: 'number', hint: glossary('monthly_rent'), validate: validators.positiveAmount },
       { key: 'contract_no', label: '合同号' },
       { key: 'pricing_authority', label: '定价权', type: 'select', options: PRICING_AUTHORITY, section: '核算判定信息（销售合同）', hint: '谁决定卖价：我方自主定价 / 客户说了算 / 上游供应商说了算（收入核算判定输入）' },
@@ -209,7 +233,7 @@ export const MODULES: Record<string, CrudConfig> = {
     columns: ['quantity', 'unit_price', 'total_amount', 'status'],
     labels: { quantity: '数量', unit_price: '单价', total_amount: '总额', status: '状态' },
     tagKeys: ['status'], numKeys: ['unit_price', 'total_amount'],
-    stageFlow: true,
+    stageFlow: true, auditEntity: 'order',
     detailActions: [
       { label: '点亮上线', endpoint: '/orders', action: '/light-on',
         fields: [{ key: 'actual_date', label: '点亮日', type: 'date' }],

@@ -25,3 +25,22 @@ export const GLOSSARY: Readonly<Record<string, string>> = {
 export function glossary(key: string): string {
   return GLOSSARY[key] ?? ''
 }
+
+/**
+ * 顶栏「帮助」术语表条目（小白友好，单一事实源）。
+ * 侧重流程词的一词多义消歧：回款(收入) vs 还款(融资)、金租申请/放款/置换、三种验收。
+ */
+export const HELP_TERMS: ReadonlyArray<{ label: string; text: string }> = [
+  { label: '回款', text: '客户把租金付给我们（收入侧，资金池入金）。' },
+  { label: '还款', text: '我们按期把融资本金+利息还给金租公司（融资侧，出金）。与「回款」一字之差、方向相反。' },
+  { label: '金租申请', text: '向金租公司发起融资租赁申请（标准模板第 9 步）。' },
+  { label: '金租放款', text: '金租公司把融资款打入我方账户，同时自动生成还款计划。' },
+  { label: '金租置换', text: '放款到账后，自动归还原先垫付的银行流贷/自有资金。' },
+  { label: '采购验收', text: '设备到货后，我们对设备商交付做检验并审批。' },
+  { label: '销售验收', text: '客户对我们交付的设备做检验签收。' },
+  { label: '点亮', text: '设备正式投产上线，点亮日为计费起点，自动转资产并开始折旧。' },
+  { label: '批次订单', text: '按采购批次下达的购买单据（设备模板叫法；标准模板拆成销售订单+采购订单）。' },
+  { label: '红冲', text: '作废单据并生成红字反向凭证，对账自动剔除。' },
+  { label: '三流对账', text: '合同流 / 发票流 / 资金流交叉核对。' },
+  { label: '等额本息', text: '每期还款额固定的还款方式。' },
+]

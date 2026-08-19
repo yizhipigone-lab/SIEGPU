@@ -184,6 +184,9 @@ test('c. 抽屉办理资金入金 → 步骤自动推进', async ({ page, reques
   await drawer.locator('input[placeholder="金额（元）"]').fill('2000000')
   await drawer.getByRole('button', { name: '确认入金' }).click()
 
+  // 办结「下一步预告」toast（新手友好专项③：办完不迷路，告知下一步 + 负责角色）
+  await expect(page.getByText('下一步：自有资金入金')).toBeVisible({ timeout: 8000 })
+
   // 抽屉关闭 + 步骤自动推进到 Step 7（自有资金入金），进度 6/18
   await expect(drawer).toBeHidden({ timeout: 8000 })
   await expect(page.getByText('6 / 18 步完成')).toBeVisible()

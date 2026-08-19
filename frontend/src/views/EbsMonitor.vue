@@ -35,6 +35,13 @@ const SYNC_TYPES = [
   { label: 'update', value: 'update' },
   { label: 'delete', value: 'delete' },
 ]
+// 日志状态筛选：空串表示「全部」（loadLogs 里 falsy 即不带 status 参数，与原 null 语义一致；
+// 避免 null value 触发 naive-ui SelectIgnoredOption 类型报错）
+const LOG_STATUS_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: '成功', value: 'MOCK_SUCCESS' },
+  { label: '失败', value: 'FAILED' },
+]
 const entityLabel = (t: string) => ENTITY_TYPES.find((x) => x.value === t)?.label || t
 
 // ------------------------------ 字段映射 ------------------------------
@@ -142,7 +149,7 @@ interface SyncLog {
 }
 const logs = ref<SyncLog[]>([])
 const logsLoading = ref(false)
-const logStatusFilter = ref<string | null>(null)
+const logStatusFilter = ref<string>('')
 
 function statusTagType(s: string): 'success' | 'error' | 'warning' | 'default' {
   if (s === 'MOCK_SUCCESS' || s === 'SUCCESS') return 'success'
@@ -256,7 +263,7 @@ onMounted(() => { loadMappings(); loadLogs() })
     <n-card title="同步日志" size="small">
       <template #header-extra>
         <n-select
-          v-model:value="logStatusFilter" :options="[{label:'全部',value:null},{label:'成功',value:'MOCK_SUCCESS'},{label:'失败',value:'FAILED'}]"
+          v-model:value="logStatusFilter" :options="LOG_STATUS_OPTIONS"
           size="small" style="width:120px" @update:value="loadLogs"
         />
       </template>

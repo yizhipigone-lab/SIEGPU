@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NAlert, NButton, NCard, NDataTable, NIcon, NModal, NSpace, NStatistic, NSteps, NStep, NTag,
+  NAlert, NButton, NCard, NDataTable, NIcon, NModal, NSkeleton, NSpace, NStatistic, NTag,
   useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -12,9 +12,11 @@ import { money } from '../utils/format'
 import { roleName } from '../utils/role'
 import { useAuthStore } from '../stores/auth'
 import {
-  FLOW_STEPS, getRoleGuide, readHideGuideBanner, seesOriginalDashboard, writeHideGuideBanner,
+  getRoleGuide, readHideGuideBanner, seesOriginalDashboard, writeHideGuideBanner,
 } from '../utils/roleGuide'
 import EChart from '../components/EChart.vue'
+import FlowMap from '../components/FlowMap.vue'
+import OnboardingTour from '../components/OnboardingTour.vue'
 
 const msg = useMessage()
 const router = useRouter()
@@ -25,8 +27,13 @@ const overview = ref<any[]>([])
 const months = ref<any[]>([])
 const myTasks = ref<any[]>([])
 const board = ref<any>(null)  // 三期 §4.5 经营看板
+const loading = ref(false)
+const loadFailed = ref(false)
+const loadedOnce = ref(false)
 
 async function refresh() {
+  loading.value = true
+  loadFailed.value = false
   try {
     const [s, a, o, m, t, b] = await Promise.all([
       api.get('/capital/summary'), api.get('/dashboard/alerts'),
@@ -39,7 +46,9 @@ async function refresh() {
     months.value = (m.data.items || []).slice(-12)
     myTasks.value = t.data || []
     board.value = b.data
-  } catch { msg.error('加载失败') }
+    loadedOnce.value = true
+  } catch { loadFailed.value = true; msg.error('加载失败') }
+  finally { loading.value = false }
 }
 
 // 30 秒静默轮询待办：只更新 myTasks，不触发整页 loading、失败不打扰用户
@@ -67,15 +76,30 @@ function dismissBanner() {
   writeHideGuideBanner(true)
 }
 const showFlowModal = ref(false)
-const myFlowSeqs = computed(() => new Set(guide.value?.flowStepSeqs ?? []))
-function stepStatus(seq: number): 'process' | 'wait' {
-  return myFlowSeqs.value.has(seq) ? 'process' : 'wait'
+const myFlowSeqs = computed(() => guide.value?.flowStepSeqs ?? [])
+// 待办锚点：把「我的待办」步骤名透传给 FlowMap，对应节点打「进行中」脉冲点
+const activeStepNames = computed(() => myTasks.value.map((t) => t.step_name).filter(Boolean))
+
+// —— 一键载入演示项目（P3，仅管理员/财务总监）——
+const demoLoading = ref(false)
+const canLoadDemo = computed(() => auth.role === 'ADMIN' || auth.role === 'FINANCE_DIRECTOR')
+async function loadDemo() {
+  demoLoading.value = true
+  try {
+    const r = await api.post('/demo/load')
+    if (r.data?.loaded) msg.success('演示项目「商机5090」已载入，正在刷新…')
+    else msg.info(r.data?.message || '演示项目已存在')
+    await refresh()
+  } catch { msg.error('载入演示项目失败') }
+  finally { demoLoading.value = false }
 }
 
-// 全新部署：无待办且总览为空（KPI 全空）→ 显示新手引导（仅原首页分支用）
+// 全新部署：无待办且总览为空（KPI 全空）→ 显示新手引导
+// 原首页分支据此显示欢迎卡；角色首页分支显示「快速开始」卡
 const isFresh = computed(() =>
   !myTasks.value.length && !overview.value.length && !alerts.value.length && !summary.value.pool_balance,
 )
+const isProcurement = computed(() => auth.role === 'PROCUREMENT')
 
 const monthlyOption = computed(() => ({
   tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -100,8 +124,30 @@ const ovCols: DataTableColumns = [
 
 <template>
   <div>
+    <!-- 首次登录分步引导（走完/点任意处自动关闭，localStorage 记忆）。
+         仅角色化首页（采购/交付/财务）展示：管理员/总监看的是经营看板（原首页），
+         且引导步骤（流程图「你负责」高亮、待办卡）是角色化概念，对管理层不适用，故默认跳过。 -->
+    <onboarding-tour v-if="!useOriginal && guide" />
+
+    <!-- 加载失败：内联重试 -->
+    <n-card v-if="loadFailed" style="margin-bottom:16px" data-testid="load-failed">
+      <div style="text-align:center;padding:12px">
+        <div style="color:#94A3B8;margin-bottom:8px">首页加载失败，请检查网络或稍后重试</div>
+        <n-button type="primary" size="small" @click="refresh">重试</n-button>
+      </div>
+    </n-card>
+
+    <!-- 首次加载骨架屏 -->
+    <template v-else-if="loading && !loadedOnce">
+      <n-space vertical :size="16">
+        <n-skeleton text :repeat="2" />
+        <n-skeleton text style="width:60%" />
+        <n-skeleton height="160px" />
+      </n-space>
+    </template>
+
     <!-- ===== 角色化首页（采购 / 交付 / 财务专员） ===== -->
-    <template v-if="!useOriginal && guide">
+    <template v-else-if="!useOriginal && guide">
       <!-- 角色职责横幅：新人第一眼「我是谁、负责哪几环」。文本刻意不含「待处理」，避免与待办卡 e2e 定位冲突。 -->
       <n-card v-if="showBanner" class="role-banner" :bordered="false">
         <div class="banner-row">
@@ -127,6 +173,14 @@ const ovCols: DataTableColumns = [
             </n-button>
           </div>
         </div>
+      </n-card>
+
+      <!-- 业务流程图：点击节点直达对应页面，本角色负责的环节高亮 -->
+      <n-card style="margin-top:16px" data-testid="flow-map">
+        <template #header>
+          <span>业务流程图 <span class="tiny" style="color:#94A3B8;font-weight:400">点击节点直达对应页面，高亮的是你负责的环节</span></span>
+        </template>
+        <FlowMap :highlight-seqs="myFlowSeqs" :active-step-names="activeStepNames" />
       </n-card>
 
       <!-- 精简统计：只留与本角色相关的，去掉资金池/折旧（那是总监视角） -->
@@ -172,6 +226,27 @@ const ovCols: DataTableColumns = [
           <n-button size="small" quaternary @click="showFlowModal = true">看完整流程</n-button>
         </n-space>
       </n-card>
+
+      <!-- 全新部署快速开始：角色首页此前零引导，新人不知道第一步做什么 -->
+      <n-card v-if="isFresh" title="快速开始" style="margin-top:16px" data-testid="quickstart">
+        <div style="color:#64748B;font-size:13px;line-height:2">
+          <template v-if="isProcurement">
+            <div>
+              ① 先建主数据：
+              <router-link to="/master/suppliers">供应商</router-link> ·
+              <router-link to="/master/customers">客户</router-link> ·
+              <router-link to="/master/equipment">设备型号</router-link>
+            </div>
+            <div>② <router-link to="/master/projects">创建项目</router-link>，选择流程模板后系统自动生成向导工作流</div>
+            <div>③ 之后每一步都会出现在上方「待办」卡片里，点「立即处理」即可</div>
+          </template>
+          <template v-else>
+            <div>① 项目由<strong>采购对接人</strong>创建后，轮到你的步骤会自动出现在上方「待办」卡片里</div>
+            <div>② 点开上方业务流程图，可以提前看看整个链路和你负责的环节</div>
+          <div>③ 想快速体验演示数据？请管理员登录后，在首页点「一键载入演示项目」</div>
+          </template>
+        </div>
+      </n-card>
     </template>
 
     <!-- ===== 原财务首页（admin / 财务总监 / 未知角色 fail-open） ===== -->
@@ -210,14 +285,27 @@ const ovCols: DataTableColumns = [
           <div>
             ② <router-link to="/master/projects">创建项目</router-link>，系统将自动生成向导式工作流程
           </div>
-          <div>
-            ③ 想快速体验？载入演示数据：<code>docker compose exec backend python -m app.demo</code>
-          </div>
+        </div>
+        <div style="margin-top:12px">
+          <n-button v-if="canLoadDemo" type="primary" size="small" :loading="demoLoading" @click="loadDemo">
+            ③ 一键载入演示项目（18 步全链路）
+          </n-button>
+          <span v-else style="color:#94A3B8;font-size:13px">
+            ③ 需要演示数据？请管理员登录后点「一键载入演示项目」。
+          </span>
         </div>
       </n-card>
 
       <n-card v-else size="small" style="margin-top:16px">
         <span style="color:#64748B">暂无待办，一切就绪</span>
+      </n-card>
+
+      <!-- 业务流程图：管理员/总监同样需要「先看全局再下钻」 -->
+      <n-card style="margin-top:16px" data-testid="flow-map">
+        <template #header>
+          <span>业务流程图 <span class="tiny" style="color:#94A3B8;font-weight:400">点击节点直达对应页面</span></span>
+        </template>
+        <FlowMap :active-step-names="activeStepNames" />
       </n-card>
 
       <!-- ===== 三期 §4.5 经营看板（总监/管理员视角） ===== -->
@@ -295,22 +383,15 @@ const ovCols: DataTableColumns = [
       </n-card>
     </template>
 
-    <!-- 流程图弹窗（所有角色都可看；当前角色负责的步骤高亮 process） -->
+    <!-- 流程图弹窗（所有角色都可看；节点可点击直达页面，无权节点置灰） -->
     <n-modal v-model:show="showFlowModal" preset="card" title="算力租赁全流程 · 11 步" style="max-width:1000px">
       <div class="flow-intro">
         <template v-if="guide">
-          你（<strong>{{ guide.title }}</strong>）负责 {{ guide.flowRange }}，已在下图高亮。
+          你（<strong>{{ guide.title }}</strong>）负责 {{ guide.flowRange }}，已在下图高亮。点击节点直达对应页面。
         </template>
-        <template v-else>管理员 / 总监视角：可查看全部步骤。</template>
+        <template v-else>管理员 / 总监视角：点击节点直达对应页面。</template>
       </div>
-      <n-steps size="small">
-        <n-step
-          v-for="s in FLOW_STEPS" :key="s.seq"
-          :status="stepStatus(s.seq)"
-          :title="`Step ${s.seq}`"
-          :description="s.name"
-        />
-      </n-steps>
+      <FlowMap :highlight-seqs="myFlowSeqs" :active-step-names="activeStepNames" />
     </n-modal>
   </div>
 </template>

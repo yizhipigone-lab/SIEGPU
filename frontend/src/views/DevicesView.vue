@@ -37,6 +37,7 @@ const loading = ref(false)
 // 下拉数据源
 const projects = ref<any[]>([])
 const orders = ref<any[]>([])
+const salesOrders = ref<any[]>([])
 const equipModels = ref<any[]>([])
 const suppliers = ref<any[]>([])
 
@@ -86,14 +87,16 @@ async function load() {
     if (fProject.value) params.project_id = fProject.value
     if (fBatch.value) params.batch_id = fBatch.value
     if (fStatus.value) params.status = fStatus.value
-    const [dev, proj, ord, eq, sup, inv] = await Promise.all([
+    const [dev, proj, ord, so, eq, sup, inv] = await Promise.all([
       http.get('/devices', { params }),
-      http.get('/projects'), http.get('/orders'), http.get('/equipment-models'), http.get('/suppliers'),
+      http.get('/projects'), http.get('/orders'), http.get('/sales-orders'),
+      http.get('/equipment-models'), http.get('/suppliers'),
       http.get('/devices/inventory-summary'),
     ])
     items.value = dev.data.items
     projects.value = proj.data.items
     orders.value = ord.data.items
+    salesOrders.value = so.data
     equipModels.value = eq.data.items
     suppliers.value = sup.data.items
     inventory.value = inv.data.items || []
@@ -207,6 +210,30 @@ async function removeFromBatch(r: Device) {
     msg.success(`设备 ${r.sn} 已移出批次`)
     await load()
   } catch (e: any) { msg.error(errMsg(e)) }
+}
+
+// ---- W4：销售批次组合（照采购批次组合模式）----
+const showSalesBatchAssign = ref(false)
+const salesBatchTarget = ref<string | null>(null)
+const salesBatchOpts = () => salesOrders.value
+  .filter((s: any) => s.is_batch)
+  .map((s: any) => ({ label: `${s.batch_name || s.id.slice(0, 8)} · ${s.quantity}台`, value: s.id }))
+
+async function submitSalesBatchAssign() {
+  if (!salesBatchTarget.value) { msg.warning('请选择销售批次'); return }
+  let ok = 0
+  let fail = 0
+  for (const id of checkedRowKeys.value) {
+    try {
+      await http.post('/sales-orders/batch-assign', { device_id: id, sales_batch_id: salesBatchTarget.value })
+      ok += 1
+    } catch { fail += 1 }
+  }
+  if (fail) msg.warning(`销售批次组合完成：成功 ${ok} 台，失败 ${fail} 台（可能已在销售批次中）`)
+  else msg.success(`销售批次组合完成：${ok} 台已挂入销售批次`)
+  showSalesBatchAssign.value = false
+  checkedRowKeys.value = []
+  await load()
 }
 
 // ---- 节点推进（单台 / 批量）----
@@ -394,6 +421,9 @@ onMounted(load)
         <n-button :disabled="!checkedRowKeys.length" @click="batchTarget = null; showBatchAssign = true">
           批次组合{{ checkedRowKeys.length ? ` (${checkedRowKeys.length})` : '' }}
         </n-button>
+        <n-button :disabled="!checkedRowKeys.length" @click="salesBatchTarget = null; showSalesBatchAssign = true">
+          销售批次组合{{ checkedRowKeys.length ? ` (${checkedRowKeys.length})` : '' }}
+        </n-button>
         <n-button @click="showImport = true">Excel 导入</n-button>
         <n-button type="primary" @click="openCreate">新增设备</n-button>
       </n-space>
@@ -507,6 +537,25 @@ onMounted(load)
         <n-space justify="end">
           <n-button @click="showBatchAssign = false">取消</n-button>
           <n-button type="primary" @click="submitBatchAssign">确认组合</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- 销售批次组合 -->
+    <n-modal v-model:show="showSalesBatchAssign" preset="card" title="销售批次组合" style="width:480px;max-width:94vw">
+      <n-space vertical :size="12">
+        <div style="font-size:13px">将选中的 {{ checkedRowKeys.length }} 台设备（SN）挂入销售批次：</div>
+        <n-form-item label="销售批次">
+          <n-select v-model:value="salesBatchTarget" :options="salesBatchOpts()" placeholder="选择销售批次" filterable />
+        </n-form-item>
+        <div style="font-size:12px;color:var(--c-text-3,#999)">
+          销售批次与采购批次分开；销售验收按销售批次进行（一批一条验收）。
+        </div>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showSalesBatchAssign = false">取消</n-button>
+          <n-button type="primary" @click="submitSalesBatchAssign">确认组合</n-button>
         </n-space>
       </template>
     </n-modal>

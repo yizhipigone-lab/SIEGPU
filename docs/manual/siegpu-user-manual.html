@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIEGPU ERP 用户操作手册</title>
+<style>
+  :root {
+    --ink: #1a1f2e; --ink-soft: #4a5164; --muted: #8a91a5;
+    --paper: #ffffff; --bg: #f4f5f8; --line: #e6e8ef;
+    --brand: #2b4cff; --brand-deep: #1e38c4;
+    --c-admin: #5b5f72; --c-cfo: #b98900; --c-buyer: #2563eb;
+    --c-delivery: #0e9f6e; --c-finance: #0d9488;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--ink); background: var(--bg); line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  nav.toc {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 258px;
+    background: #141827; color: #c7cbe0; padding: 24px 16px; overflow-y: auto;
+    border-right: 1px solid #232942;
+  }
+  nav.toc .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; letter-spacing: .03em; color: #fff; margin-bottom: 4px; }
+  nav.toc .brand .mark { width: 30px; height: 30px; border-radius: 8px; flex: none; background: linear-gradient(135deg, #4f6bff, #2b4cff); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  nav.toc .sub { font-size: 12px; color: #6b7190; margin-bottom: 18px; }
+  nav.toc a { display: block; color: #b9bdd6; text-decoration: none; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; margin: 2px 0; }
+  nav.toc a:hover { background: #232942; color: #fff; }
+  nav.toc a.chapter { font-weight: 700; color: #e7e9f5; margin-top: 14px; font-size: 14px; }
+  nav.toc a .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  main { margin-left: 258px; padding: 48px 56px 120px; max-width: 1060px; }
+
+  h1.cover { font-size: 40px; line-height: 1.25; letter-spacing: -.01em; margin: 0 0 12px; }
+  h1.cover .accent { color: var(--brand); }
+  .cover-sub { font-size: 17px; color: var(--ink-soft); max-width: 660px; margin-bottom: 8px; }
+  .cover-meta { font-size: 13px; color: var(--muted); margin-top: 20px; }
+
+  h2.sec { font-size: 26px; letter-spacing: -.01em; margin: 64px 0 8px; padding-top: 24px; border-top: 3px solid var(--ink); display: flex; align-items: center; gap: 14px; }
+  h2.sec .chip { font-size: 13px; font-weight: 700; color: #fff; padding: 3px 12px; border-radius: 999px; letter-spacing: .02em; }
+  h3 { font-size: 18px; margin: 32px 0 10px; }
+  h4 { font-size: 15px; margin: 24px 0 8px; }
+  p { margin: 10px 0; color: var(--ink-soft); }
+  p.lead { font-size: 16px; color: var(--ink); }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  code { background: #eef0f6; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.c2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.c3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .grid.c2, .grid.c3 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: 0 1px 2px rgba(20,24,39,.04); }
+  .card h4 { margin-top: 0; }
+
+  .rolehead { display: flex; align-items: center; gap: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 24px; margin: 20px 0; }
+  .rolehead .avatar { width: 56px; height: 56px; border-radius: 14px; flex: none; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 22px; font-weight: 800; }
+  .rolehead .role-title { font-size: 22px; font-weight: 800; margin: 0; }
+  .rolehead .role-en { font-size: 12px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+  .rolehead .role-tag { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+
+  table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; background: var(--paper); border-radius: 12px; overflow: hidden; }
+  table.data th { background: #f0f2f8; color: var(--ink); font-weight: 700; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.data td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: var(--ink-soft); vertical-align: top; }
+  table.data tr:last-child td { border-bottom: none; }
+  table.data .num { text-align: center; color: var(--muted); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; color: #fff; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .flow .step { flex: 1; min-width: 88px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 10px; text-align: center; }
+  .flow .step .seq { font-size: 11px; color: var(--muted); font-weight: 700; }
+  .flow .step .name { font-size: 13px; font-weight: 700; margin-top: 4px; color: var(--ink); }
+  .flow .step .who { font-size: 11px; margin-top: 4px; color: #fff; border-radius: 999px; padding: 1px 8px; display: inline-block; }
+  .flow .arrow { align-self: center; color: var(--muted); font-size: 16px; }
+
+  figure.shot { margin: 18px 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  figure.shot img { width: 100%; display: block; border-bottom: 1px solid var(--line); }
+  figure.shot figcaption { padding: 12px 16px; font-size: 13px; color: var(--ink-soft); }
+  figure.shot figcaption b { color: var(--ink); }
+  figure.shot .cap-tag { font-size: 11px; font-weight: 700; color: #fff; background: var(--brand); padding: 1px 8px; border-radius: 999px; margin-right: 8px; }
+  figure.shot .idx { display: inline-block; min-width: 22px; height: 22px; line-height: 22px; text-align: center; background: #eef0f6; color: var(--ink-soft); border-radius: 6px; font-size: 12px; font-weight: 700; margin-right: 8px; }
+
+  .callout { border-left: 4px solid var(--brand); background: #eef1ff; padding: 14px 18px; border-radius: 0 10px 10px 0; margin: 18px 0; font-size: 14px; }
+  .callout.warn { border-left-color: #e0a800; background: #fff8e6; }
+  .callout.good { border-left-color: #0e9f6e; background: #e9f9f2; }
+  .callout b { color: var(--ink); }
+
+  @media print {
+    nav.toc { display: none; }
+    main { margin-left: 0; padding: 0; max-width: none; }
+    h2.sec { page-break-before: always; }
+    figure.shot, .card, .rolehead { break-inside: avoid; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="toc">
+  <div class="brand"><span class="mark">S</span> SIEGPU ERP</div>
+  <div class="sub">用户操作手册 v1.0</div>
+  <a href="#overview"><span class="dot" style="background:#2b4cff"></span>系统总览</a>
+  <a href="#role-admin" class="chapter"><span class="dot" style="background:#5b5f72"></span>管理员</a>
+  <a href="#role-cfo" class="chapter"><span class="dot" style="background:#b98900"></span>财务总监</a>
+  <a href="#role-buyer" class="chapter"><span class="dot" style="background:#2563eb"></span>采购对接人</a>
+  <a href="#role-delivery" class="chapter"><span class="dot" style="background:#0e9f6e"></span>项目交付负责人</a>
+  <a href="#role-finance" class="chapter"><span class="dot" style="background:#0d9488"></span>财务专员</a>
+</nav>
+
+<main>
+
+  <!-- 封面 -->
+  <h1 class="cover">SIEGPU 算力租赁 ERP<br><span class="accent">用户操作手册</span></h1>
+  <p class="cover-sub">面向算力租赁业财一体化平台的分角色操作指南——覆盖管理员、财务总监、采购对接人、项目交付负责人、财务专员五个岗位的职责、工作范围、工作任务、角色协作、前后接缝与逐页界面操作。</p>
+  <div class="cover-meta">版本 v1.0 · 依据系统代码与真实界面截图编制 · 2026-08-13 · 初始密码统一 <code>sie123</code></div>
+
+  <!-- 第 0 章 -->
+  <h2 class="sec" id="overview"><span class="chip" style="background:#2b4cff">总览</span>系统是什么</h2>
+  <p class="lead">SIEGPU 是一套算力租赁 ERP：把 GPU 服务器租给客户、走金融租赁融资、按「单台设备」计费折旧核算。系统把业务操作与财务核算串成一条流水线，并与 Oracle EBS 财务系统对接。</p>
+
+  <div class="grid c2">
+    <div class="card"><h4>核心管理粒度</h4><p>以<strong>单台设备</strong>为最小单元（唯一 SN），多台设备组合成<strong>批次</strong>批量作业，所有单据关联<strong>项目编号</strong>，实现「项目 → 批次 → 单台」三级追溯。</p></div>
+    <div class="card"><h4>一条 11 步业务流水线</h4><p>从立项 → 签合同 → 下订单 → 进设备 → 验收点亮 → 金租放款 → 按台计费 → 盈利测算，由 5 个角色接力完成，中间穿插财务总监审批。</p></div>
+  </div>
+
+  <h3>11 步流水线 · 谁在哪个环节干活</h3>
+  <div class="flow">
+    <div class="step"><div class="seq">STEP 1</div><div class="name">项目建立</div><div class="who" style="background:#2563eb">采购</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 2</div><div class="name">销售合同</div><div class="who" style="background:#2563eb">采购</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 3</div><div class="name">采购合同</div><div class="who" style="background:#2563eb">采购</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 4</div><div class="name">批次订单</div><div class="who" style="background:#2563eb">采购</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 5</div><div class="name">设备导入</div><div class="who" style="background:#0e9f6e">交付</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 6</div><div class="name">设备到货</div><div class="who" style="background:#0e9f6e">交付</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 7</div><div class="name">设备上架</div><div class="who" style="background:#0e9f6e">交付</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 8</div><div class="name">点亮验收</div><div class="who" style="background:#0e9f6e">交付</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 9</div><div class="name">金租放款</div><div class="who" style="background:#0d9488">财务</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 10</div><div class="name">按台计费</div><div class="who" style="background:#0d9488">财务</div></div><div class="arrow">→</div>
+    <div class="step"><div class="seq">STEP 11</div><div class="name">盈利测算</div><div class="who" style="background:#0d9488">财务</div></div>
+  </div>
+
+  <h3>五个岗位一览</h3>
+  <table class="data">
+    <thead><tr><th style="width:120px">岗位</th><th style="width:100px">登录账号</th><th>在流水线中的职责</th><th>权限范围</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge" style="background:#5b5f72">管理员</span></td><td>admin</td><td>全局管理、流程配置、异常兜底</td><td>看全部 29 页</td></tr>
+      <tr><td><span class="badge" style="background:#b98900">财务总监</span></td><td>cfo</td><td>全局视野 + 审批把关（付款/收入/验收/开票）</td><td>看全部 29 页</td></tr>
+      <tr><td><span class="badge" style="background:#2563eb">采购对接人</span></td><td>buyer</td><td>第 1–4 步：立项、销售合同、采购合同、批次订单</td><td>10 页</td></tr>
+      <tr><td><span class="badge" style="background:#0e9f6e">项目交付负责人</span></td><td>delivery</td><td>第 5–8 步：设备导入、到货、上架、点亮验收</td><td>9 页</td></tr>
+      <tr><td><span class="badge" style="background:#0d9488">财务专员</span></td><td>finance</td><td>第 9–11 步：金租放款、按台计费、盈利测算 + 全部财务功能</td><td>22 页</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <b>通用操作（所有角色）：</b>登录页输入账号密码 → 进入首页（看板 + 待办中心）。顶栏右侧依次是「我的角色 / 全部菜单」切换（仅采购/交付/财务三个一线角色）、消息铃铛、术语帮助、用户菜单（退出登录）。非管理员/总监默认只显示本角色菜单，可点顶栏「全部菜单」临时展开。
+  </div>
+  <figure class="shot">
+    <img src="images/_shared/login.png" alt="登录页">
+    <figcaption><span class="cap-tag">通用</span><b>登录页</b>：输入账号 + 密码（初始 <code>sie123</code>），点「登录」进入系统。</figcaption>
+  </figure>
+
+  <!-- ============ 第 1 章 管理员 ============ -->
+  <h2 class="sec" id="role-admin"><span class="chip" style="background:#5b5f72">ADMIN</span>管理员</h2>
+  <div class="rolehead">
+    <div class="avatar" style="background:#5b5f72">管</div>
+    <div>
+      <p class="role-title">管理员</p>
+      <div class="role-en">ADMIN · 账号 admin</div>
+      <div class="role-tag">全局管理者：系统里唯一能看全部页面、并能调整流程配置、兜底异常的角色。</div>
+    </div>
+  </div>
+
+  <h3>岗位职责</h3>
+  <ul>
+    <li>维护全系统主数据与基础配置（供应商、客户、设备型号、银行账户）。</li>
+    <li>掌握全局视野，可查看所有项目的业务与财务数据。</li>
+    <li>兜底处理异常流程：可强制跳过或手动完成任意步骤（其他角色无此权限）。</li>
+  </ul>
+
+  <h3>岗位工作范围</h3>
+  <p>管理员可访问<strong>全部 29 个页面</strong>，覆盖业务、财务、资产、对账全链路。以下是系统全部页面的逐一操作指引（本角色同时也是系统页面的「全量参考」）。</p>
+
+  <h3>工作任务</h3>
+  <table class="data">
+    <thead><tr><th class="num">#</th><th>任务</th><th>对应页面 / 操作</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>维护主数据（供应商/客户/设备型号/银行）</td><td>主数据分组</td></tr>
+      <tr><td class="num">2</td><td>全局数据查看与监督</td><td>首页看板 / 项目总览 / 对账中心</td></tr>
+      <tr><td class="num">3</td><td>异常流程兜底（强制跳过 / 手动完成步骤）</td><td>项目工作台</td></tr>
+    </tbody>
+  </table>
+
+  <h3>与其他角色配合 · 前后接缝</h3>
+  <p>管理员是全局支撑角色，<strong>不占流水线固定步骤</strong>（无前后岗位接替）。其职责是：为采购/交付/财务三个一线角色维护主数据与基础配置；当流程卡住或需纠偏时，兜底处理异常步骤（强制跳过或手动完成，仅管理员与财务总监有此权限），保证流水线不被卡死。</p>
+
+  <h3>界面操作指引（全量 29 页）</h3>
+  <figure class="shot"><img src="images/admin/home.png" alt="首页"><figcaption><span class="idx">1</span><b>首页</b>：经营看板（核心指标/待办中心/资金预测/EBS 状态）+ 全局待办。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/portfolio.png" alt="项目总览"><figcaption><span class="idx">2</span><b>项目总览</b>：所有项目的流程进度、当前步骤、停滞天数，组合视角。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/capital.png" alt="资金池"><figcaption><span class="idx">3</span><b>资金池</b>：资金流水（入金/出金），记录银行流贷、自有资金、预付采购款。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/invoices.png" alt="发票对账"><figcaption><span class="idx">4</span><b>发票对账</b>：销售/采购发票登记、认证、抵扣、开票核销。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/leasing.png" alt="金租流程"><figcaption><span class="idx">5</span><b>金租流程</b>：金租申请、放款、还款计划与进度。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/profit.png" alt="利润测算"><figcaption><span class="idx">6</span><b>利润测算</b>：项目盈利测算（收入/成本/毛利/IRR）。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/comparison.png" alt="项目对比"><figcaption><span class="idx">7</span><b>项目对比</b>：多项目横向对比。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/sales-orders.png" alt="销售订单"><figcaption><span class="idx">8</span><b>销售订单</b>：销售订单管理。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/acceptances.png" alt="验收管理"><figcaption><span class="idx">9</span><b>验收管理</b>：采购验收、销售验收登记与审批。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/confirmations.png" alt="客户确认"><figcaption><span class="idx">10</span><b>客户确认</b>：服务确认单。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/billing.png" alt="计费管理"><figcaption><span class="idx">11</span><b>计费管理</b>：按台计费、生成计费单。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/customer-statement.png" alt="客户对账单"><figcaption><span class="idx">12</span><b>客户对账单</b>：客户维度对账。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/ebs.png" alt="EBS监控"><figcaption><span class="idx">13</span><b>EBS 监控</b>：字段映射、手动触发同步、日志与失败重试。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/exchange-rates.png" alt="币种汇率"><figcaption><span class="idx">14</span><b>币种汇率</b>：币种、汇率、汇兑损益科目规则。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/insurance.png" alt="保险管理"><figcaption><span class="idx">15</span><b>保险管理</b>：保单、自动投保、保费分摊、归集、摊销。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/prepayments.png" alt="预付款台账"><figcaption><span class="idx">16</span><b>预付款台账</b>：预付款按月结转。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/payments.png" alt="付款管控"><figcaption><span class="idx">17</span><b>付款管控</b>：审批中心 + 付款申请 + 付款登记 + 多对多核销。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/revenue-recognitions.png" alt="收入确认"><figcaption><span class="idx">18</span><b>收入确认</b>：收入确认单、凭证、科目映射。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/reconciliation-center.png" alt="对账中心"><figcaption><span class="idx">19</span><b>对账中心</b>：7 维对账（销售/采购/资产/监管账户/汇兑/业财/三流差异）。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/returns.png" alt="退货管理"><figcaption><span class="idx">20</span><b>退货管理</b>：采购退货全链路。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-suppliers.png" alt="供应商"><figcaption><span class="idx">21</span><b>供应商</b>：供应商档案维护。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-customers.png" alt="客户"><figcaption><span class="idx">22</span><b>客户</b>：客户档案维护。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-equipment.png" alt="设备型号"><figcaption><span class="idx">23</span><b>设备型号</b>：GPU 机型、计费模式、基准单价。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-banks.png" alt="银行"><figcaption><span class="idx">24</span><b>银行</b>：银行账户维护。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-projects.png" alt="项目"><figcaption><span class="idx">25</span><b>项目</b>：项目立项。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-contracts.png" alt="合同"><figcaption><span class="idx">26</span><b>合同</b>：销售/采购合同录入、核算判定、变更、终止。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-orders.png" alt="订单"><figcaption><span class="idx">27</span><b>订单</b>：采购/批次订单下达。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/devices.png" alt="设备清单"><figcaption><span class="idx">28</span><b>设备清单</b>：单台设备状态、节点推进。</figcaption></figure>
+  <figure class="shot"><img src="images/admin/master-assets.png" alt="资产"><figcaption><span class="idx">29</span><b>资产</b>：固定资产卡片、折旧。</figcaption></figure>
+
+  <!-- ============ 第 2 章 财务总监 ============ -->
+  <h2 class="sec" id="role-cfo"><span class="chip" style="background:#b98900">FINANCE_DIRECTOR</span>财务总监</h2>
+  <div class="rolehead">
+    <div class="avatar" style="background:#b98900">总</div>
+    <div>
+      <p class="role-title">财务总监</p>
+      <div class="role-en">FINANCE_DIRECTOR · 账号 cfo</div>
+      <div class="role-tag">财务负责人：全局视野 + 关键业务审批把关。</div>
+    </div>
+  </div>
+
+  <h3>岗位职责</h3>
+  <ul>
+    <li>掌握全局财务与业务数据，对经营结果负责。</li>
+    <li>审批关键业务：付款申请、收入确认、验收、金租放款、开票核销。</li>
+    <li>监控资金、融资、监管账户合规（月度最低留存额）、对账差异。</li>
+  </ul>
+
+  <h3>岗位工作范围</h3>
+  <p>财务总监可访问<strong>全部 29 个页面</strong>（与管理员一致）。核心工作台是「付款管控」页的<strong>审批中心</strong>，以及首页的待办中心（待审批事项汇聚到首页）。</p>
+
+  <h3>工作任务</h3>
+  <table class="data">
+    <thead><tr><th class="num">#</th><th>任务</th><th>对应页面</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>审批付款申请（通过/驳回，驳回必填原因）</td><td>付款管控 → 审批中心</td></tr>
+      <tr><td class="num">2</td><td>审批收入确认草稿</td><td>收入确认</td></tr>
+      <tr><td class="num">3</td><td>审批验收（采购/销售）</td><td>验收管理</td></tr>
+      <tr><td class="num">4</td><td>监控资金与监管账户合规</td><td>资金池 / 金租流程 / 经营看板</td></tr>
+      <tr><td class="num">5</td><td>关注对账差异与 EBS 同步状态</td><td>对账中心 / EBS 监控</td></tr>
+    </tbody>
+  </table>
+
+  <h3>与其他角色配合</h3>
+  <table class="data">
+    <thead><tr><th>配合对象</th><th>配合方式</th></tr></thead>
+    <tbody>
+      <tr><td>采购对接人</td><td>采购合同/订单提交后，相关验收进入总监审批环节</td></tr>
+      <tr><td>项目交付负责人</td><td>验收单、点亮验收由交付发起，总监审批通过才生效</td></tr>
+      <tr><td>财务专员</td><td>财务的付款申请、收入确认、开票核销，由总监审批把关</td></tr>
+    </tbody>
+  </table>
+
+  <h3>审批工作步骤 · 前后接缝</h3>
+  <p>财务总监<strong>不占流水线某一步，而是穿插在关键节点把关</strong>：采购/销售验收、金租放款、开票核销、付款申请、收入确认等，均需总监审批后才生效。因此总监的「接缝」是——上游角色提交单据 → 总监审批 → 单据进入下一环节。</p>
+  <ol>
+    <li><b>看待办</b>：登录进入首页，待办中心显示「待审批」事项。</li>
+    <li><b>进审批中心</b>：进入「付款管控 → 审批中心」，查看待审批申请列表。</li>
+    <li><b>审批</b>：点「通过」放行，或点「驳回」并<strong>必填驳回原因</strong>（缺原因无法提交）。</li>
+    <li><b>收入确认审批</b>：进入「收入确认」，审批草稿，通过后自动生成凭证并同步 EBS。</li>
+  </ol>
+
+  <h3>界面操作指引（审批为重点）</h3>
+  <p class="small muted">财务总监的所有页面界面与管理员一致（见「管理员」章节全量 29 页）。以下重点展示审批相关界面。</p>
+  <figure class="shot"><img src="images/cfo/home.png" alt="财务总监首页"><figcaption><span class="cap-tag">财务总监</span><b>首页</b>：原版首页，含经营看板与待办中心（待审批事项）。</figcaption></figure>
+  <figure class="shot"><img src="images/cfo/payments.png" alt="付款管控-审批中心"><figcaption><span class="cap-tag">财务总监</span><b>付款管控 → 审批中心</b>：待审批的付款/收入申请在此集中，可「通过」或「驳回」（驳回必须填原因）。</figcaption></figure>
+  <figure class="shot"><img src="images/cfo/revenue-recognitions.png" alt="收入确认审批"><figcaption><span class="cap-tag">财务总监</span><b>收入确认</b>：审批收入确认草稿，通过后生成凭证并同步 EBS。</figcaption></figure>
+  <figure class="shot"><img src="images/cfo/reconciliation-center.png" alt="对账中心"><figcaption><span class="cap-tag">财务总监</span><b>对账中心</b>：全局 7 维对账，有差异整行标红，监督业财一致。</figcaption></figure>
+
+  <!-- ============ 第 3 章 采购对接人 ============ -->
+  <h2 class="sec" id="role-buyer"><span class="chip" style="background:#2563eb">PROCUREMENT</span>采购对接人</h2>
+  <div class="rolehead">
+    <div class="avatar" style="background:#2563eb">采</div>
+    <div>
+      <p class="role-title">采购对接人</p>
+      <div class="role-en">PROCUREMENT · 账号 buyer</div>
+      <div class="role-tag">业务起点：负责项目立项、两类合同与批次订单，流水线第 1–4 步。</div>
+    </div>
+  </div>
+
+  <h3>岗位职责</h3>
+  <ul>
+    <li>建立算力项目（项目编号、名称、业务类型、租赁模式等）。</li>
+    <li>录入销售合同（与客户）与采购合同（与供应商）。</li>
+    <li>下达批次订单（把多台设备组成批次下单）。</li>
+  </ul>
+
+  <h3>岗位工作范围</h3>
+  <p>可访问 10 个页面：首页、项目总览、销售订单（公共），以及设备清单、项目、合同、订单、供应商、客户、设备型号（专属）。</p>
+
+  <h3>在流水线中的位置（前后接缝）</h3>
+  <table class="data">
+    <thead><tr><th class="num">步骤</th><th>工作</th><th>交接</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>项目建立</td><td>—（业务起点）</td></tr>
+      <tr><td class="num">2</td><td>销售合同</td><td>—</td></tr>
+      <tr><td class="num">3</td><td>采购合同</td><td>—</td></tr>
+      <tr><td class="num">4</td><td>批次订单</td><td>完成后交给 → <b>项目交付负责人</b>（进入设备导入）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>工作任务与操作步骤</h3>
+  <ol>
+    <li><b>建立项目</b>：进入「项目」页 → 新建项目，填项目编号、名称、业务类型（自有/直租/回租）、负责人、周期、预算。</li>
+    <li><b>录入销售合同</b>：进入「合同」页 → 新建「销售合同」，关联项目与客户，录计费规则、核算判定信息（定价权/存货风险/主要责任人）。</li>
+    <li><b>录入采购合同</b>：新建「采购合同」，关联项目与供应商，录采购明细（按台/按批次）、预付款比例、交付条款。</li>
+    <li><b>下达批次订单</b>：进入「订单」页 → 新建批次订单，把待分组设备组成批次，关联采购合同与项目。</li>
+  </ol>
+
+  <h3>界面操作指引（10 页）</h3>
+  <figure class="shot"><img src="images/buyer/home.png" alt="采购首页"><figcaption><span class="idx">1</span><b>首页</b>：角色化首页，采购职责横幅 + 我的待办（当前轮到采购处理的步骤）。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/master-projects.png" alt="项目"><figcaption><span class="idx">2</span><b>项目</b>：新建项目、查看项目列表（立项入口）。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/master-contracts.png" alt="合同"><figcaption><span class="idx">3</span><b>合同</b>：销售/采购合同录入、核算判定、变更、终止。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/master-orders.png" alt="订单"><figcaption><span class="idx">4</span><b>订单</b>：批次订单 / 采购订单下达。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/master-suppliers.png" alt="供应商"><figcaption><span class="idx">5</span><b>供应商</b>：硬件供应商、金租机构档案维护。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/master-customers.png" alt="客户"><figcaption><span class="idx">6</span><b>客户</b>：客户档案维护。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/master-equipment.png" alt="设备型号"><figcaption><span class="idx">7</span><b>设备型号</b>：GPU 机型、计费模式、基准单价。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/devices.png" alt="设备清单"><figcaption><span class="idx">8</span><b>设备清单</b>：查看设备状态（只读了解，推进由交付负责）。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/portfolio.png" alt="项目总览"><figcaption><span class="idx">9</span><b>项目总览</b>：查看项目流程进度（公共）。</figcaption></figure>
+  <figure class="shot"><img src="images/buyer/sales-orders.png" alt="销售订单"><figcaption><span class="idx">10</span><b>销售订单</b>：销售订单（公共）。</figcaption></figure>
+
+  <!-- ============ 第 4 章 项目交付负责人 ============ -->
+  <h2 class="sec" id="role-delivery"><span class="chip" style="background:#0e9f6e">DELIVERY</span>项目交付负责人</h2>
+  <div class="rolehead">
+    <div class="avatar" style="background:#0e9f6e">交</div>
+    <div>
+      <p class="role-title">项目交付负责人</p>
+      <div class="role-en">DELIVERY · 账号 delivery</div>
+      <div class="role-tag">交付中段：负责设备从导入到点亮验收，流水线第 5–8 步。</div>
+    </div>
+  </div>
+
+  <h3>岗位职责</h3>
+  <ul>
+    <li>导入设备清单（批量导入单台设备，生成 SN）。</li>
+    <li>推进设备状态：到货 → 上架 → 点亮验收（单台或批量）。</li>
+    <li>登记采购验收、销售验收。</li>
+  </ul>
+
+  <h3>岗位工作范围</h3>
+  <p>可访问 9 个页面：首页、项目总览、销售订单（公共），以及设备清单、验收管理、客户确认、项目、设备型号、订单（专属）。</p>
+
+  <h3>在流水线中的位置（前后接缝）</h3>
+  <table class="data">
+    <thead><tr><th class="num">步骤</th><th>工作</th><th>交接</th></tr></thead>
+    <tbody>
+      <tr><td class="num">5</td><td>设备导入</td><td>从<b>采购对接人</b>接批次订单 → 导入设备</td></tr>
+      <tr><td class="num">6</td><td>设备到货</td><td>—</td></tr>
+      <tr><td class="num">7</td><td>设备上架</td><td>—</td></tr>
+      <tr><td class="num">8</td><td>点亮验收</td><td>完成后交给 → <b>财务专员</b>（进入金租放款/按台计费）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>工作任务与操作步骤</h3>
+  <ol>
+    <li><b>导入设备清单</b>：进入「设备清单」页 → 批量导入设备（关联批次、项目、型号、采购原值），系统自动生成唯一 SN。</li>
+    <li><b>设备到货</b>：设备到达后，在设备详情推进状态到「到货」。</li>
+    <li><b>设备上架</b>：压测通过后推进到「上架」（自动触发资产转固）。</li>
+    <li><b>点亮验收</b>：客户验收通过后推进到「点亮验收」——计费起点，同时触发财产险投保、资产进入运营期。</li>
+    <li><b>验收登记</b>：在「验收管理」页登记采购验收 / 销售验收，提交总监审批。</li>
+  </ol>
+
+  <h3>界面操作指引（9 页）</h3>
+  <figure class="shot"><img src="images/delivery/home.png" alt="交付首页"><figcaption><span class="idx">1</span><b>首页</b>：交付职责横幅 + 我的待办（当前轮到交付处理的步骤）。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/devices.png" alt="设备清单"><figcaption><span class="idx">2</span><b>设备清单</b>：导入设备、查看单台状态、推进节点（到货/上架/点亮验收）。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/acceptances.png" alt="验收管理"><figcaption><span class="idx">3</span><b>验收管理</b>：采购验收 / 销售验收登记与提交。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/confirmations.png" alt="客户确认"><figcaption><span class="idx">4</span><b>客户确认</b>：服务确认单。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/master-projects.png" alt="项目"><figcaption><span class="idx">5</span><b>项目</b>：查看项目信息。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/master-orders.png" alt="订单"><figcaption><span class="idx">6</span><b>订单</b>：查看采购/批次订单进度。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/master-equipment.png" alt="设备型号"><figcaption><span class="idx">7</span><b>设备型号</b>：设备型号参考。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/portfolio.png" alt="项目总览"><figcaption><span class="idx">8</span><b>项目总览</b>：项目流程进度（公共）。</figcaption></figure>
+  <figure class="shot"><img src="images/delivery/sales-orders.png" alt="销售订单"><figcaption><span class="idx">9</span><b>销售订单</b>：销售订单（公共）。</figcaption></figure>
+
+  <!-- ============ 第 5 章 财务专员 ============ -->
+  <h2 class="sec" id="role-finance"><span class="chip" style="background:#0d9488">FINANCE_STAFF</span>财务专员</h2>
+  <div class="rolehead">
+    <div class="avatar" style="background:#0d9488">财</div>
+    <div>
+      <p class="role-title">财务专员</p>
+      <div class="role-en">FINANCE_STAFF · 账号 finance</div>
+      <div class="role-tag">财务收口：金租放款、按台计费、盈利测算 + 全部业财一体化功能，流水线第 9–11 步 + 全财务模块。</div>
+    </div>
+  </div>
+
+  <h3>岗位职责</h3>
+  <ul>
+    <li>金租放款：点亮达标后触发金租放款，登记放款与还款。</li>
+    <li>按台计费：点亮后按单台设备生成计费单。</li>
+    <li>盈利测算：生成项目盈利测算。</li>
+    <li>全财务功能：发票、付款三重管控、进项税、收入确认、对账、汇率/汇兑损益、保险、预付款结转、退货财务联动、EBS 同步。</li>
+  </ul>
+
+  <h3>岗位工作范围</h3>
+  <p>可访问 22 个页面（菜单最多），覆盖资金、发票、金租、计费、对账、收入确认、汇率、保险、预付款、付款、退货、EBS 等全部财务功能。</p>
+
+  <h3>工作任务</h3>
+  <table class="data">
+    <thead><tr><th class="num">#</th><th>任务</th><th>对应页面</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>记录资金流水（入金/出金/预付采购款）</td><td>资金池</td></tr>
+      <tr><td class="num">2</td><td>金租申请 / 放款 / 还款</td><td>金租流程</td></tr>
+      <tr><td class="num">3</td><td>按台计费、生成计费单</td><td>计费管理</td></tr>
+      <tr><td class="num">4</td><td>发票登记 / 认证 / 抵扣 / 开票核销</td><td>发票对账</td></tr>
+      <tr><td class="num">5</td><td>付款申请 → 审批 → 登记 → 核销（三重管控）</td><td>付款管控</td></tr>
+      <tr><td class="num">6</td><td>收入确认（草稿 → 审批 → 生成凭证）</td><td>收入确认</td></tr>
+      <tr><td class="num">7</td><td>币种 / 汇率 / 汇兑损益</td><td>币种汇率</td></tr>
+      <tr><td class="num">8</td><td>保险投保 / 分摊 / 归集 / 摊销</td><td>保险管理</td></tr>
+      <tr><td class="num">9</td><td>预付款按月结转</td><td>预付款台账</td></tr>
+      <tr><td class="num">10</td><td>7 维对账 / 差异定位</td><td>对账中心</td></tr>
+      <tr><td class="num">11</td><td>采购退货财务联动 / 红字发票 / 退款核销</td><td>退货管理</td></tr>
+      <tr><td class="num">12</td><td>监控 EBS 同步状态 / 失败重试</td><td>EBS 监控</td></tr>
+    </tbody>
+  </table>
+
+  <h3>在流水线中的位置（前后接缝）</h3>
+  <table class="data">
+    <thead><tr><th class="num">步骤</th><th>工作</th><th>交接</th></tr></thead>
+    <tbody>
+      <tr><td class="num">9</td><td>金租放款</td><td>从<b>项目交付负责人</b>接点亮验收 → 触发金租放款</td></tr>
+      <tr><td class="num">10</td><td>按台计费</td><td>点亮后逐台生成计费单</td></tr>
+      <tr><td class="num">11</td><td>盈利测算</td><td>生成项目盈利测算（流程收口）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>与其他角色配合</h3>
+  <table class="data">
+    <thead><tr><th>配合对象</th><th>配合方式</th></tr></thead>
+    <tbody>
+      <tr><td>项目交付负责人</td><td>交付点亮验收后，财务接手做金租放款、按台计费</td></tr>
+      <tr><td>财务总监</td><td>财务的付款申请、收入确认、开票核销提交总监审批</td></tr>
+      <tr><td>采购对接人</td><td>采购合同/订单是财务付款、预付款、发票的源头</td></tr>
+    </tbody>
+  </table>
+
+  <h3>界面操作指引（22 页）</h3>
+  <figure class="shot"><img src="images/finance/home.png" alt="财务首页"><figcaption><span class="idx">1</span><b>首页</b>：财务职责横幅 + 我的待办 + 快捷入口（记流水/按台计费/金租/发票）。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/capital.png" alt="资金池"><figcaption><span class="idx">2</span><b>资金池</b>：记录资金流水（银行流贷/自有资金入金、预付采购款出金）。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/invoices.png" alt="发票对账"><figcaption><span class="idx">3</span><b>发票对账</b>：发票登记、认证、抵扣、开票核销。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/leasing.png" alt="金租流程"><figcaption><span class="idx">4</span><b>金租流程</b>：金租申请、放款、还款计划。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/billing.png" alt="计费管理"><figcaption><span class="idx">5</span><b>计费管理</b>：按台计费、生成计费单。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/customer-statement.png" alt="客户对账单"><figcaption><span class="idx">6</span><b>客户对账单</b>：客户维度对账。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/payments.png" alt="付款管控"><figcaption><span class="idx">7</span><b>付款管控</b>：付款申请 → 审批中心 → 付款登记 → 多对多核销。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/revenue-recognitions.png" alt="收入确认"><figcaption><span class="idx">8</span><b>收入确认</b>：收入确认单、凭证、科目映射。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/reconciliation-center.png" alt="对账中心"><figcaption><span class="idx">9</span><b>对账中心</b>：7 维对账，有差异整行标红。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/exchange-rates.png" alt="币种汇率"><figcaption><span class="idx">10</span><b>币种汇率</b>：币种、汇率、汇兑损益规则。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/insurance.png" alt="保险管理"><figcaption><span class="idx">11</span><b>保险管理</b>：保单、投保、分摊、归集、摊销。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/prepayments.png" alt="预付款台账"><figcaption><span class="idx">12</span><b>预付款台账</b>：预付款按月结转。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/returns.png" alt="退货管理"><figcaption><span class="idx">13</span><b>退货管理</b>：采购退货全链路 + 红字发票 + 退款核销。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/ebs.png" alt="EBS监控"><figcaption><span class="idx">14</span><b>EBS 监控</b>：字段映射、手动触发同步、日志与失败重试。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/confirmations.png" alt="客户确认"><figcaption><span class="idx">15</span><b>客户确认</b>：服务确认单。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/devices.png" alt="设备清单"><figcaption><span class="idx">16</span><b>设备清单</b>：设备状态（回租出售等场景）。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/master-assets.png" alt="资产"><figcaption><span class="idx">17</span><b>资产</b>：固定资产卡片、折旧。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/master-banks.png" alt="银行"><figcaption><span class="idx">18</span><b>银行</b>：银行账户维护。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/master-projects.png" alt="项目"><figcaption><span class="idx">19</span><b>项目</b>：查看项目。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/master-orders.png" alt="订单"><figcaption><span class="idx">20</span><b>订单</b>：查看采购/批次订单。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/portfolio.png" alt="项目总览"><figcaption><span class="idx">21</span><b>项目总览</b>：项目流程进度（公共）。</figcaption></figure>
+  <figure class="shot"><img src="images/finance/sales-orders.png" alt="销售订单"><figcaption><span class="idx">22</span><b>销售订单</b>：销售订单（公共）。</figcaption></figure>
+
+</main>
+</body>
+</html>

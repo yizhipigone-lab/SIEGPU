@@ -15,7 +15,8 @@
 export const PUBLIC_MENU_KEYS: ReadonlySet<string> = new Set([
   '/',              // 首页（看板 + 待办，人人都看）
   '/portfolio',     // 项目总览（组合视角，各角色都需了解项目状态）
-  '/sales-orders',  // 销售订单（用户决策：所有人可见）
+  '/orders',        // 订单中心（采购/销售 Tab；销售订单原对所有角色可见，采购三角色本就在白名单）
+  '/sales-orders',  // 旧路由（已重定向到 /orders?tab=sales，保留不碍事）
 ])
 
 /**

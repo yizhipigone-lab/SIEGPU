@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import {
-  NButton, NDatePicker, NFormItem, NInput, NInputNumber, NTag, useMessage,
+  NButton, NCheckbox, NDatePicker, NFormItem, NInput, NInputNumber, NTag, useMessage,
 } from 'naive-ui'
 import { http } from '../../api/client'
 import { errMsg } from '../../utils/errMsg'
@@ -19,6 +19,7 @@ const form = ref({
   quantity_accepted: null as number | null,
   quantity_rejected: 0,
   notes: '',
+  shelve: false,
 })
 const file = ref<File | null>(null)
 
@@ -57,6 +58,7 @@ async function submit() {
           quantity_accepted: form.value.quantity_accepted,
           quantity_rejected: form.value.quantity_rejected || 0,
           notes: form.value.notes || null,
+          shelve: (props.prefill.acceptance_type || '采购验收') === '销售验收' ? form.value.shelve : false,
         })
         arId.value = data.id
         sub.value[0].state = 'done'
@@ -118,6 +120,11 @@ const SUB_TAG: Record<SubState, { type: any; text: string }> = {
     </n-form-item>
     <n-form-item label="备注">
       <n-input v-model:value="form.notes" type="textarea" :rows="2" placeholder="选填" />
+    </n-form-item>
+    <n-form-item v-if="(prefill.acceptance_type || '采购验收') === '销售验收'" label="上架">
+      <n-checkbox v-model:checked="form.shelve">
+        勾选后，验收通过时同步把订单中的上架标记为完成
+      </n-checkbox>
     </n-form-item>
     <n-form-item label="验收附件（选填）">
       <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif" @change="onFileChange" />
