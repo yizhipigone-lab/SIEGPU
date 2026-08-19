@@ -74,7 +74,7 @@
 
 ### 4.2 三条规则
 
-**规则 1：强制参照。** 新建/编辑 `type=PURCHASE` 合同时，`parent_contract_id` 必选，候选 = 同 `project_id` 且 `type=SALES` 的合同（前端下拉 + 后端校验双保险）。type=SALES 的合同不要求 parent。编辑存量无 parent 的采购合同时要求补选。
+**规则 1：强制参照（创建时设定，创建后锁定）。** 新建 `type=PURCHASE` 合同时，`parent_contract_id` 必选，候选 = 同 `project_id` 且 `type=SALES` 的合同（前端下拉 + 后端校验双保险）。type=SALES 的合同不要求 parent。**参照关系创建后锁定不可改**：`parent_contract_id` 不进入 `ContractUpdate` schema 与服务层 `_UPDATEABLE` 白名单（与现状一致），采购合同一旦参照某销售合同便不可改挂；存量无 parent 的采购合同不自动补录（如需参照可重建该合同）。
 
 **规则 2：总额硬校验（含税口径）。** 保存采购合同时校验：
 
@@ -103,7 +103,7 @@
 
 | 文件 | 改动 |
 |---|---|
-| `app/services/contract_service.py` | create/update 路径：强制参照校验（PURCHASE 必带同项目 SALES parent）+ 总额硬校验（含税口径）+ 销售合同变更后返回 referenced_purchase_count |
+| `app/services/contract_service.py` | create 路径：强制参照校验（PURCHASE 必带同项目 SALES parent）+ 总额硬校验（含税口径）；update 路径：销售合同金额/条款变更后返回 referenced_purchase_count（parent_contract_id 保持不可改，不进 _UPDATEABLE） |
 | `app/schemas/contract.py` | 响应增加 `parent_contract_no`（展示用）、`referenced_purchase_count`（销售合同） |
 | `app/services/workflow_service.py` | workflow steps 附 sales/purchase/order 实体 id（问题 A） |
 | `app/api/v1/endpoints/`（合同相关） | 透传新校验错误码与字段 |
@@ -167,6 +167,6 @@
 
 ## 9. 风险与开放问题
 
-1. **存量采购合同无 parent**：规则 1 只对新建强制；存量编辑时要求补选。是否需要一个数据补录脚本把存量采购合同按项目关联到销售合同？（默认不自动，避免误关联；由用户在编辑时补）
+1. **存量采购合同无 parent**：参照关系创建后锁定（规则 1），存量无 parent 的采购合同不做批量自动关联（避免误关联）；如需参照，用户重建该采购合同并在创建时选定销售合同。
 2. **多份销售合同**：一个项目若有多份 SALES 合同，步骤"销售合同"跳列表；采购参照时需人工选对那份（候选下拉已限定同项目 SALES）。
 3. **总额口径**：含税对比为主，NULL 回退不含税——已在 §4.2 明确，避免存量 NULL 数据被误拦。
