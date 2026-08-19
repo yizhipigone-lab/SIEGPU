@@ -106,7 +106,7 @@ window.__ModuleLoader__.load({
           if (pausedRef.current || !alive) return;
           const r = await fetchQuotes();
           if (!alive) return;
-          if (r.ok && r.quotes.length > 0) {
+          if (r.quotes.length > 0) {
             setQuotes(r.quotes);
             setQuotesAt(r.fetchedAt);
           }

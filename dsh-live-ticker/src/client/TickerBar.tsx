@@ -39,8 +39,8 @@ export function TickerBar(): React.ReactElement {
       if (pausedRef.current || !alive) return
       const r = await fetchQuotes()
       if (!alive) return
-      // 成功才覆盖；失败保留上次值（设计 §5：失败保留上次值并显示 stale 标记）
-      if (r.ok && r.quotes.length > 0) {
+      // 有数据就显示（含服务端 stale 数据），ok 状态单独跟踪显示标记
+      if (r.quotes.length > 0) {
         setQuotes(r.quotes)
         setQuotesAt(r.fetchedAt)
       }
