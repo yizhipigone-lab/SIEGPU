@@ -1,7 +1,7 @@
 /**
  * 两个可折叠行（默认展开）：
- * 1) 指数行：4 指数 2×2 网格，涨红跌绿，5s 轮询；
- * 2) 新闻行：横向滚动 ticker，最新在前，悬停暂停，60s 轮询。
+ * 1) 指数行：4 指数紧凑横排（flex wrap，窄屏自动换行），涨红跌绿，5s 轮询；
+ * 2) 新闻行：横向滚动 ticker（100s 慢速），最新在前，悬停暂停，60s 轮询。
  * 纯展示；visibilitychange 隐藏时暂停全部定时器。
  */
 
@@ -87,7 +87,7 @@ export function TickerBar(): React.ReactElement {
   return (
     <>
       <style>{`
-        .lt-ticker-inner { animation: lt-ticker-scroll 40s linear infinite; }
+        .lt-ticker-inner { animation: lt-ticker-scroll 100s linear infinite; }
         .lt-ticker-scroll:hover .lt-ticker-inner { animation-play-state: paused; }
         @keyframes lt-ticker-scroll {
           0% { transform: translateX(0); }
@@ -103,10 +103,10 @@ export function TickerBar(): React.ReactElement {
             {!quotesOk && quotes.length > 0 ? '（连接中断，显示上次数据）' : ''}
           </span>
         </summary>
-        <div style={styles.quoteGrid}>
+        <div style={styles.quoteRow}>
           {quotes.length === 0 && <span style={styles.empty}>暂无行情数据</span>}
           {quotes.map((q) => (
-            <div key={q.name} style={styles.quoteCell}>
+            <div key={q.name} style={styles.quoteChip}>
               <span style={styles.quoteName}>{q.name}</span>
               <span style={styles.quotePrice}>{q.price.toFixed(2)}</span>
               <span style={changeStyle(q.changePct)}>
@@ -153,9 +153,9 @@ const styles: Record<string, React.CSSProperties> = {
   summary: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 0', userSelect: 'none' },
   summaryTitle: { fontWeight: 600 },
   meta: { fontSize: 11, color: 'var(--dsw-alias-label-secondary, #9ca3af)' },
-  quoteGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 6, paddingBottom: 6 },
-  quoteCell: { display: 'flex', alignItems: 'baseline', gap: 8, padding: '4px 8px', borderRadius: 6, background: 'var(--dsw-alias-bg-elevated, rgba(128,128,128,.08))' },
-  quoteName: { color: 'var(--dsw-alias-label-secondary, #9ca3af)' },
+  quoteRow: { display: 'flex', flexWrap: 'wrap', columnGap: 18, rowGap: 4, paddingBottom: 6 },
+  quoteChip: { display: 'inline-flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap', fontSize: 13 },
+  quoteName: { color: 'var(--dsw-alias-label-secondary, #9ca3af)', fontSize: 12 },
   quotePrice: { fontWeight: 700, fontVariantNumeric: 'tabular-nums' },
   quotePct: { fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
   tickerWrap: { overflow: 'hidden', paddingBottom: 4 },

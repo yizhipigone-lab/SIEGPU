@@ -171,7 +171,7 @@ window.__ModuleLoader__.load({
       const fmtTime = (t) => t ? new Date(t).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "";
       return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("style", { children: `
-            .lt-ticker-inner { animation: lt-ticker-scroll 40s linear infinite; }
+            .lt-ticker-inner { animation: lt-ticker-scroll 100s linear infinite; }
             .lt-ticker-scroll:hover .lt-ticker-inner { animation-play-state: paused; }
             @keyframes lt-ticker-scroll {
               0% { transform: translateX(0); }
@@ -187,9 +187,9 @@ window.__ModuleLoader__.load({
                 !quotesOk && quotes.length > 0 ? "\uFF08\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u663E\u793A\u4E0A\u6B21\u6570\u636E\uFF09" : ""
               ] })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteGrid, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteRow, children: [
               quotes.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.empty, children: "\u6682\u65E0\u884C\u60C5\u6570\u636E" }),
-              quotes.map((q) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteCell, children: [
+              quotes.map((q) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteChip, children: [
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.quoteName, children: q.name }),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.quotePrice, children: q.price.toFixed(2) }),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: changeStyle(q.changePct), children: [
@@ -231,9 +231,9 @@ window.__ModuleLoader__.load({
       summary: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0", userSelect: "none" },
       summaryTitle: { fontWeight: 600 },
       meta: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #9ca3af)" },
-      quoteGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 6, paddingBottom: 6 },
-      quoteCell: { display: "flex", alignItems: "baseline", gap: 8, padding: "4px 8px", borderRadius: 6, background: "var(--dsw-alias-bg-elevated, rgba(128,128,128,.08))" },
-      quoteName: { color: "var(--dsw-alias-label-secondary, #9ca3af)" },
+      quoteRow: { display: "flex", flexWrap: "wrap", columnGap: 18, rowGap: 4, paddingBottom: 6 },
+      quoteChip: { display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", fontSize: 13 },
+      quoteName: { color: "var(--dsw-alias-label-secondary, #9ca3af)", fontSize: 12 },
       quotePrice: { fontWeight: 700, fontVariantNumeric: "tabular-nums" },
       quotePct: { fontSize: 12, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
       tickerWrap: { overflow: "hidden", paddingBottom: 4 },
