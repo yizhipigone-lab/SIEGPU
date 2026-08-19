@@ -123,6 +123,21 @@ watch(activeTab, refresh)
 onMounted(() => { searchTerm.value = readSearch(); refresh(); loadRemoteOptions() })
 watch(() => props.config.apiPath, () => { items.value = []; searchTerm.value = readSearch(); activeTab.value = ''; refresh(); loadRemoteOptions() })
 
+// 步骤导航实体级跳转：?detail=<id> 时自动打开对应实体的详情抽屉。
+// 列表可能尚未加载完，先挂起 pendingDetailId，待 items 就绪后再打开。
+const pendingDetailId = ref<string | null>(null)
+function tryOpenPendingDetail() {
+  const id = pendingDetailId.value
+  if (!id) return
+  const row = items.value.find((r: any) => String(r.id) === id)
+  if (row) { openDetail(row); pendingDetailId.value = null }
+}
+watch(() => route.query.detail, (id) => {
+  pendingDetailId.value = id ? String(id) : null
+  if (pendingDetailId.value) tryOpenPendingDetail()
+}, { immediate: true })
+watch(items, () => { if (pendingDetailId.value) tryOpenPendingDetail() })
+
 // 搜索过滤
 const filteredItems = computed(() => {
   if (!searchTerm.value.trim()) return items.value
