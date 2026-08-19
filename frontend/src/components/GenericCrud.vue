@@ -87,6 +87,11 @@ const ACTION_LABELS: Record<string, string> = {
   ALLOCATE: '调配', ALLOCATE_RETURN: '调配归还', SUPERSEDE: '置换', LEASEBACK_SALE: '回租出售',
 }
 function auditLabel(a: string): string { return ACTION_LABELS[a] ?? a }
+
+// 跳转到合同列表并打开指定合同的详情抽屉（参照销售合同链接用）
+function goContract(id: string) {
+  router.push({ path: '/master/contracts', query: { detail: id } })
+}
 // 操作记录仅管理层可见（与后端 /audit 的 require_role 口径一致）
 const canViewAudit = computed(() => auth.role === 'ADMIN' || auth.role === 'FINANCE_DIRECTOR')
 
@@ -515,6 +520,14 @@ const tableColumns = computed(() => {
             <span v-else>{{ detailRow[f.key] ?? '-' }}</span>
           </n-descriptions-item>
         </n-descriptions>
+
+        <!-- 采购合同：参照的销售合同（可点跳转） -->
+        <div v-if="detailRow?.parent_contract_id" style="margin-top:12px">
+          <div class="muted tiny">参照销售合同</div>
+          <n-button text type="primary" @click="goContract(detailRow.parent_contract_id)">
+            {{ detailRow.parent_contract_no || detailRow.parent_contract_id }}
+          </n-button>
+        </div>
 
         <!-- 二期 W3-4：核算判定信息（判定依据 + 确认留痕） -->
         <div v-if="config.revenueJudge && detailRow?.revenue_method" style="margin-top:20px" data-testid="judge-detail">

@@ -172,6 +172,9 @@ export const MODULES: Record<string, CrudConfig> = {
     listParamKey: 'type',
     revenueJudge: true, auditEntity: 'contract',
     detailTabs: [
+      { label: '被参照采购合同', endpoint: '/contracts', paramKey: 'parent_contract_id',
+        columns: ['contract_no', 'amount_incl_tax', 'status'],
+        labels: { contract_no: '合同号', amount_incl_tax: '金额(含税)', status: '状态' } },
       { label: '发票', endpoint: '/invoices', paramKey: 'contract_id', columns: ['invoice_no', 'amount', 'status'], labels: { invoice_no: '发票号', amount: '金额', status: '状态' } },
       { label: '计费单', endpoint: '/billings', paramKey: 'contract_id', columns: ['period_label', 'amount', 'status'], labels: { period_label: '期间', amount: '金额(含税)', status: '状态' } },
       { label: '变更记录', endpoint: '/contracts/amendments', paramKey: 'contract_id', columns: ['amendment_date', 'change_type', 'reason'], labels: { amendment_date: '变更日', change_type: '类型', reason: '原因' } },
