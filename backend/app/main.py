@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.endpoints import (
-    acceptances, auth, assets, billings, capital, confirmations, contracts, currencies, dashboard, devices, ebs, excel, files, funding, health,
+    acceptances, audit, auth, assets, billings, capital, confirmations, contracts, currencies, dashboard, demo, devices, ebs, excel, files, funding, health,
     insurance, invoices, leasing, master, notifications, ocr, orders, payments, prepayments, projects, reconciliation, repayments, reports, returns, revenue_recognitions, sales_orders, workflows,
 )
 from app.core.db import SessionLocal
@@ -149,3 +149,7 @@ app.include_router(payments.router, prefix="/api", tags=["payments"])
 app.include_router(revenue_recognitions.router, prefix="/api", tags=["revenue"])
 app.include_router(reconciliation.router, prefix="/api/reconciliation-center", tags=["reconciliation"])
 app.include_router(returns.router, prefix="/api/returns", tags=["returns"])
+# 新手引导专项：一键载入演示项目（幂等，权限 ADMIN/FINANCE_DIRECTOR）
+app.include_router(demo.router, tags=["demo"])
+# 操作留痕查询（单据详情「操作记录」tab，只读）
+app.include_router(audit.router, tags=["audit"])

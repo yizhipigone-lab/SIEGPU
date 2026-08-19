@@ -123,3 +123,22 @@ def test_order_detail_schema_serializes_batch_nulls():
                     contract_id=None, stages=[])
     assert d.total_amount is None and d.quantity is None
     assert d.equipment_model_id is None and d.unit_price is None
+
+
+def test_update_order_recomputes_total(db):
+    """四期修补：订单可编辑（此前无 PATCH 端点→前端报 405）；改数量/单价自动重算总额。"""
+    p = _project(db); e = _equipment(db)
+    o = svc.create_order(db, project_id=p.id, equipment_model_id=e.id, quantity=500, unit_price=Decimal("4000000"))
+    assert o.total_amount == Decimal("2000000000")
+    svc.update_order(db, o.id, quantity=600, unit_price=Decimal("3800000"))
+    assert o.quantity == 600 and o.unit_price == Decimal("3800000")
+    assert o.total_amount == Decimal("2280000000")  # 600 × 3,800,000
+
+
+def test_update_order_blocked_after_light_on(db):
+    """已点亮订单：数量/单价/型号已生成固定资产，禁改（防与资产卡片不一致）。"""
+    p = _project(db); e = _equipment(db)
+    o = svc.create_order(db, project_id=p.id, equipment_model_id=e.id, quantity=10, unit_price=Decimal("100000"))
+    svc.light_on(db, order_id=o.id, actual_date=date(2026, 9, 15))
+    with pytest.raises(BusinessError):
+        svc.update_order(db, o.id, quantity=20)

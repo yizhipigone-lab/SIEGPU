@@ -478,6 +478,24 @@ def advance_device_stage(db: Session, *, device_id, stage, status,
     return d, row
 
 
+def complete_device_stage(db: Session, *, device_id, stage, actual_date=None,
+                          operator_id=None):
+    """把设备某节点直接推到「已完成」（跨过进行中）。幂等：已完成为 no-op。
+
+    用于销售验收勾选「上架」的联动：一次到位标记完成（含上架建卡/表外同步的资产副作用）。
+    """
+    d = get_device_or_404(db, device_id)
+    stages = _ensure_device_stages(db, d.id)
+    row = next((s for s in stages if s.stage == stage), None)
+    if row is None or row.status == "已完成":
+        return d, row
+    if row.status != "进行中":
+        advance_device_stage(db, device_id=device_id, stage=stage, status="进行中",
+                             actual_date=actual_date, operator_id=operator_id)
+    return advance_device_stage(db, device_id=device_id, stage=stage, status="已完成",
+                                actual_date=actual_date, operator_id=operator_id)
+
+
 def advance_batch_stages(db: Session, *, batch_id, stage, status,
                          actual_date=None, attachment_path=None, notes=None,
                          operator_id=None) -> dict:

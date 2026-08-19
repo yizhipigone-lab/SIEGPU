@@ -14,7 +14,8 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
                     leasing_mode=None, pricing_authority=None, inventory_risk_bearer=None,
                     principal_role=None, currency_code=None, booked_rate=None, actor_id=None,
                     purchase_type=None, delivery_terms=None, warranty_terms=None,
-                    penalty_terms=None, prepayment_ratio=None, collection_account_type=None) -> Contract:
+                    penalty_terms=None, prepayment_ratio=None, collection_account_type=None,
+                    biz_type=None, amount_incl_tax=None, lease_months=None) -> Contract:
     proj = db.get(Project, project_id)
     if not proj or proj.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "项目不存在", 404)
@@ -39,6 +40,7 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
         purchase_type=purchase_type, delivery_terms=delivery_terms, warranty_terms=warranty_terms,
         penalty_terms=penalty_terms, prepayment_ratio=prepayment_ratio,
         collection_account_type=collection_account_type,
+        biz_type=biz_type, amount_incl_tax=amount_incl_tax, lease_months=lease_months,
     )
     db.add(c)
     db.flush()
@@ -55,7 +57,9 @@ def create_contract(db: Session, *, project_id, type: str, party_id, amount,
 _UPDATEABLE = ("contract_no", "monthly_rent", "start_date", "end_date", "file_path",
                "leasing_mode", "pricing_authority", "inventory_risk_bearer", "principal_role",
                "currency_code", "booked_rate", "purchase_type", "delivery_terms",
-               "warranty_terms", "penalty_terms", "prepayment_ratio", "collection_account_type")
+               "warranty_terms", "penalty_terms", "prepayment_ratio", "collection_account_type",
+               # 四期 W4：合同类型 / 含税总额 / 税率 / 租期 / 不含税金额（金额随含税联动，保存即生效）
+               "biz_type", "amount_incl_tax", "tax_rate", "lease_months", "amount")
 
 
 def update_contract(db: Session, cid, *, actor_id=None, **fields) -> Contract:

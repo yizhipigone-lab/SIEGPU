@@ -10,6 +10,8 @@ from app.core.deps import get_current_user
 from app.core.exceptions import BusinessError
 from app.models.user import User
 from app.schemas.leasing import (
+    DisbursementCreate,
+    DisbursementOut,
     DisburseRequest,
     LeasingNodeOut,
     LeasingProcessCreate,
@@ -85,3 +87,23 @@ def disburse(process_id: UUID, payload: DisburseRequest, db: Session = Depends(g
         "capital_transaction_id": str(txn.id),
         "repayments_generated": n,
     }
+
+
+@router.get("/processes/{process_id}/disbursements")
+def list_disbursements(process_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = svc.list_disbursements(db, process_id)
+    return {"items": [DisbursementOut.model_validate(r).model_dump(mode="json") for r in rows]}
+
+
+@router.post("/processes/{process_id}/disbursements", response_model=DisbursementOut, status_code=201)
+def add_disbursement(process_id: UUID, payload: DisbursementCreate, db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    try:
+        d, _, _ = svc.add_disbursement(db, process_id=process_id, acceptance_id=payload.acceptance_id,
+                                       amount=payload.amount, disbursement_date=payload.disbursement_date,
+                                       note=payload.note, created_by=user.id)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "重复放款", 409)
+    return DisbursementOut.model_validate(d)

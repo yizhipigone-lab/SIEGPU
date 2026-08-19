@@ -435,3 +435,57 @@ def test_alembic_0017_creates_and_drops_all():
     assert "'点亮验收','已退货'" in code.split("def downgrade")[0]
     assert "DELETE FROM devices WHERE status = '已退货'" in down
     assert "'已退货'" not in down.split("ADD CONSTRAINT")[1]  # 旧 CHECK 不含已退货
+
+
+# ---- 0020 W4：销售分批次验收（sales_orders 批次字段 + sales_batch_devices + acceptance_records.shelve） ----
+
+ALEMBIC_0020 = ROOT / "alembic" / "versions" / "0020_sales_batch_acceptance.py"
+
+
+def test_schema_sql_sales_batch():
+    sql = _read(SCHEMA_SQL)
+    assert "is_batch BOOLEAN NOT NULL DEFAULT FALSE" in sql  # sales_orders 批次载体
+    assert "batch_name VARCHAR(100)" in sql
+    assert "CREATE TABLE sales_batch_devices" in sql
+    assert "uq_sbd_active_device" in sql
+    assert "shelve BOOLEAN NOT NULL DEFAULT FALSE" in sql  # acceptance_records 上架同步标记
+
+
+def test_alembic_0020_creates_and_drops_all():
+    code = _read(ALEMBIC_0020)
+    assert 'revision = "0020_sales_batch_acceptance"' in code
+    assert 'down_revision = "0019_disbursement_acceptance"' in code
+    assert "CREATE TABLE IF NOT EXISTS sales_batch_devices" in code
+    assert "ADD COLUMN IF NOT EXISTS is_batch" in code
+    assert "ADD COLUMN IF NOT EXISTS batch_name" in code
+    assert "ADD COLUMN IF NOT EXISTS shelve" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP COLUMN IF EXISTS shelve" in down
+    assert "DROP TABLE IF EXISTS sales_batch_devices" in down
+    assert "DROP COLUMN IF EXISTS is_batch" in down
+
+
+# ---- 0021 四期 W4：合同类型 + 金额含税化（contracts + biz_type/amount_incl_tax/lease_months，纯加法） ----
+
+ALEMBIC_0021 = ROOT / "alembic" / "versions" / "0021_contract_biz_type.py"
+
+
+def test_schema_sql_contract_biz_type():
+    sql = _read(SCHEMA_SQL)
+    assert "biz_type IN ('算力租赁','转售','服务')" in sql
+    assert "amount_incl_tax DECIMAL(18,2)" in sql
+    assert "lease_months INTEGER" in sql
+
+
+def test_alembic_0021_creates_and_backfills():
+    code = _read(ALEMBIC_0021)
+    assert 'revision = "0021_contract_biz_type"' in code
+    assert 'down_revision = "0020_sales_batch_acceptance"' in code
+    assert "ADD COLUMN IF NOT EXISTS biz_type" in code
+    assert "ADD COLUMN IF NOT EXISTS amount_incl_tax" in code
+    assert "ADD COLUMN IF NOT EXISTS lease_months" in code
+    # 存量回填：含税 = 不含税 × (1+税率)
+    assert "UPDATE contracts SET amount_incl_tax = ROUND(amount * (1 + tax_rate), 2)" in code
+    down = code.split("def downgrade")[1]
+    for col in ("biz_type", "amount_incl_tax", "lease_months"):
+        assert f"DROP COLUMN IF EXISTS {col}" in down

@@ -72,6 +72,35 @@ def list_orders(db: Session, project_id=None):
     return db.execute(stmt).scalars().all()
 
 
+# 订单编辑白名单（四期修补：此前订单无 PATCH 端点，前端编辑报 405）
+_UPDATEABLE = ("project_id", "contract_id", "equipment_model_id", "quantity", "unit_price",
+               "order_date", "expected_delivery_date", "disbursement_threshold_pct", "batch_name")
+# 已点亮后禁改的资产字段（数量/单价/型号已据 total_amount 生成固定资产，改了会与资产卡片不一致）
+_ASSET_DRIVING = ("quantity", "unit_price", "equipment_model_id")
+
+
+def update_order(db: Session, order_id, *, actor_id=None, **fields) -> Order:
+    o = db.get(Order, order_id)
+    if not o or o.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "订单不存在", 404)
+    if o.status == "已点亮" and any(fields.get(k) is not None for k in _ASSET_DRIVING):
+        raise BusinessError("ILLEGAL_TRANSITION", "订单已点亮投产，数量/单价/型号已生成固定资产，不可再改", 409)
+    if fields.get("project_id") is not None and not db.get(Project, fields["project_id"]):
+        raise BusinessError("NOT_FOUND", "项目不存在", 404)
+    if fields.get("equipment_model_id") is not None and not db.get(EquipmentModel, fields["equipment_model_id"]):
+        raise BusinessError("NOT_FOUND", "设备型号不存在", 404)
+    for k, v in fields.items():
+        if k in _UPDATEABLE and v is not None:
+            setattr(o, k, v)
+    # 非批次订单：数量/单价变化 → 重算总额（批次订单总额由批内设备聚合派生，不在此算）
+    if not o.is_batch and o.quantity is not None and o.unit_price is not None:
+        o.total_amount = o.quantity * o.unit_price
+    db.flush()
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, o.project_id)
+    return o
+
+
 def get_order_with_stages(db: Session, order_id):
     o = db.get(Order, order_id)
     if not o or o.deleted_at is not None:

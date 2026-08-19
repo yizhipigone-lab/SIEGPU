@@ -12,6 +12,7 @@ from app.schemas.order import (
     OrderCreate,
     OrderDetail,
     OrderOut,
+    OrderUpdate,
     StageAdvance,
 )
 from app.services import order_service as svc
@@ -45,6 +46,22 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), user: User
 @router.get("/{order_id}", response_model=OrderDetail)
 def get_order(order_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     o, stages = svc.get_order_with_stages(db, order_id)
+    return OrderDetail(
+        id=o.id, project_id=o.project_id, equipment_model_id=o.equipment_model_id, contract_id=o.contract_id,
+        quantity=o.quantity, unit_price=o.unit_price, total_amount=o.total_amount, status=o.status,
+        is_batch=o.is_batch, batch_name=o.batch_name, batch_status=o.batch_status, flow_type=o.flow_type,
+        disbursement_threshold_pct=o.disbursement_threshold_pct,
+        disbursement_todo_process_id=o.disbursement_todo_process_id,
+        stages=[DeliveryStageOut.model_validate(s) for s in stages],
+    )
+
+
+@router.patch("/{order_id}", response_model=OrderDetail)
+def update_order(order_id: UUID, payload: OrderUpdate, db: Session = Depends(get_db),
+                 user: User = Depends(get_current_user)):
+    o = svc.update_order(db, order_id, actor_id=user.id, **payload.model_dump(exclude_unset=True))
+    db.commit()
+    _, stages = svc.get_order_with_stages(db, o.id)
     return OrderDetail(
         id=o.id, project_id=o.project_id, equipment_model_id=o.equipment_model_id, contract_id=o.contract_id,
         quantity=o.quantity, unit_price=o.unit_price, total_amount=o.total_amount, status=o.status,

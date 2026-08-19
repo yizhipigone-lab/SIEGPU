@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -75,3 +75,22 @@ class DisburseRequest(BaseModel):
     actual_disbursement_amount: Decimal = Field(gt=0)
     disbursement_date: date
     note: str | None = None
+
+
+class DisbursementCreate(BaseModel):
+    amount: Decimal = Field(gt=0)
+    disbursement_date: date
+    acceptance_id: UUID
+    note: str | None = None
+
+
+class DisbursementOut(BaseModel):
+    id: UUID
+    process_id: UUID
+    acceptance_id: UUID | None = None
+    amount: Decimal
+    disbursement_date: date
+    note: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

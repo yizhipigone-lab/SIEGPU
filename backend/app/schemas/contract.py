@@ -10,6 +10,8 @@ PricingAuthority = Literal["自主定价", "客户定价", "上游定价"]
 InventoryRiskBearer = Literal["我方", "客户", "上游"]
 PrincipalRole = Literal["主要责任人", "代理人"]
 RevenueMethod = Literal["总额法", "净额法", "经营租赁", "服务费", "待判定"]
+# 四期 W4：合同业务类型（算力租赁/转售/服务）
+BizType = Literal["算力租赁", "转售", "服务"]
 
 
 class ContractCreate(BaseModel):
@@ -39,6 +41,10 @@ class ContractCreate(BaseModel):
     penalty_terms: str | None = None
     prepayment_ratio: Decimal | None = Field(None, ge=0)
     collection_account_type: Literal["监管户", "一般户"] | None = None
+    # 四期 W4：合同类型 / 含税总额 / 算力租赁租期（全可选；amount 仍为不含税）
+    biz_type: BizType | None = None
+    amount_incl_tax: Decimal | None = Field(None, ge=0)  # 合同金额（含税）
+    lease_months: int | None = Field(None, ge=1)  # 租期(月)，仅算力租赁
 
 
 class ContractUpdate(BaseModel):
@@ -60,6 +66,12 @@ class ContractUpdate(BaseModel):
     penalty_terms: str | None = None
     prepayment_ratio: Decimal | None = Field(None, ge=0)
     collection_account_type: Literal["监管户", "一般户"] | None = None
+    # 四期 W4：分类/条款/税率/金额可改（不含税随含税联动或直接改；合同变更仍走 Amendment 留痕渠道）
+    biz_type: BizType | None = None
+    tax_rate: Decimal | None = Field(None, ge=0, lt=1)  # 税率（小数，0~1）
+    amount_incl_tax: Decimal | None = Field(None, ge=0)
+    amount: Decimal | None = Field(None, ge=0)  # 不含税金额（前端由含税自动算/可手改）
+    lease_months: int | None = Field(None, ge=1)
 
 
 class MethodConfirmIn(BaseModel):
@@ -147,4 +159,8 @@ class ContractOut(BaseModel):
     penalty_terms: str | None = None
     prepayment_ratio: Decimal | None = None
     collection_account_type: str | None = None
+    # 四期 W4：合同类型 / 含税总额 / 算力租赁租期
+    biz_type: str | None = None
+    amount_incl_tax: Decimal | None = None
+    lease_months: int | None = None
     model_config = {"from_attributes": True}

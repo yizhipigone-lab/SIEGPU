@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/acceptances", tags=["验收记录"])
 
 @router.post("", response_model=AcceptanceOut, status_code=201)
 def create_ar(payload: AcceptanceCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    ar = svc.create_acceptance(db, **payload.model_dump())
+    ar = svc.create_acceptance(db, **payload.model_dump(exclude={'acceptance_date', 'rejection_reason'}))
     db.commit()
     return AcceptanceOut.model_validate(ar)
 

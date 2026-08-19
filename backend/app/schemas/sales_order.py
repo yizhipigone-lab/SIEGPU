@@ -17,6 +17,9 @@ class SalesOrderCreate(BaseModel):
     end_date: date | None = None
     status: str = "待交付"
     notes: str | None = None
+    # W4：销售批次（照采购批次订单）
+    is_batch: bool = False
+    batch_name: str | None = None
 
 
 class SalesOrderUpdate(BaseModel):
@@ -41,7 +44,31 @@ class SalesOrderOut(BaseModel):
     end_date: date | None = None
     status: str
     notes: str | None = None
+    is_batch: bool = False
+    batch_name: str | None = None
+    batch_status: str | None = None
     created_at: datetime
     updated_at: datetime
 
+    model_config = {"from_attributes": True}
+
+
+# ---- W4：销售批次-设备组合 ----
+
+class SalesBatchAssign(BaseModel):
+    device_id: uuid.UUID
+    sales_batch_id: uuid.UUID
+
+
+class SalesBatchRemove(BaseModel):
+    device_id: uuid.UUID
+
+
+class SalesBatchDeviceOut(BaseModel):
+    id: uuid.UUID
+    sales_batch_id: uuid.UUID
+    device_id: uuid.UUID
+    action: str
+    active: bool
+    operated_by: uuid.UUID | None
     model_config = {"from_attributes": True}

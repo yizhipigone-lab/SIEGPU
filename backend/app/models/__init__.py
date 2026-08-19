@@ -12,7 +12,7 @@ from app.models.device import BatchDevice, Device, DeviceStage, OffBalanceRegist
 from app.models.ebs import EbsFieldMapping, EbsSyncLog
 from app.models.funding import FundingReplacement
 from app.models.insurance import InsuranceConfig, InsurancePolicy, InsurancePolicyDevice
-from app.models.leasing import LeasingNode, LeasingProcess
+from app.models.leasing import LeasingDisbursement, LeasingNode, LeasingProcess
 from app.models.long_term_payable import LongTermPayable
 from app.models.master import Bank, Customer, EquipmentModel, Supplier
 from app.models.notification import Notification
@@ -23,7 +23,7 @@ from app.models.project_workflow import ProjectWorkflow
 from app.models.repayment import Repayment
 from app.models.revenue import GlAccountMapping, RevenueRecognition
 from app.models.return_order import ReturnOrder, ReturnOrderDevice
-from app.models.sales_order import SalesOrder
+from app.models.sales_order import SalesBatchDevice, SalesOrder
 from app.models.service_confirmation import ServiceConfirmation
 from app.models.step_audit_log import StepAuditLog
 from app.models.user import AuditLog, IdempotencyKey, User
@@ -35,8 +35,8 @@ __all__ = [
     "Supplier", "Customer", "EquipmentModel", "Bank",
     "Project", "Contract",
     "Notification",
-    "SalesOrder",
-    "LeasingProcess", "LeasingNode",
+    "SalesOrder", "SalesBatchDevice",
+    "LeasingProcess", "LeasingNode", "LeasingDisbursement",
     "LongTermPayable",
     "CapitalTransaction", "CapitalAllocation",
     "Currency", "ExchangeRate", "ExchangeGainLossRule",

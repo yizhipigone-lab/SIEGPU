@@ -62,3 +62,7 @@ class Contract(UUIDPK, TimestampMixin, Base):
     penalty_terms: Mapped[str | None] = mapped_column(String(200), nullable=True)
     prepayment_ratio: Mapped[Decimal | None] = mapped_column(Numeric(10, 8), nullable=True)
     collection_account_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 四期 W4：合同类型 + 含税总额 + 算力租赁租期（全 nullable，纯加法；amount 仍为不含税口径，下游核算不变）
+    biz_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 合同类型：算力租赁/转售/服务
+    amount_incl_tax: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)  # 合同金额（含税）
+    lease_months: Mapped[int | None] = mapped_column(nullable=True)  # 租期(月)，仅算力租赁填写

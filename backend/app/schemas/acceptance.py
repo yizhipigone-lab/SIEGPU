@@ -16,6 +16,8 @@ class AcceptanceCreate(BaseModel):
     quantity_rejected: int = Field(default=0, ge=0)
     rejection_reason: str | None = None
     notes: str | None = None
+    # W4：销售验收勾选「上架」→ 审批通过时同步标记订单/批次设备上架完成
+    shelve: bool = False
 
 
 class AcceptanceUpdate(BaseModel):
@@ -41,6 +43,7 @@ class AcceptanceOut(BaseModel):
     rejection_reason: str | None = None
     file_path: str | None = None
     notes: str | None = None
+    shelve: bool = False
     created_at: datetime
     updated_at: datetime
 

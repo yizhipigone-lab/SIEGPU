@@ -170,6 +170,10 @@ CREATE TABLE contracts (
     penalty_terms VARCHAR(200),          -- 违约条款
     prepayment_ratio NUMERIC(10,8),      -- 预付款比例（小数）
     collection_account_type VARCHAR(20), -- 销售收款账户类型（监管户/一般户）
+    -- 四期 W4：合同类型 / 含税总额 / 算力租赁租期（迁移 0021，全 nullable；amount 仍为不含税口径）
+    biz_type VARCHAR(20) CHECK (biz_type IS NULL OR biz_type IN ('算力租赁','转售','服务')),  -- 合同类型
+    amount_incl_tax DECIMAL(18,2) CHECK (amount_incl_tax IS NULL OR amount_incl_tax >= 0),    -- 合同金额（含税）
+    lease_months INTEGER CHECK (lease_months IS NULL OR lease_months >= 1),                   -- 租期(月)，仅算力租赁
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -193,6 +197,10 @@ CREATE TABLE sales_orders (
     end_date DATE,
     status VARCHAR(20) NOT NULL DEFAULT '待交付' CHECK (status IN ('待交付','执行中','已终止','已完成')),
     notes TEXT,
+    -- W4：销售批次载体（照采购侧 orders.is_batch/batch_name/batch_status）
+    is_batch BOOLEAN NOT NULL DEFAULT FALSE,
+    batch_name VARCHAR(100),
+    batch_status VARCHAR(20),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
@@ -247,6 +255,22 @@ CREATE TABLE leasing_nodes (
 );
 CREATE TRIGGER trg_leasing_nodes_updated BEFORE UPDATE ON leasing_nodes FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX idx_leasing_nodes_process ON leasing_nodes(process_id) WHERE deleted_at IS NULL;
+
+-- 金租分次放款：一次批准可多笔放款，每笔独立生成还款计划
+CREATE TABLE leasing_disbursements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    process_id UUID NOT NULL REFERENCES leasing_processes(id),
+    acceptance_id UUID,  -- FK 见下方 ALTER TABLE（acceptance_records 定义在后）
+    amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
+    disbursement_date DATE NOT NULL,
+    note TEXT,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE TRIGGER trg_disb_updated BEFORE UPDATE ON leasing_disbursements FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_disb_process ON leasing_disbursements(process_id) WHERE deleted_at IS NULL;
 
 -- ============================ 资金域 ============================
 
@@ -455,6 +479,23 @@ CREATE UNIQUE INDEX uq_batch_devices_active ON batch_devices(device_id) WHERE ac
 CREATE INDEX idx_bd_batch ON batch_devices(batch_id) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_bd_updated BEFORE UPDATE ON batch_devices FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- W4：销售批次-设备组合关系（照采购侧 batch_devices）
+CREATE TABLE sales_batch_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sales_batch_id UUID NOT NULL REFERENCES sales_orders(id),
+    device_id UUID NOT NULL REFERENCES devices(id),
+    action VARCHAR(10) NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    operated_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE TRIGGER trg_sales_batch_devices_updated BEFORE UPDATE ON sales_batch_devices FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX idx_sbd_batch ON sales_batch_devices(sales_batch_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_sbd_device ON sales_batch_devices(device_id) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_sbd_active_device ON sales_batch_devices(device_id) WHERE active AND deleted_at IS NULL;
+
 -- off_balance_registers：表外设备备查台账（独立于 assets，避免污染折旧汇总）
 CREATE TABLE off_balance_registers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -505,6 +546,8 @@ CREATE TABLE acceptance_records (
     file_path VARCHAR(500),
     attachments JSONB,
     notes TEXT,
+    -- W4：销售验收勾选「上架」→ 审批通过同步标记订单/批次设备上架完成
+    shelve BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -515,6 +558,8 @@ CREATE TABLE acceptance_records (
 );
 CREATE TRIGGER trg_acceptance_records_updated BEFORE UPDATE ON acceptance_records FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX idx_acc_project ON acceptance_records(project_id) WHERE deleted_at IS NULL;
+ALTER TABLE leasing_disbursements ADD CONSTRAINT fk_disb_acceptance FOREIGN KEY (acceptance_id) REFERENCES acceptance_records(id);
+CREATE INDEX idx_disb_acceptance ON leasing_disbursements(acceptance_id) WHERE deleted_at IS NULL;
 
 -- billings：v3.1 order_id→nullable、+sales_order_id +confirmation_status、唯一索引重建
 CREATE TABLE billings (
@@ -576,6 +621,7 @@ CREATE INDEX idx_sc_sales_order ON service_confirmations(sales_order_id) WHERE d
 CREATE TABLE repayments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     leasing_process_id UUID NOT NULL REFERENCES leasing_processes(id),
+    disbursement_id UUID REFERENCES leasing_disbursements(id),
     period INTEGER NOT NULL CHECK (period > 0),
     due_date DATE NOT NULL,
     planned_principal DECIMAL(18,2) NOT NULL CHECK (planned_principal >= 0),

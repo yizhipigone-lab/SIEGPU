@@ -20,6 +20,19 @@ class OrderCreate(BaseModel):
     disbursement_threshold_pct: Decimal | None = Field(None, ge=0, le=100)
 
 
+class OrderUpdate(BaseModel):
+    """订单编辑（全部可选）。已点亮订单的数量/单价/型号不可改（已据此生成固定资产）。"""
+    project_id: UUID | None = None
+    contract_id: UUID | None = None
+    equipment_model_id: UUID | None = None
+    quantity: int | None = Field(None, gt=0)
+    unit_price: Decimal | None = Field(None, ge=0)
+    order_date: date | None = None
+    expected_delivery_date: date | None = None
+    disbursement_threshold_pct: Decimal | None = Field(None, ge=0, le=100)
+    batch_name: str | None = None
+
+
 class DeliveryStageOut(BaseModel):
     id: UUID
     stage: str

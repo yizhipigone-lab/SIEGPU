@@ -13,6 +13,7 @@ class Repayment(UUIDPK, TimestampMixin, Base):
     __tablename__ = "repayments"
 
     leasing_process_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("leasing_processes.id"), nullable=False)
+    disbursement_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("leasing_disbursements.id"), nullable=True)
     period: Mapped[int] = mapped_column(Integer, nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     planned_principal: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)

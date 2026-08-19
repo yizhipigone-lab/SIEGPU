@@ -44,3 +44,16 @@ class LeasingNode(UUIDPK, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     stuck_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class LeasingDisbursement(UUIDPK, TimestampMixin, Base):
+    """一笔放款记录（一次金租批准可多笔放款，每笔独立生成还款计划）。"""
+
+    __tablename__ = "leasing_disbursements"
+
+    process_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("leasing_processes.id"), nullable=False)
+    acceptance_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("acceptance_records.id"), nullable=True)  # 关联哪一批采购验收（验收→订单→合同→项目血缘）
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    disbursement_date: Mapped[date] = mapped_column(Date, nullable=False)  # 实际放款日（还款期从这天起算）
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)

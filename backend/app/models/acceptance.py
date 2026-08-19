@@ -2,7 +2,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,3 +25,5 @@ class AcceptanceRecord(UUIDPK, TimestampMixin, Base):
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # W4：销售验收勾选「上架」→ 审批通过时同步把订单/批次设备的上架标记完成
+    shelve: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

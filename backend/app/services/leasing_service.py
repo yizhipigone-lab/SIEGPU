@@ -11,8 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
+from app.models.acceptance import AcceptanceRecord
 from app.models.capital import CapitalTransaction
-from app.models.leasing import LeasingNode, LeasingProcess
+from app.models.leasing import LeasingDisbursement, LeasingNode, LeasingProcess
 from app.models.master import Supplier
 from app.models.project import Project
 from app.models.repayment import Repayment
@@ -151,3 +152,66 @@ def disburse(db: Session, *, process_id, actual_disbursement_amount: Decimal,
     from app.services import workflow_service as _wf
     _wf.after_action(db, proc.project_id)
     return proc, txn, len(rows)
+
+
+def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal, disbursement_date: date,
+                     note: str | None = None, created_by=None) -> tuple:
+    """新增一笔放款：校验所选采购验收（已通过、属本项目）→ 写放款记录 → 生成该笔还款计划 → 记入金 → 置换。
+
+    一次金租批准可多笔放款，每笔关联具体一批采购验收（验收→订单→合同→项目血缘），每笔独立生成还款计划。
+    """
+    proc = db.get(LeasingProcess, process_id)
+    if not proc or proc.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "金租申请不存在", 404)
+    if proc.status not in ("进行中", "已批", "已放款"):
+        raise BusinessError("ILLEGAL_TRANSITION", f"不允许 {proc.status} → 放款", 409)
+    if not (proc.annual_rate is not None and proc.term_periods and proc.payment_freq and proc.repayment_method):
+        raise BusinessError("BAD_REQUEST", "缺少 利率/期数/频率/方式，无法生成还款计划", 422)
+    acc = db.get(AcceptanceRecord, acceptance_id)
+    if not acc or acc.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "采购验收不存在", 404)
+    if acc.acceptance_type != "采购验收" or acc.status != "已通过":
+        raise BusinessError("PRECONDITION", "该验收不是已通过的采购验收", 409)
+    if acc.project_id != proc.project_id:
+        raise BusinessError("PRECONDITION", "该采购验收不属于本项目", 409)
+
+    d = LeasingDisbursement(process_id=process_id, acceptance_id=acceptance_id, amount=amount,
+                            disbursement_date=disbursement_date, note=note, created_by=created_by)
+    db.add(d)
+    db.flush()
+
+    rows = generate_plan(principal=amount, annual_rate=proc.annual_rate,
+                         term_periods=proc.term_periods, payment_freq=proc.payment_freq,
+                         method=proc.repayment_method, disbursement_date=disbursement_date)
+    for r in rows:
+        db.add(Repayment(leasing_process_id=proc.id, disbursement_id=d.id, period=r.period,
+                         due_date=r.due_date, planned_principal=r.planned_principal,
+                         planned_interest=r.planned_interest, status="待还"))
+
+    txn = CapitalTransaction(project_id=proc.project_id, source_type="金租融资", direction="IN",
+                             amount=amount, transaction_date=disbursement_date,
+                             leasing_process_id=proc.id, category="放款",
+                             idempotency_key=f"disburse:{d.id}", note=note, created_by=created_by)
+    db.add(txn)
+
+    from app.services import funding_service as fs
+    fs.execute_replacement(db, project_id=proc.project_id, leasing_process_id=proc.id,
+                           disbursement_amount=amount, disbursement_date=disbursement_date,
+                           created_by=created_by)
+
+    if proc.status != "已放款":
+        proc.status = "已放款"
+
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=created_by, action="DISBURSE", target_type="leasing_disbursement",
+               target_id=d.id, after_json={"amount": str(amount), "periods": len(rows)})
+    from app.services import workflow_service as _wf
+    _wf.after_action(db, proc.project_id)
+    return d, txn, len(rows)
+
+
+def list_disbursements(db: Session, process_id):
+    return db.execute(select(LeasingDisbursement).where(
+        LeasingDisbursement.process_id == process_id,
+        LeasingDisbursement.deleted_at.is_(None),
+    ).order_by(LeasingDisbursement.created_at)).scalars().all()
