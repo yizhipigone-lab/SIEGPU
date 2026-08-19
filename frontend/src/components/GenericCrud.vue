@@ -51,25 +51,42 @@ async function loadRemoteOptions() {
   }
 }
 
+// 回填抑制标志：编辑回填(openEdit)/新建初始化(blankForm)期间置 true，
+// 供 calc 重算 watcher 与下方 dependsOn watcher 共用（防覆盖回填值）。声明须早于所有用到它的 watcher（TDZ）。
+let suppressCalc = false
+
 // 依赖式远程下拉：选项随 dependsOn 字段（如 project_id）变化重新拉取，依赖值作为同名查询参数追加。
 // 与上面的静态 loadRemoteOptions 共存：无 dependsOn 的字段仍只在挂载/模块切换时加载一次。
+// flush:'sync'：回填逐字段赋值时本回调在 suppressCalc=true 窗口内同步触发（判定在首个 await 前捕获），
+// 因此回填只拉选项、不清空刚回填的值；用户切换依赖时才清理过期选择（M2）。
 watch(
   () => props.config.fields.map((f) => (f.remoteOptions?.dependsOn ? form[f.remoteOptions.dependsOn] : null)),
   async () => {
+    const suppressed = suppressCalc
     for (const f of props.config.fields) {
       const ro = f.remoteOptions
       if (!ro?.dependsOn || Array.isArray(ro.endpoint)) continue
       const depVal = form[ro.dependsOn]
-      if (!depVal) { remoteOpts[f.key] = []; continue }
+      if (!depVal) {
+        remoteOpts[f.key] = []
+        if (!suppressed) form[f.key] = null  // 依赖被清空 → 级联清空已选值
+        continue
+      }
       const sep = ro.endpoint.includes('?') ? '&' : '?'
       const url = `${ro.endpoint}${sep}${ro.dependsOn}=${depVal}`
       try {
         const r = await api.get(url)
-        remoteOpts[f.key] = (r.data.items || r.data || []).map((it: any) => ({ label: it[ro.label], value: it[ro.value] }))
+        const opts = (r.data.items || r.data || []).map((it: any) => ({ label: it[ro.label], value: it[ro.value] }))
+        remoteOpts[f.key] = opts
+        // M2：用户切换依赖（如换项目）后，已选值不在新选项里即过期，清空防后端 400；回填期间不清
+        if (!suppressed && form[f.key] !== null && form[f.key] !== undefined && form[f.key] !== ''
+          && !opts.some((o: any) => String(o.value) === String(form[f.key]))) {
+          form[f.key] = null
+        }
       } catch { remoteOpts[f.key] = [] }
     }
   },
-  { deep: true, immediate: true },
+  { deep: true, immediate: true, flush: 'sync' },
 )
 
 // 详情抽屉
@@ -101,8 +118,7 @@ const activeAction = ref<DetailAction | null>(null)
 const actionForm = reactive<Record<string, any>>({})
 
 // 自动计算字段（如 不含税=含税/(1+税率)）：仅当「依赖字段」变化时重算；calc 字段本身可手工改（不在依赖里）。
-// suppressCalc：编辑回填/新建初始化期间抑制重算，防覆盖存量值/默认值（flush:sync 保证回填逐字段触发时被挡住）。
-let suppressCalc = false
+// suppressCalc（声明见上方 dependsOn watcher 前）：编辑回填/新建初始化期间抑制重算，防覆盖存量值/默认值（flush:sync 保证回填逐字段触发时被挡住）。
 const calcFields = computed(() => props.config.fields.filter((f) => f.calc && f.calcDeps?.length))
 const calcDepsValues = computed(() => calcFields.value.flatMap((f) => f.calcDeps!.map((k) => form[k])))
 watch(calcDepsValues, () => {
@@ -508,8 +524,8 @@ const tableColumns = computed(() => {
             </n-tooltip>
           </template>
           <div style="width:100%">
-            <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" />
-            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" clearable />
+            <n-select v-if="f.remoteOptions" v-model:value="form[f.key]" :options="remoteOpts[f.key] || []" filterable placeholder="请选择" :disabled="!!f.disabledWhen?.(form, editing)" />
+            <n-select v-else-if="f.type === 'select'" v-model:value="form[f.key]" :options="f.options" clearable :disabled="!!f.disabledWhen?.(form, editing)" />
             <MoneyInput v-else-if="f.type === 'number'" v-model:value="form[f.key]" :status="fieldWarn(f) ? 'warning' : undefined" />
             <n-date-picker v-else-if="f.type === 'date'" type="date" style="width:100%"
               :value="ymdToTs(form[f.key])" @update:value="(ts: number | null) => form[f.key] = tsToYmd(ts)" />

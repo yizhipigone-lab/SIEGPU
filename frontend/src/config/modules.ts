@@ -23,6 +23,7 @@ export interface FieldConfig {
   validate?: (value: any) => string | undefined  // 即时校验（小白防误填）：返回警告文案则标黄，见 utils/validators.ts
   section?: string            // 分组标题：表单中在该字段前渲染分割线（如「核算判定信息」）
   showWhen?: (form: Record<string, any>) => boolean  // 条件显示（如租期仅算力租赁）
+  disabledWhen?: (form: Record<string, any>, editing: any | null) => boolean  // 条件禁用（如参照合同创建后不可改：编辑态只读展示当前值）
   calc?: (form: Record<string, any>) => number | null  // 自动计算（如 不含税=含税/(1+税率)），可手工改
   calcDeps?: string[]                                  // calc 依赖字段，变化时重算本字段
   percent?: boolean           // 百分数输入：显示×100、提交/100（税率 13% ↔ 0.13）
@@ -215,6 +216,7 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'party_id', label: '对方(客户/供应商)', required: true, remoteOptions: { endpoint: ['/customers', '/suppliers'], label: 'name', value: 'id', tags: ['客户', '供应商'] } },
       { key: 'parent_contract_id', label: '参照销售合同', type: 'select', required: true,
         showWhen: (form) => form.type === 'PURCHASE',
+        disabledWhen: (_form, editing) => !!editing,  // M1：后端锁定创建后不可改，编辑态只读展示当前值（避免"可改但不生效"假象）
         hint: '本采购合同参照的销售合同（必选，创建后不可改）；采购总额不得超过该销售合同额',
         remoteOptions: { endpoint: '/contracts?type=SALES', label: 'contract_no', value: 'id', dependsOn: 'project_id' } },
       { key: 'amount_incl_tax', label: '合同金额(含税,元)', type: 'number', required: true, hint: '合同上写的含税总额（客户实际要付的钱）', validate: validators.positiveAmount },
