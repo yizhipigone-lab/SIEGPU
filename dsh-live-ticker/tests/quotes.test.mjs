@@ -1,37 +1,38 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { INDEX_SECIDS, parsePush2Quotes } from '../src/quotes.ts'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { INDEX_CODES, parseTencentQuotes } from '../src/quotes.ts'
 
-test('INDEX_SECIDS 含 4 个指数且顺序稳定', () => {
-  assert.deepEqual(INDEX_SECIDS, ['1.000001', '0.399006', '1.000688', '1.000510'])
+const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'tencent-quotes.txt')
+
+test('INDEX_CODES 含 4 个指数且顺序稳定', () => {
+  assert.deepEqual(INDEX_CODES, ['sh000001', 'sz399006', 'sh000688', 'sh000510'])
 })
 
-test('parsePush2Quotes 解析东财 ulist 响应', () => {
-  const json = {
-    data: {
-      diff: [
-        { f12: '000001', f14: '上证指数', f2: 3990.3, f3: 0.19 },
-        { f12: '399006', f14: '创业板指', f2: 3705.56, f3: -0.93 },
-        { f12: '000688', f14: '科创50', f2: 1790.87, f3: 0.11 },
-        { f12: '000510', f14: '中证A500', f2: 5892.61, f3: -0.32 },
-      ],
-    },
-  }
-  const q = parsePush2Quotes(json)
+test('parseTencentQuotes 解析腾讯 qt.gtimg.cn 真实响应（fixture）', () => {
+  const text = readFileSync(FIXTURE, 'utf8')
+  const q = parseTencentQuotes(text)
   assert.equal(q.length, 4)
-  assert.deepEqual(q[0], { name: '上证指数', price: 3990.3, changePct: 0.19 })
+  assert.equal(q[0].name, '上证指数')
+  assert.equal(q[1].name, '创业板指')
+  assert.equal(q[2].name, '科创50')
   assert.equal(q[3].name, '中证A500')
+  // 字段索引正确：现价与涨跌幅均为有限数（不依赖具体数值，避免随行情波动失败）
+  for (const item of q) {
+    assert.ok(Number.isFinite(item.price) && item.price > 0, `${item.name} price`)
+    assert.ok(Number.isFinite(item.changePct) && Math.abs(item.changePct) < 100, `${item.name} changePct`)
+  }
 })
 
-test('parsePush2Quotes 容错：缺字段丢弃、非数字转为 null', () => {
-  const json = {
-    data: { diff: [
-      { f14: '无价', f3: 1 },
-      { f14: '无涨跌', f2: 100 },
-      { f14: '正常', f2: '1,234.56', f3: '-0.5' },
-    ] },
-  }
-  const q = parsePush2Quotes(json)
+test('parseTencentQuotes 容错：缺字段丢弃、非数字丢弃、空串不等于 0', () => {
+  // 涨跌幅在 f[32]：f[0..2]=标志/名称/代码，f[3]=现价，f[4..31]=28 个填充字段，f[32]=涨跌幅
+  const pad = '0~'.repeat(28)
+  const valid = `v_x1="1~正常~002~1234.56~${pad}-1.5~";`
+  const badPrice = `v_x2="1~无价~003~abc~${pad}-1.5~";`     // price 非数字
+  const badPct = `v_x3="1~无涨跌~004~1234.56~${pad}~";`        // f[32] 空（Number('')===0 的陷阱）
+  const q = parseTencentQuotes(valid + badPrice + badPct)
   assert.equal(q.length, 1)
-  assert.deepEqual(q[0], { name: '正常', price: 1234.56, changePct: -0.5 })
+  assert.deepEqual(q[0], { name: '正常', price: 1234.56, changePct: -1.5 })
 })

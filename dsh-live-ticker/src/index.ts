@@ -1,15 +1,15 @@
 /**
  * dsh-live-ticker host 面：
- * 注册同源 JSON 路由，代理东财数据（浏览器不直连跨域）：
+ * 注册同源 JSON 路由，代理行情与新闻（浏览器不直连跨域）：
  *   /live-ticker/news   东财新闻列表（30s 缓存）
- *   /live-ticker/quotes 东财指数行情（3s 缓存）
+ *   /live-ticker/quotes 腾讯指数行情（3s 缓存；push2.eastmoney.com 在 Node 下 TLS 失败，改腾讯）
  * handler 为 Node http 风格 (req, res) -> void | Promise<void>，自行写响应。
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { NewsCache, fetchEfinanceNews } from './news.ts'
-import { fetchQuotesFromEastMoney } from './quotes.ts'
+import { fetchQuotesFromTencent } from './quotes.ts'
 
 export const name = 'dsh-live-ticker'
 export const inject = ['webServer']
@@ -21,7 +21,7 @@ const QUOTES_ROUTE = '/live-ticker/quotes'
 
 export function apply(ctx: Context) {
   const newsCache = new NewsCache(NEWS_CACHE_TTL_MS)
-  let quotesCache: { quotes: ReturnType<typeof fetchQuotesFromEastMoney> extends Promise<infer T> ? T : never; fetchedAt: number } | null = null
+  let quotesCache: { quotes: ReturnType<typeof fetchQuotesFromTencent> extends Promise<infer T> ? T : never; fetchedAt: number } | null = null
   let registered = false
 
   function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -75,7 +75,7 @@ export function apply(ctx: Context) {
           return
         }
         try {
-          const quotes = await fetchQuotesFromEastMoney()
+          const quotes = await fetchQuotesFromTencent()
           quotesCache = { quotes, fetchedAt: Date.now() }
           sendJson(res, 200, { ok: true, quotes, fetchedAt: quotesCache.fetchedAt })
         } catch (err) {
