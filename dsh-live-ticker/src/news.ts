@@ -13,6 +13,10 @@ export interface NewsItem {
 export interface NewsSnapshot {
   items: NewsItem[]
   fetchedAt: number
+  /**
+   * 由调用方设置：HTTP 路由在缓存过期、抓取失败回退到 last() 时置为 true（仍返回旧数据）；
+   * 本模块 fetchEfinanceNews 始终产出 false。
+   */
   stale: boolean
 }
 
@@ -33,6 +37,7 @@ export function parseEfinanceNews(json: unknown): NewsItem[] {
     if (typeof r.showTime !== 'string' || !r.showTime.trim()) continue
     items.push({
       title: r.title.trim(),
+      // slice 对短于 16 位或非规范字符串不会抛错，只会截取到分钟（安全假设，无行为变化）
       showTime: r.showTime.slice(0, 16),
       url: r.url.trim(),
     })
