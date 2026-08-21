@@ -104,6 +104,11 @@ def disburse(db: Session, request_id, *, transaction_date: date, settlement_rate
         for s in pool_splits:
             pool = s["pool"]
             amt = Decimal(str(s["amount"]))
+            if pool not in _POOL_SOURCE:
+                raise BusinessError("BAD_REQUEST",
+                                    f"非法拆分资金池 {pool}（可选：LEASING 金租/BANK 银行/OWN 自有）", 400)
+            if amt <= 0:
+                raise BusinessError("BAD_REQUEST", "拆分金额必须 > 0", 400)
             _cap._assert_pool_sufficient(db, pr.project_id, pool, amt)
             txns.append(CapitalTransaction(
                 project_id=pr.project_id, contract_id=pr.contract_id,

@@ -242,3 +242,35 @@ def test_fx_diff_split_to_devices_golden(db):
     assert by_dev[d1.id] == Decimal("600.00") and by_dev[d2.id] == Decimal("400.00")
     assert sum(by_dev.values()) == Decimal("1000.00")
     # 幂等：重复结算同发票同流水不再出汇兑（fx:{txn}:{inv} 哨兵）——由超额拦截间接保证，此处直调钩子了 
+
+
+# ------------------------------ 拆分付款对抗用例（审计发现） ------------------------------
+
+def test_disburse_split_invalid_pool_rejected(db):
+    """拆分指定 PREPAY 池（余额充足时）→ 应 400，而非 _POOL_SOURCE KeyError 500。"""
+    p = _project(db)
+    # PREPAY 池挂账 1000（通用记一笔绕过余额校验造数），使余额校验放行、直击 pool 映射
+    capital_service.record_transaction(db, created_by=None, project_id=p.id, source_type="预付",
+                                       direction="IN", amount=Decimal("1000"),
+                                       transaction_date=date(2026, 8, 1),
+                                       pool="PREPAY", idempotency_key=f"seed-pp-{uuid.uuid4().hex[:6]}")
+    pr = _approved_request(db, p, Decimal("1000"))
+    with pytest.raises(BusinessError) as e:
+        svc.disburse(db, pr.id, transaction_date=date(2026, 8, 10),
+                     pool_splits=[{"pool": "PREPAY", "amount": Decimal("1000")}])
+    assert e.value.status_code == 400  # 非法池须 400  bad request
+
+
+def test_disburse_split_nonpositive_amount_rejected(db):
+    """拆分项金额 ≤ 0 → 400（不得生成 0 元流水）。"""
+    p = _project(db)
+    capital_service.record_transaction(db, created_by=None, project_id=p.id, source_type="自有资金",
+                                       direction="IN", amount=Decimal("1000"),
+                                       transaction_date=date(2026, 8, 1),
+                                       pool="OWN", idempotency_key=f"seed-own-{uuid.uuid4().hex[:6]}")
+    pr = _approved_request(db, p, Decimal("1000"))
+    with pytest.raises(BusinessError) as e:
+        svc.disburse(db, pr.id, transaction_date=date(2026, 8, 10),
+                     pool_splits=[{"pool": "OWN", "amount": Decimal("1000")},
+                                  {"pool": "BANK", "amount": Decimal("0")}])
+    assert e.value.status_code == 400
