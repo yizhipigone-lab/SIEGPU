@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // 二期 W11-12：付款三重管控（申请 → 审批 → 登记 → 核销）+ 审批中心。
 // 三区块：审批中心（待审批通过/驳回）/ 付款申请（新增、登记、核销）/ 核销记录。
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import {
-  NButton, NCard, NDataTable, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NModal,
+  NButton, NCard, NCheckbox, NDataTable, NDatePicker, NForm, NFormItem, NInput, NInputNumber, NModal,
   NSelect, NSpace, NTag, useMessage,
 } from 'naive-ui'
 import { api } from '../api/client'
@@ -71,15 +71,44 @@ async function doReject() {
 
 // ---- 登记付款 ----
 const disburseTarget = ref<any | null>(null)
-const disburseForm = reactive({ transaction_date: '', settlement_rate: null as number | null })
+const disburseForm = reactive({
+  transaction_date: '', settlement_rate: null as number | null,
+  // 四期 W4：按资金池拆分支付（金租/银行/自有各出多少；Σ 须等于实付现金）
+  split: false,
+  splitLeasing: null as number | null, splitBank: null as number | null, splitOwn: null as number | null,
+})
+/** 实付现金 = 申请额 − 预付款冲抵 */
+const cashOf = (r: any) => Number(r.amount) - Number(r.prepayment_offset || 0)
+const splitSum = computed(() =>
+  (disburseForm.splitLeasing || 0) + (disburseForm.splitBank || 0) + (disburseForm.splitOwn || 0))
+const splitMismatch = computed(() =>
+  !!(disburseForm.split && disburseTarget.value && splitSum.value !== cashOf(disburseTarget.value)))
 async function doDisburse() {
   if (!disburseForm.transaction_date) { msg.warning('请选择付款日期'); return }
+  if (splitMismatch.value) {
+    msg.warning(`拆分合计 ${money(splitSum.value)} 须等于实付现金 ${money(cashOf(disburseTarget.value))}`)
+    return
+  }
   try {
-    await api.post(`/payment-requests/${disburseTarget.value.id}/disburse`, {
+    const payload: any = {
       transaction_date: disburseForm.transaction_date,
       settlement_rate: disburseForm.settlement_rate,
-    })
+    }
+    if (disburseForm.split) {
+      const splits = [
+        { pool: 'LEASING', amount: disburseForm.splitLeasing },
+        { pool: 'BANK', amount: disburseForm.splitBank },
+        { pool: 'OWN', amount: disburseForm.splitOwn },
+      ].filter((s) => s.amount && s.amount > 0)
+      if (!splits.length) { msg.warning('拆分支付至少填一个池的金额'); return }
+      payload.pool_splits = splits
+    }
+    await api.post(`/payment-requests/${disburseTarget.value.id}/disburse`, payload)
     disburseTarget.value = null
+    Object.assign(disburseForm, {
+      transaction_date: '', settlement_rate: null,
+      split: false, splitLeasing: null, splitBank: null, splitOwn: null,
+    })
     msg.success('已登记付款（落资金流水）'); await refresh()
   } catch (e: any) { msg.error(errMsg(e)) }
 }
@@ -192,14 +221,26 @@ const apprStatusType = (s: string) => ({ 已通过: 'success', 已驳回: 'error
     </n-modal>
 
     <!-- 登记付款 -->
-    <n-modal :show="disburseTarget !== null" preset="card" title="登记付款" style="width:400px" @update:show="(v: boolean) => !v && (disburseTarget = null)">
+    <n-modal :show="disburseTarget !== null" preset="card" title="登记付款" style="width:440px" @update:show="(v: boolean) => !v && (disburseTarget = null)">
       <n-form label-placement="left" :label-width="110">
         <n-form-item label="付款日期" required>
           <n-date-picker type="date" style="width:100%" :value="ymdToTs(disburseForm.transaction_date)" @update:value="(ts: number | null) => disburseForm.transaction_date = tsToYmd(ts)" />
         </n-form-item>
         <n-form-item label="结算汇率"><n-input-number v-model:value="disburseForm.settlement_rate" :min="0" :precision="8" style="width:100%" placeholder="外币付款才填" /></n-form-item>
+        <n-form-item label="拆分支付">
+          <n-checkbox v-model:checked="disburseForm.split">按资金池拆分（金租/银行/自有各出多少）</n-checkbox>
+        </n-form-item>
+        <template v-if="disburseForm.split">
+          <n-form-item label="金租池出"><n-input-number v-model:value="disburseForm.splitLeasing" :min="0" style="width:100%" placeholder="金租池支付额" /></n-form-item>
+          <n-form-item label="银行池出"><n-input-number v-model:value="disburseForm.splitBank" :min="0" style="width:100%" placeholder="银行池支付额" /></n-form-item>
+          <n-form-item label="自有池出"><n-input-number v-model:value="disburseForm.splitOwn" :min="0" style="width:100%" placeholder="自有池支付额" /></n-form-item>
+          <div class="muted tiny" style="margin:-4px 0 8px 110px">
+            实付现金 {{ money(cashOf(disburseTarget)) }}（申请额 − 冲抵）· 拆分合计 {{ money(splitSum) }}
+            <span v-if="splitMismatch" style="color:#D97706">合计须等于实付现金</span>
+          </div>
+        </template>
       </n-form>
-      <template #footer><n-space justify="end"><n-button @click="disburseTarget = null">取消</n-button><n-button type="primary" @click="doDisburse">登记</n-button></n-space></template>
+      <template #footer><n-space justify="end"><n-button @click="disburseTarget = null">取消</n-button><n-button type="primary" :disabled="splitMismatch" @click="doDisburse">登记</n-button></n-space></template>
     </n-modal>
 
     <!-- 核销 -->
