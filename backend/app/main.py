@@ -55,6 +55,8 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 滑动续期：允许浏览器 JS 读取新令牌响应头
+    expose_headers=["X-Token-Refresh"],
 )
 
 

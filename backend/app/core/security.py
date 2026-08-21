@@ -35,3 +35,15 @@ def decode_token(token: str) -> dict:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algo])
     except JWTError as e:
         raise ValueError("invalid token") from e
+
+
+def should_refresh(payload: dict) -> bool:
+    """滑动续期：剩余有效期不足总时长一半时，由 get_current_user 在响应头里发新令牌。
+
+    效果：只要持续在用就永不过期；闲置超过 access_token_expire_minutes 才需重新登录。
+    """
+    exp = payload.get("exp")
+    if not exp:
+        return False
+    remaining = float(exp) - datetime.now(timezone.utc).timestamp()
+    return remaining < settings.access_token_expire_minutes * 60 / 2

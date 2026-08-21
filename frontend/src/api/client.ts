@@ -10,7 +10,12 @@ http.interceptors.request.use((config) => {
 
 // W8：不在拦截器里脱壳——保留 AxiosResponse 类型，调用方 .data 取数，类型不再"说谎"
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // 滑动续期：后端在令牌剩余有效期过半时下发新令牌，静默替换
+    const newToken = response.headers['x-token-refresh']
+    if (newToken) localStorage.setItem('token', newToken)
+    return response
+  },
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token')

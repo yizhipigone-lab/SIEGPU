@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://siegpu:pw@db:5432/siegpu"
     jwt_secret: str = "change-me-in-prod"
     jwt_algo: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 1440
     vat_default: str = "0.13"
     upload_dir: str = "./uploads"
 
