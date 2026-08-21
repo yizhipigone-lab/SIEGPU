@@ -140,3 +140,40 @@ def test_orphans_and_unlinked_orders(db):
 
 def test_project_not_found_returns_none(db):
     assert svc.project_relationships(db, uuid.uuid4()) is None
+
+def test_tree_includes_invoices_and_confirmations(db):
+    """P1：销售合同节点挂发票（RECEIVABLE）；销售订单节点挂对账单。"""
+    from datetime import date as _date
+
+    from app.models.billing import Billing, Invoice
+    from app.models.service_confirmation import ServiceConfirmation
+
+    proj = _proj(db); cust, sup = _party(db); em = _em(db)
+    sc = _contract(db, proj, cust.id, "SALES")
+    so = SalesOrder(project_id=proj.id, contract_id=sc.id, equipment_model_id=em.id,
+                    quantity=1, monthly_rent_per_unit=D("100"), total_monthly_rent=D("100"))
+    db.add(so); db.flush()
+    inv = Invoice(contract_id=sc.id, direction="RECEIVABLE", amount=D("1130"),
+                  amount_ex_tax=D("1000"), tax_amount=D("130"), invoice_no="INV-TREE-1",
+                  issue_date=_date(2026, 9, 20))
+    # 采购发票不应出现在销售合同节点
+    pc = _contract(db, proj, sup.id, "PURCHASE", parent=sc)
+    pinv = Invoice(contract_id=pc.id, direction="PAYABLE", amount=D("565"),
+                   amount_ex_tax=D("500"), tax_amount=D("65"), invoice_no="INV-TREE-P")
+    db.add_all([inv, pinv]); db.flush()
+    bill = Billing(project_id=proj.id, contract_id=sc.id, period_index=1, period_label="2026-09",
+                   billing_date=_date(2026, 9, 30), days_in_period=30, amount=D("113"),
+                   amount_ex_tax=D("100"), tax_amount=D("13"), sales_order_id=so.id)
+    db.add(bill); db.flush()
+    conf = ServiceConfirmation(billing_id=bill.id, sales_order_id=so.id, period_label="2026-09",
+                               status="已确认")
+    db.add(conf); db.flush()
+
+    tree = svc.project_relationships(db, proj.id)
+    scn = tree["sales_contracts"][0]
+    assert [i["invoice_no"] for i in scn["invoices"]] == ["INV-TREE-1"]
+    assert scn["invoices"][0]["status"] == "待开"
+    assert scn["invoices"][0]["amount_ex_tax"] == 1000.0
+    son = scn["sales_orders"][0]
+    assert [c["status"] for c in son["confirmations"]] == ["已确认"]
+    assert son["confirmations"][0]["period_label"] == "2026-09"

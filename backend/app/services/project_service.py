@@ -76,12 +76,14 @@ def project_relationships(db: Session, project_id) -> dict | None:
     """
     from sqlalchemy import select
 
+    from app.models.billing import Invoice
     from app.models.delivery import Order
     from app.models.device import Device
     from app.models.leasing import LeasingProcess
     from app.models.master import Customer, Supplier
     from app.models.project import Contract
     from app.models.sales_order import SalesBatchDevice, SalesOrder
+    from app.models.service_confirmation import ServiceConfirmation
 
     p = db.get(Project, project_id)
     if p is None:
@@ -102,6 +104,16 @@ def project_relationships(db: Session, project_id) -> dict | None:
     leasing = db.execute(
         select(LeasingProcess).where(LeasingProcess.project_id == project_id)
     ).scalars().all()
+
+    # P1：发票（挂合同）与对账单（挂销售订单）——血缘树的资金/确认节点
+    contract_ids = [c.id for c in contracts]
+    invoices = db.execute(
+        select(Invoice).where(Invoice.contract_id.in_(contract_ids))
+    ).scalars().all() if contract_ids else []
+    sales_order_ids = [so.id for so in sales_orders]
+    confirmations = db.execute(
+        select(ServiceConfirmation).where(ServiceConfirmation.sales_order_id.in_(sales_order_ids))
+    ).scalars().all() if sales_order_ids else []
 
     # 往来单位名称（合同 party_type=supplier/customer 快照解析）
     party_ids = {c.party_id for c in contracts} | {lp.supplier_id for lp in leasing}
@@ -184,7 +196,19 @@ def project_relationships(db: Session, project_id) -> dict | None:
                 "quantity": so.quantity,
                 "total_monthly_rent": _f(so.total_monthly_rent),
                 "device_count": batch_dev_count.get(so.id, 0),
+                "confirmations": [{
+                    "id": str(cf.id), "period_label": cf.period_label,
+                    "status": cf.status,
+                    "confirmed_at": cf.confirmed_at.isoformat() if cf.confirmed_at else None,
+                } for cf in confirmations if cf.sales_order_id == so.id],
             } for so in sales_orders if so.contract_id == c.id],
+            "invoices": [{
+                "id": str(iv.id), "invoice_no": iv.invoice_no,
+                "amount": _f(iv.amount), "amount_ex_tax": _f(iv.amount_ex_tax),
+                "status": iv.status,
+                "issue_date": iv.issue_date.isoformat() if iv.issue_date else None,
+                "paid_date": iv.paid_date.isoformat() if iv.paid_date else None,
+            } for iv in invoices if iv.contract_id == c.id and iv.direction == "RECEIVABLE"],
             "purchase_contracts": [
                 _purchase_contract_node(pc) for pc in contracts
                 if pc.type == "PURCHASE" and pc.parent_contract_id == c.id

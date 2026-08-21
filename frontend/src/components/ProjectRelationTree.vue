@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NCard, NEmpty, NSpin, NTag, useMessage } from 'naive-ui'
-import { ChevronDown, ChevronRight } from 'lucide-vue-next'
+import {
+  NButton, NCard, NEmpty, NForm, NFormItem, NInputNumber, NModal, NSelect, NSpin, NTag, useMessage,
+} from 'naive-ui'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-vue-next'
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
 import { money, statusTagType } from '../utils/format'
 
 /**
- * 项目血缘树：项目 → 销售合同 →（销售订单；参照的采购合同 → 采购订单 → 预付款 + 单台设备穿透）；
- * 项目 → 金租申请。数据来自 GET /projects/{id}/relationships（后端一次聚合）。
+ * 项目血缘树：项目 → 销售合同 →（销售订单+对账单；发票；参照的采购合同 → 采购订单 → 预付款 + 单台设备穿透）；
+ * 项目 → 金租申请（可从本卡直接发起，预填项目）。数据来自 GET /projects/{id}/relationships（后端一次聚合）。
  * 预付款口径：devices 单源按采购订单聚合 —— 已付挂账 / 部分核销 / 已回核销。
  */
 const props = defineProps<{ projectId: string }>()
@@ -44,6 +46,51 @@ function toggle(orderId: string) { expanded.value[orderId] = !expanded.value[ord
 function go(path: string, query: Record<string, string> = {}) {
   router.push({ path, query: { project_id: props.projectId, ...query } })
 }
+
+// —— 发起金租申请（预填本项目，资金供应商远程下拉） ——
+const showLease = ref(false)
+const fundSuppliers = ref<{ label: string; value: string }[]>([])
+const leaseForm = reactive({
+  supplier_id: null as string | null,
+  total_amount: null as number | null,
+  annual_rate: null as number | null,  // 百分数输入（4 = 4%），提交 ÷100
+  term_periods: 12,
+  payment_freq: '月',
+  repayment_method: '等额本息',
+})
+const FREQ_OPTS = ['月', '季', '半年'].map((v) => ({ label: v, value: v }))
+const REPAY_OPTS = ['等额本息', '等额本金'].map((v) => ({ label: v, value: v }))
+
+async function openLease() {
+  if (!fundSuppliers.value.length) {
+    try {
+      const { data } = await http.get('/suppliers')
+      fundSuppliers.value = (data.items || [])
+        .filter((s: any) => s.type === '资金供应商')
+        .map((s: any) => ({ label: s.name, value: s.id }))
+    } catch { /* 下拉为空不阻断，提交时后端校验 */ }
+  }
+  showLease.value = true
+}
+
+async function submitLease() {
+  if (!leaseForm.supplier_id || !leaseForm.total_amount) { msg.warning('请选金租机构并填写申请金额'); return }
+  try {
+    await http.post('/leasing/processes', {
+      project_id: props.projectId,
+      supplier_id: leaseForm.supplier_id,
+      total_amount: leaseForm.total_amount,
+      annual_rate: leaseForm.annual_rate != null ? leaseForm.annual_rate / 100 : null,
+      term_periods: leaseForm.term_periods,
+      payment_freq: leaseForm.payment_freq,
+      repayment_method: leaseForm.repayment_method,
+    })
+    msg.success('金租申请已发起')
+    showLease.value = false
+    Object.assign(leaseForm, { supplier_id: null, total_amount: null, annual_rate: null })
+    await load()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
 </script>
 
 <template>
@@ -52,7 +99,13 @@ function go(path: string, query: Record<string, string> = {}) {
       <!-- 金租申请（项目级，leasing_processes.project_id 强制挂钩） -->
       <n-card size="small" style="margin-bottom:12px;border-left:4px solid #7C3AED">
         <template #header>
-          <span style="font-weight:600">金租申请（{{ tree.leasing_processes.length }}）</span>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:600">金租申请（{{ tree.leasing_processes.length }}）</span>
+            <n-button size="tiny" type="primary" quaternary @click="openLease">
+              <template #icon><Plus :size="14" /></template>
+              发起金租申请
+            </n-button>
+          </div>
         </template>
         <div v-if="tree.leasing_processes.length === 0" style="color:#94A3B8;font-size:13px">
           暂无金租申请
@@ -87,7 +140,7 @@ function go(path: string, query: Record<string, string> = {}) {
           </div>
         </template>
 
-        <!-- 销售订单 -->
+        <!-- 销售订单（含对账单状态） -->
         <div style="margin-left:16px;margin-bottom:8px">
           <div style="font-size:12px;color:#94A3B8;margin-bottom:4px">销售订单（{{ sc.sales_orders.length }}）</div>
           <div v-if="sc.sales_orders.length === 0" style="color:#CBD5E1;font-size:13px">暂无</div>
@@ -102,6 +155,26 @@ function go(path: string, query: Record<string, string> = {}) {
             <span v-if="so.is_batch" style="color:#94A3B8;font-size:12px">已挂 {{ so.device_count }} 台</span>
             <span class="num" style="color:#64748B;font-size:12px">月租 {{ money(so.total_monthly_rent) }}</span>
             <n-tag size="tiny" :type="statusTagType(so.status) as any">{{ so.status }}</n-tag>
+            <n-tag
+              v-for="cf in so.confirmations" :key="cf.id" size="tiny"
+              :type="statusTagType(cf.status) as any"
+              @click.stop="go('/confirmations')"
+            >对账单 {{ cf.period_label }} {{ cf.status }}</n-tag>
+          </div>
+        </div>
+
+        <!-- 发票（销售方向，期2 起开票即确认收入） -->
+        <div v-if="sc.invoices && sc.invoices.length" style="margin-left:16px;margin-bottom:8px">
+          <div style="font-size:12px;color:#94A3B8;margin-bottom:4px">发票（{{ sc.invoices.length }}）</div>
+          <div
+            v-for="iv in sc.invoices" :key="iv.id"
+            style="display:flex;align-items:center;gap:10px;padding:4px 0;cursor:pointer"
+            @click="go('/invoices')"
+          >
+            <span>{{ iv.invoice_no || '未编号' }}</span>
+            <span class="num" style="color:#64748B;font-size:12px">含税 {{ money(iv.amount) }}</span>
+            <n-tag size="tiny" :type="statusTagType(iv.status) as any">{{ iv.status }}</n-tag>
+            <span v-if="iv.paid_date" style="color:#94A3B8;font-size:12px">回款 {{ iv.paid_date }}</span>
           </div>
         </div>
 
@@ -196,6 +269,34 @@ function go(path: string, query: Record<string, string> = {}) {
         description="暂无业务对象：先录入销售合同，再参照创建采购合同"
         style="padding:24px 0"
       />
+
+      <!-- 发起金租申请（预填本项目） -->
+      <n-modal v-model:show="showLease" preset="card" title="发起金租申请" style="width:440px;max-width:94vw">
+        <n-form label-placement="left" :label-width="90">
+          <n-form-item label="金租机构" required>
+            <n-select v-model:value="leaseForm.supplier_id" :options="fundSuppliers" filterable
+                      placeholder="选择资金供应商" data-testid="lease-supplier" />
+          </n-form-item>
+          <n-form-item label="申请金额" required>
+            <n-input-number v-model:value="leaseForm.total_amount" :min="0" :show-button="false"
+                            style="width:100%" placeholder="元" data-testid="lease-amount" />
+          </n-form-item>
+          <n-form-item label="年利率%">
+            <n-input-number v-model:value="leaseForm.annual_rate" :min="0" :precision="2" style="width:100%" placeholder="如 4 = 4%" />
+          </n-form-item>
+          <n-form-item label="期数">
+            <n-input-number v-model:value="leaseForm.term_periods" :min="1" style="width:100%" />
+          </n-form-item>
+          <n-form-item label="还款频率"><n-select v-model:value="leaseForm.payment_freq" :options="FREQ_OPTS" /></n-form-item>
+          <n-form-item label="还款方式"><n-select v-model:value="leaseForm.repayment_method" :options="REPAY_OPTS" /></n-form-item>
+        </n-form>
+        <template #footer>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <n-button @click="showLease = false">取消</n-button>
+            <n-button type="primary" data-testid="lease-submit" @click="submitLease">提交申请</n-button>
+          </div>
+        </template>
+      </n-modal>
     </div>
   </n-spin>
 </template>

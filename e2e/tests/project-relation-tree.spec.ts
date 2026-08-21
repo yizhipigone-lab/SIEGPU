@@ -127,3 +127,45 @@ test('项目血缘树：API 结构 + 工作台卡片树（批次汇总 + 单台�
   await expect(scCard.getByText(sn)).toBeVisible()
   await expect(scCard.getByText(devSns[1])).toBeVisible()
 })
+
+test('P1：工作台直接发起金租申请（预填项目）→ 卡片树实时出现', async ({ page, request }) => {
+  const headers = await apiLogin(request)
+  const RUN2 = `${RUN}lz`
+  const fund = await post(request, headers, '/suppliers',
+    { name: `E2E金租-发起-${RUN2}`, type: '资金供应商' }, '金租机构')
+  const proj = await post(request, headers, '/projects', { name: `E2E-发起-${RUN2}` }, '立项')
+
+  await uiLogin(page)
+  await page.goto(`/projects/${proj.id}/workspace`)
+  await expect(page.getByText('业务对象关联')).toBeVisible({ timeout: 10000 })
+  const lpCard = page.locator('.n-card', { hasText: '金租申请（0）' })
+  await expect(lpCard).toBeVisible()
+
+  await page.getByRole('button', { name: '发起金租申请' }).click()
+  const modal = page.locator('.n-modal', { hasText: '发起金租申请' })
+  await modal.waitFor()
+  // naive-ui 下拉（虚拟滚动只渲染可见窗口）：展开 → 键入名称收窄 → 点唯一选项
+  const leaseSel = modal.getByTestId('lease-supplier').locator('.n-base-selection')
+  await leaseSel.click()
+  await leaseSel.locator('input').fill(`E2E金租-发起-${RUN2}`)
+  await page.waitForTimeout(400)
+  const opt = page.locator('.n-base-select-option', { hasText: `E2E金租-发起-${RUN2}` })
+    .filter({ visible: true }).first()
+  await opt.waitFor({ state: 'visible', timeout: 15000 })
+  await opt.click()
+  await modal.getByTestId('lease-amount').locator('input').fill('800000')
+  await modal.getByTestId('lease-submit').click()
+  await expect(modal).toBeHidden({ timeout: 15000 })
+
+  // 卡片树刷新：计数翻 1 + 机构名可见
+  await expect(page.locator('.n-card', { hasText: '金租申请（1）' })).toBeVisible({ timeout: 8000 })
+  await expect(page.locator('.n-card', { hasText: '金租申请' }).getByText(`E2E金租-发起-${RUN2}`)).toBeVisible()
+
+  // API 追值：申请确实挂在项目下
+  const procs = await (await request.get(`${api}/leasing/processes`, {
+    headers, params: { project_id: proj.id },
+  })).json()
+  expect(procs.items.length).toBe(1)
+  expect(Number(procs.items[0].total_amount)).toBe(800000)
+  expect(procs.items[0].supplier_id).toBe(fund.id)
+})
