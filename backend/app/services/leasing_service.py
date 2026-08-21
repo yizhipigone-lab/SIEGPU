@@ -74,7 +74,10 @@ def get_process(db: Session, process_id):
     nodes = db.execute(
         select(LeasingNode).where(LeasingNode.process_id == process_id).order_by(LeasingNode.seq)
     ).scalars().all()
-    return proc, nodes
+    # 加载关联的项目和供应商名称
+    proj = db.get(Project, proc.project_id)
+    sup = db.get(Supplier, proc.supplier_id)
+    return proc, nodes, proj, sup
 
 
 def advance_node(db: Session, *, node_id, status, actual_date=None, stuck_reason=None) -> LeasingNode:
@@ -89,6 +92,9 @@ def advance_node(db: Session, *, node_id, status, actual_date=None, stuck_reason
         node.actual_date = actual_date
     if status == "卡住" and stuck_reason:
         node.stuck_reason = stuck_reason
+    # 取消卡住时清空原因
+    if status == "进行中" and node.stuck_reason is not None:
+        node.stuck_reason = None
     db.flush()
     return node
 
@@ -108,12 +114,12 @@ def disburse(db: Session, *, process_id, actual_disbursement_amount: Decimal,
     if not (proc.annual_rate is not None and proc.term_periods and proc.payment_freq and proc.repayment_method):
         raise BusinessError("BAD_REQUEST", "缺少 利率/期数/频率/方式，无法生成还款计划", 422)
 
-    # 1) 放款入金（NF1 幂等键）
+    # 1) 放款入金（NF1 幂等键；四期 W4：入金租池 pool=LEASING）
     txn = CapitalTransaction(
         project_id=proc.project_id, source_type="金租融资", direction="IN",
         amount=actual_disbursement_amount, transaction_date=disbursement_date,
         leasing_process_id=proc.id, category="放款", idempotency_key=f"disburse:{proc.id}",
-        note=note, created_by=disbursed_by,
+        note=note, created_by=disbursed_by, pool="LEASING",
     )
     db.add(txn)
 
@@ -169,11 +175,12 @@ def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal,
         raise BusinessError("BAD_REQUEST", "缺少 利率/期数/频率/方式，无法生成还款计划", 422)
     acc = db.get(AcceptanceRecord, acceptance_id)
     if not acc or acc.deleted_at is not None:
-        raise BusinessError("NOT_FOUND", "采购验收不存在", 404)
-    if acc.acceptance_type != "采购验收" or acc.status != "已通过":
-        raise BusinessError("PRECONDITION", "该验收不是已通过的采购验收", 409)
+        raise BusinessError("NOT_FOUND", "验收记录不存在", 404)
+    # 四期 W4 期3：放款依据放宽为「已通过的采购验收 或 销售验收」（硬流转 #5）
+    if acc.acceptance_type not in ("采购验收", "销售验收") or acc.status != "已通过":
+        raise BusinessError("PRECONDITION", "放款依据必须是已通过的采购验收或销售验收", 409)
     if acc.project_id != proc.project_id:
-        raise BusinessError("PRECONDITION", "该采购验收不属于本项目", 409)
+        raise BusinessError("PRECONDITION", "该验收不属于本项目", 409)
 
     d = LeasingDisbursement(process_id=process_id, acceptance_id=acceptance_id, amount=amount,
                             disbursement_date=disbursement_date, note=note, created_by=created_by)
@@ -191,7 +198,8 @@ def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal,
     txn = CapitalTransaction(project_id=proc.project_id, source_type="金租融资", direction="IN",
                              amount=amount, transaction_date=disbursement_date,
                              leasing_process_id=proc.id, category="放款",
-                             idempotency_key=f"disburse:{d.id}", note=note, created_by=created_by)
+                             idempotency_key=f"disburse:{d.id}", note=note, created_by=created_by,
+                             pool="LEASING")
     db.add(txn)
 
     from app.services import funding_service as fs

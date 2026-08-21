@@ -187,6 +187,11 @@ def test_confirm_upload_writes_audit(db):
     b = bsvc.generate_billing(db, order_id=o.id, contract_id=ct.id, period_index=1,
                                 billing_date=date(2026, 7, 31), created_by=u.id)
     db.flush()
+    # 四期 W4 期3 硬流转#3：建对账单（确认单）前须有已通过的销售验收
+    from app.services import acceptance_service as asvc
+    _ar = asvc.create_acceptance(db, project_id=p.id, acceptance_type="销售验收", sales_order_id=so.id)
+    asvc.approve_acceptance(db, _ar, approved_by=u.id)
+    db.flush()
     sc = csvc2.create_confirmation(db, billing_id=b.id, sales_order_id=so.id,
                                     period_label="2026-07", created_by=u.id)
     db.flush()

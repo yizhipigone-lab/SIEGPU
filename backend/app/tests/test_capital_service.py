@@ -128,3 +128,96 @@ def test_amount_must_be_positive(db):
     with pytest.raises(IntegrityError):
         svc.record_transaction(db, created_by=u.id, project_id=p.id, source_type="自有资金",
                                direction="IN", amount=Decimal("-1"), transaction_date=date(2026, 1, 1))
+
+
+# ---------------- 四期 W4：资金池分池 ----------------
+
+def test_bank_loan_and_repay(db):
+    """记银行借款→银行池↑；还银行→银行池↓；超额还银行被拦。"""
+    u = _user(db); p = _project(db)
+    svc.record_bank_loan(db, project_id=p.id, amount=Decimal("5000000"),
+                         transaction_date=date(2026, 1, 1), created_by=u.id)
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("5000000")
+    svc.repay_bank(db, project_id=p.id, amount=Decimal("2000000"),
+                   transaction_date=date(2026, 2, 1), created_by=u.id)
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("3000000")
+    # 超额还银行 → 拦
+    with pytest.raises(BusinessError):
+        svc.repay_bank(db, project_id=p.id, amount=Decimal("99999999"),
+                       transaction_date=date(2026, 3, 1), created_by=u.id)
+
+
+def test_prepayment_pool_flow(db):
+    """预付(银行池出钱)→挂账池↑；退回→挂账池↓+现金回池↑；核销→挂账池↓。余额不足拦截。"""
+    u = _user(db); p = _project(db)
+    svc.record_bank_loan(db, project_id=p.id, amount=Decimal("1000000"),
+                         transaction_date=date(2026, 1, 1), created_by=u.id)
+    # 预付 40 万：银行池 100→60，挂账池 0→40
+    svc.record_prepayment(db, project_id=p.id, amount=Decimal("400000"),
+                          transaction_date=date(2026, 1, 5), created_by=u.id, from_pool="BANK")
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("600000")
+    assert svc.pool_balance(db, p.id, "PREPAY") == Decimal("400000")
+    # 供应商退回 15 万（金租放款后）：挂账池 40→25，银行池 60→75
+    svc.refund_prepayment(db, project_id=p.id, amount=Decimal("150000"),
+                          transaction_date=date(2026, 2, 1), created_by=u.id, to_pool="BANK")
+    assert svc.pool_balance(db, p.id, "PREPAY") == Decimal("250000")
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("750000")
+    # 拿发票核销 20 万：挂账池 25→5（不涉现金）
+    svc.offset_prepayment(db, project_id=p.id, amount=Decimal("200000"),
+                          transaction_date=date(2026, 2, 10), created_by=u.id)
+    assert svc.pool_balance(db, p.id, "PREPAY") == Decimal("50000")
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("750000")  # 核销不动现金池
+    # 挂账余额不足核销 → 拦
+    with pytest.raises(BusinessError):
+        svc.offset_prepayment(db, project_id=p.id, amount=Decimal("999999"),
+                              transaction_date=date(2026, 3, 1), created_by=u.id)
+
+
+def test_prepay_from_pool_cannot_be_prepay(db):
+    """预付不能从预付款池支出（防呆）。"""
+    u = _user(db); p = _project(db)
+    with pytest.raises(BusinessError):
+        svc.record_prepayment(db, project_id=p.id, amount=Decimal("1"),
+                              transaction_date=date(2026, 1, 1), created_by=u.id, from_pool="PREPAY")
+
+
+def test_pools_by_project_and_summary(db):
+    """pools_by_project 返回 4 池；pool_summary.by_pool 含 4 池 net。"""
+    u = _user(db); p = _project(db)
+    svc.record_bank_loan(db, project_id=p.id, amount=Decimal("1000000"),
+                         transaction_date=date(2026, 1, 1), created_by=u.id)
+    svc.record_prepayment(db, project_id=p.id, amount=Decimal("300000"),
+                          transaction_date=date(2026, 1, 2), created_by=u.id, from_pool="BANK")
+    pools = svc.pools_by_project(db, p.id)
+    assert pools["BANK"] == Decimal("700000")
+    assert pools["PREPAY"] == Decimal("300000")
+    assert pools["LEASING"] == Decimal("0")
+    s = svc.pool_summary(db)
+    assert s["by_pool"]["BANK"]["net"] == Decimal("700000")
+    assert s["by_pool"]["PREPAY"]["net"] == Decimal("300000")
+
+
+def test_leasing_disburse_lands_in_leasing_pool(db):
+    """金租放款流水入金租池（pool=LEASING）。"""
+    from datetime import date as _date
+    from app.models.leasing import LeasingProcess
+    from app.models.master import Supplier
+    from app.services import leasing_service as lsvc
+    u = _user(db); p = _project(db)
+    sup = Supplier(name="金租A", type="资金供应商"); db.add(sup); db.flush()
+    proc = lsvc.create_process(db, project_id=p.id, supplier_id=sup.id, total_amount=Decimal("1000000"),
+                               annual_rate=Decimal("0.05"), term_periods=3, payment_freq="月",
+                               repayment_method="等额本息")
+    lsvc.disburse(db, process_id=proc.id, actual_disbursement_amount=Decimal("1000000"),
+                  disbursement_date=_date(2026, 1, 1), disbursed_by=u.id)
+    assert svc.pool_balance(db, p.id, "LEASING") == Decimal("1000000")
+
+
+def test_reverse_stays_in_same_pool(db):
+    """红冲同池反向：银行池红冲后余额抵消。"""
+    u = _user(db); p = _project(db)
+    t = svc.record_bank_loan(db, project_id=p.id, amount=Decimal("1000"),
+                             transaction_date=date(2026, 1, 1), created_by=u.id)
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("1000")
+    svc.reverse_transaction(db, txn_id=t.id, reversed_by=u.id)
+    assert svc.pool_balance(db, p.id, "BANK") == Decimal("0")

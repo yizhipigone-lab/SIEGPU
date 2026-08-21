@@ -73,10 +73,15 @@ def create_request(db: Session, *, project_id, amount: Decimal, contract_id=None
 
 # ------------------------------ 登记（审批通过 → 落资金流水） ------------------------------
 
+# 四期 W4：付款资金池 → source_type 映射（金租池支出不再被置换引擎当作待置换桥资）
+_POOL_SOURCE = {"BANK": "银行流贷", "OWN": "自有资金", "LEASING": "金租融资"}
+
+
 def disburse(db: Session, request_id, *, transaction_date: date, settlement_rate=None,
-             bank_id=None, actor_id=None) -> CapitalTransaction:
+             bank_id=None, actor_id=None, pool_splits=None) -> CapitalTransaction:
     """登记付款：已批准 → 落 capital_transaction（实付现金 = 申请额 − 预付款冲抵额）。
-    冲抵额按设备剩余预付款 FIFO 抵扣（视同结转，写 devices.prepayment_settled_amount 单源）。"""
+    冲抵额按设备剩余预付款 FIFO 抵扣（视同结转，写 devices.prepayment_settled_amount 单源）。
+    四期 W4：pool_splits 给定时按资金池拆分（金租/银行/自有各出多少），逐池生成流水并校验余额。"""
     pr = db.get(PaymentRequest, request_id)
     if not pr or pr.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "付款申请不存在", 404)
@@ -86,19 +91,41 @@ def disburse(db: Session, request_id, *, transaction_date: date, settlement_rate
         raise BusinessError("ILLEGAL_TRANSITION", f"付款申请状态 {pr.status} 不可登记", 409)
 
     cash = pr.amount - pr.prepayment_offset
-    txn = CapitalTransaction(
-        project_id=pr.project_id, contract_id=pr.contract_id,
-        source_type="自有资金", direction=pr.direction,
-        amount=cash, transaction_date=transaction_date, bank_id=bank_id,
-        category="付款" if pr.direction == "OUT" else "收款",
-        currency_code=pr.currency_code, settlement_rate=settlement_rate,
-        base_amount=(to_base(pr.amount, settlement_rate)
-                     if pr.currency_code and settlement_rate else None),
-        note=f"付款申请 {pr.id}" + (f"；预付款冲抵 {pr.prepayment_offset}" if pr.prepayment_offset > 0 else ""),
-        idempotency_key=f"payreq:{pr.id}", created_by=actor_id,
-    )
-    db.add(txn)
+    base_amount = (to_base(pr.amount, settlement_rate) if pr.currency_code and settlement_rate else None)
+    note = f"付款申请 {pr.id}" + (f"；预付款冲抵 {pr.prepayment_offset}" if pr.prepayment_offset > 0 else "")
+
+    from app.services import capital_service as _cap
+    txns: list[CapitalTransaction] = []
+    if pool_splits:
+        # 拆分支付：Σ拆分额 须等于实付现金；逐池校验余额并各生成一条流水
+        total_split = sum(Decimal(str(s["amount"])) for s in pool_splits)
+        if total_split != cash:
+            raise BusinessError("BAD_REQUEST", f"拆分合计 {total_split} 须等于实付现金 {cash}", 400)
+        for s in pool_splits:
+            pool = s["pool"]
+            amt = Decimal(str(s["amount"]))
+            _cap._assert_pool_sufficient(db, pr.project_id, pool, amt)
+            txns.append(CapitalTransaction(
+                project_id=pr.project_id, contract_id=pr.contract_id,
+                source_type=_POOL_SOURCE[pool], direction=pr.direction,
+                amount=amt, transaction_date=transaction_date, bank_id=bank_id,
+                category="付款" if pr.direction == "OUT" else "收款",
+                currency_code=pr.currency_code, settlement_rate=settlement_rate,
+                base_amount=base_amount, note=note,
+                idempotency_key=f"payreq:{pr.id}:{pool}", created_by=actor_id, pool=pool))
+    else:
+        txns.append(CapitalTransaction(
+            project_id=pr.project_id, contract_id=pr.contract_id,
+            source_type="自有资金", direction=pr.direction,
+            amount=cash, transaction_date=transaction_date, bank_id=bank_id,
+            category="付款" if pr.direction == "OUT" else "收款",
+            currency_code=pr.currency_code, settlement_rate=settlement_rate,
+            base_amount=base_amount,
+            note=note,
+            idempotency_key=f"payreq:{pr.id}", created_by=actor_id))
+    db.add_all(txns)
     db.flush()
+    txn = txns[0]  # 主流水（pr.capital_transaction_id 指向）
     if pr.prepayment_offset > 0:
         _apply_prepayment_offset(db, pr.project_id, pr.prepayment_offset, actor_id=actor_id)
     pr.status = "已付款"
@@ -108,7 +135,8 @@ def disburse(db: Session, request_id, *, transaction_date: date, settlement_rate
     _audit.log(db, user_id=actor_id, action="CAPITAL_TXN", target_type="capital_transaction",
                target_id=txn.id,
                after_json={"payment_request_id": str(pr.id), "cash": str(cash),
-                           "prepayment_offset": str(pr.prepayment_offset)})
+                           "prepayment_offset": str(pr.prepayment_offset),
+                           "pools": {t.pool: str(t.amount) for t in txns}})
     return txn
 
 

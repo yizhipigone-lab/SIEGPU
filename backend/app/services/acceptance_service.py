@@ -11,6 +11,38 @@ from app.models.acceptance import AcceptanceRecord
 
 logger = logging.getLogger(__name__)
 
+# 设备阶段顺序（与 device_service.DEVICE_STAGES 一致），「在途」起的下标
+_SHIPPED_STAGES = ("在途", "到货", "己方压测", "上架", "客户压测", "点亮验收")
+
+
+def _assert_devices_shipped(db, sales_order_id) -> None:
+    """四期 W4 期3 硬流转#2：销售验收前，销售批次下已挂设备须全部「在途」或更后（已发货）。
+    未挂任何设备的销售订单不强制（无设备可验，保持兼容）。"""
+    from app.models.device import Device
+    from app.models.sales_order import SalesBatchDevice
+    dev_ids = db.execute(
+        select(SalesBatchDevice.device_id).where(
+            SalesBatchDevice.sales_batch_id == sales_order_id,
+            SalesBatchDevice.active.is_(True),
+            SalesBatchDevice.deleted_at.is_(None),
+        )
+    ).scalars().all()
+    if not dev_ids:
+        return  # 未挂设备 → 不强制（兼容非批次/旧路径）
+    not_shipped = db.execute(
+        select(Device.sn).where(
+            Device.id.in_(dev_ids),
+            Device.deleted_at.is_(None),
+            Device.status.notin_(_SHIPPED_STAGES),
+        )
+    ).scalars().all()
+    if not_shipped:
+        raise BusinessError(
+            "PRECONDITION",
+            f"尚有 {len(not_shipped)} 台设备未发货（仍在「在途」之前），不能做销售验收",
+            409,
+        )
+
 
 def create_acceptance(db: Session, *, project_id: uuid.UUID, acceptance_type: str,
                       order_id: uuid.UUID | None = None, sales_order_id: uuid.UUID | None = None,
@@ -22,6 +54,10 @@ def create_acceptance(db: Session, *, project_id: uuid.UUID, acceptance_type: st
         raise BusinessError("VALIDATION_ERROR", "采购验收必须关联采购订单(order_id)", 422)
     if acceptance_type == "销售验收" and not sales_order_id:
         raise BusinessError("VALIDATION_ERROR", "销售验收必须关联销售订单(sales_order_id)", 422)
+
+    # 四期 W4 期3 硬流转#2：在途发货 → 才能销售验收。销售批次已挂设备时，须全部「在途」或更后。
+    if acceptance_type == "销售验收":
+        _assert_devices_shipped(db, sales_order_id)
 
     ar = AcceptanceRecord(
         project_id=project_id, acceptance_type=acceptance_type,

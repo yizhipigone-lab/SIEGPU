@@ -40,6 +40,7 @@ def test_sales_acceptance_shelve_completes_device_stage(db):
                purchase_value=D("10000"), leasing_mode="自有", ownership="表内自有")
     db.add(d); db.flush()
     so_svc.add_to_sales_batch(db, device_id=d.id, sales_batch_id=so.id)
+    d.status = "到货"  # 四期 W4 期3 硬流转#2：销售验收前设备须已发货（在途/到货…）
     db.flush()
     ar = acc.create_acceptance(db, project_id=p.id, acceptance_type="销售验收",
                                sales_order_id=so.id, quantity_accepted=1, shelve=True)
@@ -62,6 +63,7 @@ def test_sales_acceptance_no_shelve_does_nothing(db):
                purchase_value=D("10000"), leasing_mode="自有", ownership="表内自有")
     db.add(d); db.flush()
     so_svc.add_to_sales_batch(db, device_id=d.id, sales_batch_id=so.id)
+    d.status = "到货"  # 期3 硬流转#2：设备须已发货
     db.flush()
     ar = acc.create_acceptance(db, project_id=p.id, acceptance_type="销售验收",
                                sales_order_id=so.id, quantity_accepted=1, shelve=False)

@@ -278,7 +278,7 @@ CREATE INDEX idx_disb_process ON leasing_disbursements(process_id) WHERE deleted
 CREATE TABLE capital_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id),
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('自有资金','银行流贷','金租融资','租金收入','调配','调配归还','还款','归还流贷','归还自有','汇兑损益')),
+    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('自有资金','银行流贷','金租融资','租金收入','调配','调配归还','还款','归还流贷','归还自有','汇兑损益','预付','归还银行')),
     direction VARCHAR(4) NOT NULL CHECK (direction IN ('IN','OUT')),
     amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
     transaction_date DATE NOT NULL,
@@ -298,6 +298,8 @@ CREATE TABLE capital_transactions (
     currency_code VARCHAR(10),
     settlement_rate DECIMAL(18,8),
     base_amount DECIMAL(18,2),
+    -- 四期 W4：资金池分池（迁移 0022；OWN 自有/LEASING 金租/BANK 银行/PREPAY 预付款挂账，默认 OWN）
+    pool VARCHAR(20) NOT NULL DEFAULT 'OWN' CHECK (pool IN ('OWN','LEASING','BANK','PREPAY')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
@@ -308,6 +310,7 @@ CREATE INDEX idx_ct_date ON capital_transactions(transaction_date);
 CREATE INDEX idx_ct_source ON capital_transactions(source_type);
 CREATE INDEX idx_ct_invoice ON capital_transactions(invoice_id);
 CREATE INDEX idx_ct_replaced ON capital_transactions(project_id, is_replaced) WHERE deleted_at IS NULL AND direction = 'OUT';
+CREATE INDEX idx_ct_pool ON capital_transactions(project_id, pool) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_ct_updated BEFORE UPDATE ON capital_transactions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- 资金置换记录（v3.1 新增）
@@ -1129,6 +1132,7 @@ CREATE TABLE revenue_recognitions (
     batch_id UUID REFERENCES orders(id),
     device_id UUID REFERENCES devices(id),
     billing_id UUID REFERENCES billings(id),
+    invoice_id UUID REFERENCES invoices(id),       -- 四期 W4 期2：收入改按开票确认（迁移 0023），发票幂等
     period_label VARCHAR(20) NOT NULL,
     recognition_date DATE NOT NULL,
     amount DECIMAL(18,2) NOT NULL CHECK (amount >= 0),   -- 不含税
@@ -1145,6 +1149,7 @@ CREATE TABLE revenue_recognitions (
     deleted_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX uq_revrec_billing ON revenue_recognitions(billing_id) WHERE deleted_at IS NULL AND billing_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_rr_invoice ON revenue_recognitions(invoice_id) WHERE deleted_at IS NULL AND invoice_id IS NOT NULL;
 CREATE INDEX idx_revrec_project ON revenue_recognitions(project_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX idx_revrec_device ON revenue_recognitions(device_id) WHERE deleted_at IS NULL AND device_id IS NOT NULL;
 CREATE TRIGGER trg_revrec_updated BEFORE UPDATE ON revenue_recognitions FOR EACH ROW EXECUTE FUNCTION set_updated_at();

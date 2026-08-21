@@ -18,6 +18,19 @@ def create_confirmation(db: Session, *, billing_id: uuid.UUID, sales_order_id: u
     if existing:
         raise BusinessError("DUPLICATE", "该计费记录已有确认单", 409)
 
+    # 四期 W4 期3 硬流转#3：销售验收通过 → 才能建客户对账单（确认单）
+    from app.models.acceptance import AcceptanceRecord
+    accepted = db.execute(
+        select(AcceptanceRecord.id).where(
+            AcceptanceRecord.sales_order_id == sales_order_id,
+            AcceptanceRecord.acceptance_type == "销售验收",
+            AcceptanceRecord.status == "已通过",
+            AcceptanceRecord.deleted_at.is_(None),
+        )
+    ).first()
+    if not accepted:
+        raise BusinessError("PRECONDITION", "该销售订单尚未通过销售验收，不能建客户对账单", 409)
+
     sc = ServiceConfirmation(
         billing_id=billing_id, sales_order_id=sales_order_id,
         period_label=period_label, created_by=created_by,

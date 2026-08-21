@@ -34,6 +34,14 @@ def _funder(db, name="某金租"):
     db.add(s); db.flush(); return s
 
 
+def _approve_purchase_acceptance(db, project_id, order_id):
+    """四期 W4 期3 硬流转#1：批次设备推进「在途」前，须先有已通过的采购验收。"""
+    from app.services import acceptance_service as asvc
+    ar = asvc.create_acceptance(db, project_id=project_id, acceptance_type="采购验收", order_id=order_id)
+    asvc.approve_acceptance(db, ar, approved_by=None)
+    return ar
+
+
 def _batch_with_devices(db, p, e, n, threshold=Decimal("50"), leasing_mode="直租"):
     batch = Order(project_id=p.id, is_batch=True, batch_name="B",
                   disbursement_threshold_pct=threshold)
@@ -45,6 +53,7 @@ def _batch_with_devices(db, p, e, n, threshold=Decimal("50"), leasing_mode="直�
         d.batch_id = batch.id
         devs.append(d)
     db.flush()
+    _approve_purchase_acceptance(db, p.id, batch.id)  # 采购验收前置（期3 硬流转#1）
     return batch, devs
 
 

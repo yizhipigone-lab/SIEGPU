@@ -24,9 +24,10 @@ from app.services import leasing_service as svc
 router = APIRouter()
 
 
-def _detail(proc, nodes) -> LeasingProcessDetail:
+def _detail(proc, nodes, project=None, supplier=None) -> LeasingProcessDetail:
     return LeasingProcessDetail(
-        id=proc.id, project_id=proc.project_id, supplier_id=proc.supplier_id,
+        id=proc.id, project_id=proc.project_id, project_name=project.name if project else None,
+        supplier_id=proc.supplier_id, supplier_name=supplier.name if supplier else None,
         total_amount=proc.total_amount, status=proc.status,
         disbursement_date=proc.disbursement_date, plan_generated=proc.plan_generated,
         leasing_mode=proc.leasing_mode, financing_type=proc.financing_type,
@@ -50,14 +51,14 @@ def create_process(payload: LeasingProcessCreate, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
     proc = svc.create_process(db, **payload.model_dump())
     db.commit()
-    _, nodes = svc.get_process(db, proc.id)
-    return _detail(proc, nodes)
+    proc, nodes, proj, sup = svc.get_process(db, proc.id)
+    return _detail(proc, nodes, proj, sup)
 
 
 @router.get("/processes/{process_id}", response_model=LeasingProcessDetail)
 def get_process(process_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    proc, nodes = svc.get_process(db, process_id)
-    return _detail(proc, nodes)
+    proc, nodes, proj, sup = svc.get_process(db, process_id)
+    return _detail(proc, nodes, proj, sup)
 
 
 @router.patch("/nodes/{node_id}")

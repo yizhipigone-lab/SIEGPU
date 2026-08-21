@@ -418,6 +418,25 @@ def _assert_light_rework_safe(db: Session, device_id) -> None:
         )
 
 
+def _assert_purchase_accepted(db: Session, device) -> None:
+    """四期 W4 期3 硬流转#1：推进「在途」前，设备所属采购订单/批次须已有「已通过」的采购验收。
+    无关联订单（order_id/batch_id 皆空，如直接建档）→ 不强制。"""
+    from app.models.acceptance import AcceptanceRecord
+    order_ids = [oid for oid in (device.order_id, device.batch_id) if oid]
+    if not order_ids:
+        return
+    ok = db.execute(
+        select(AcceptanceRecord.id).where(
+            AcceptanceRecord.order_id.in_(order_ids),
+            AcceptanceRecord.acceptance_type == "采购验收",
+            AcceptanceRecord.status == "已通过",
+            AcceptanceRecord.deleted_at.is_(None),
+        )
+    ).first()
+    if not ok:
+        raise BusinessError("PRECONDITION", "该设备所属采购订单尚未通过采购验收，不能登记在途发货", 409)
+
+
 def advance_device_stage(db: Session, *, device_id, stage, status,
                          actual_date=None, attachment_path=None, notes=None,
                          operator_id=None):
@@ -438,6 +457,9 @@ def advance_device_stage(db: Session, *, device_id, stage, status,
     allowed = DEVICE_STAGE_TRANSITIONS.get(row.status, set())
     if status not in allowed:
         raise BusinessError("ILLEGAL_TRANSITION", f"节点 {stage} 不允许 {row.status} → {status}", 409)
+    # 四期 W4 期3 硬流转#1：采购验收通过 → 才能推进「在途」（发货）。无关联订单的设备不强制。
+    if stage == "在途" and status in ("进行中", "已完成"):
+        _assert_purchase_accepted(db, d)
     # D5：点亮验收 已完成→不合格 返工守门（有运营中资产或按台计费 → 必须先红冲/处置）
     if stage == "点亮验收" and row.status == "已完成" and status == "不合格":
         _assert_light_rework_safe(db, d.id)

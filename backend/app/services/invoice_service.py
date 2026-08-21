@@ -12,10 +12,36 @@ from app.utils.reconcile import is_over_contract, q2
 from .contract_service import get_contract_or_404
 
 
+def _assert_statement_confirmed(db: Session, contract_id) -> None:
+    """四期 W4 期3 硬流转#4：销售批次流的合同（已有销售订单）开票前，须存在「已确认」的客户对账单。
+    关联链：confirmation.sales_order_id → sales_order.contract_id == 本合同。
+    无销售订单的合同（一次性/非批次销售）不设对账前置，可直接开票（兼容既有快捷流程）。"""
+    from app.models.sales_order import SalesOrder
+    from app.models.service_confirmation import ServiceConfirmation
+    has_sales_order = db.execute(
+        select(SalesOrder.id).where(SalesOrder.contract_id == contract_id,
+                                    SalesOrder.deleted_at.is_(None)).limit(1)
+    ).first()
+    if not has_sales_order:
+        return  # 非批次销售流：无对账单概念，不设前置
+    ok = db.execute(
+        select(ServiceConfirmation.id)
+        .join(SalesOrder, ServiceConfirmation.sales_order_id == SalesOrder.id)
+        .where(SalesOrder.contract_id == contract_id,
+               ServiceConfirmation.status == "已确认",
+               ServiceConfirmation.deleted_at.is_(None))
+    ).first()
+    if not ok:
+        raise BusinessError("PRECONDITION", "该销售合同尚未有已确认的客户对账单，不能开票", 409)
+
+
 def create_invoice(db: Session, *, contract_id, amount: Decimal, invoice_no=None,
                    issue_date=None, due_date=None, paid_date=None, file_path=None,
                    currency_code=None, invoice_rate=None) -> Invoice:
     c = get_contract_or_404(db, contract_id)
+    # 四期 W4 期3 硬流转#4：销售发票须先「对账单确认」（确认单已确认）才能开票
+    if c.direction == "RECEIVABLE":
+        _assert_statement_confirmed(db, contract_id)
     ex, tax = _split(amount, c.tax_rate)
     # 超开拦截：Σ已有不含税 + 新增不含税 > 合同额 × (1 + tolerance)
     existing = db.execute(
@@ -36,6 +62,9 @@ def create_invoice(db: Session, *, contract_id, amount: Decimal, invoice_no=None
     )
     db.add(inv)
     db.flush()
+    # 四期 W4 期2：开票即驱动收入确认（销售方向）。收入源=开票，不再按计费。
+    from app.services import revenue_recognition_service as _rr
+    _rr.generate_draft_for_invoice(db, inv)
     return inv
 
 

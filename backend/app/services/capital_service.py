@@ -65,6 +65,44 @@ def project_allocatable(db: Session, project_id) -> Decimal:
     return np if np > 0 else Decimal(0)
 
 
+# ---------------- 四期 W4：资金池分池（按 pool 独立记账） ----------------
+
+POOLS = ("OWN", "LEASING", "BANK", "PREPAY")
+POOL_LABELS = {"OWN": "自有资金池", "LEASING": "金租池", "BANK": "银行池", "PREPAY": "预付款池(挂账)"}
+
+
+def pool_balance(db: Session, project_id, pool: str) -> Decimal:
+    """某项目某池余额 = ΣIN − ΣOUT（软删除过滤由 do_orm_execute 事件保证）。PREPAY 池=当前挂账预付额。"""
+    inn, out = Decimal(0), Decimal(0)
+    rows = db.execute(
+        select(CapitalTransaction.direction, func.coalesce(func.sum(CapitalTransaction.amount), 0))
+        .where(CapitalTransaction.project_id == project_id, CapitalTransaction.pool == pool)
+        .group_by(CapitalTransaction.direction)
+    ).all()
+    for d, s in rows:
+        if d == "IN":
+            inn += Decimal(s)
+        else:
+            out += Decimal(s)
+    return inn - out
+
+
+def pools_by_project(db: Session, project_id) -> dict:
+    """某项目 4 池余额：{pool: balance}。"""
+    return {p: pool_balance(db, project_id, p) for p in POOLS}
+
+
+def _assert_pool_sufficient(db: Session, project_id, pool: str, amount: Decimal) -> None:
+    """OUT 前置校验：该池余额须 ≥ 金额（防超额支出/超挂账核销）。"""
+    bal = pool_balance(db, project_id, pool)
+    if amount > bal:
+        raise BusinessError(
+            "INSUFFICIENT_POOL",
+            f"{POOL_LABELS.get(pool, pool)}余额不足：现有 {bal}，需 {amount}",
+            400,
+        )
+
+
 def pool_by_project(db: Session) -> list[dict]:
     """分项目资金视图：净头寸 / 可调余额 / 在途调配 / 近30天收支。"""
     from datetime import date, timedelta
@@ -154,12 +192,31 @@ def pool_summary(db: Session) -> dict:
         {"project_id": k, "in": v["in"], "out": v["out"], "net_position": v["in"] - v["out"]}
         for k, v in per.items()
     ]
+    # 四期 W4：按资金池拆分（全局，跨项目 Σ）
+    pool_rows = db.execute(
+        select(
+            CapitalTransaction.pool,
+            CapitalTransaction.direction,
+            func.coalesce(func.sum(CapitalTransaction.amount), 0),
+        ).group_by(CapitalTransaction.pool, CapitalTransaction.direction)
+    ).all()
+    by_pool: dict[str, dict] = {p: {"label": POOL_LABELS[p], "in": Decimal(0), "out": Decimal(0)} for p in POOLS}
+    for pl, d, s in pool_rows:
+        b = by_pool.setdefault(pl, {"label": POOL_LABELS.get(pl, pl), "in": Decimal(0), "out": Decimal(0)})
+        s = Decimal(s)
+        if d == "IN":
+            b["in"] += s
+        else:
+            b["out"] += s
+    for b in by_pool.values():
+        b["net"] = b["in"] - b["out"]
     return {
         "pool_balance": inn - out,
         "total_in": inn,
         "total_out": out,
         "by_source": by_source,
         "per_project": per_project,
+        "by_pool": by_pool,
     }
 
 
@@ -169,6 +226,8 @@ def record_transaction(db: Session, *, created_by, **kw) -> CapitalTransaction:
     proj = db.get(Project, kw["project_id"])
     if not proj or proj.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "项目不存在", 404)
+    # 注：通用「记一笔」不强制池余额（财务可能要记调整/期初）；池余额硬校验放在专门的支出动作
+    # （付款按池拆分 disburse、预付、还银行 repay_bank）里，用 _assert_pool_sufficient。
     txn = CapitalTransaction(created_by=created_by, **kw)
     db.add(txn)
     db.flush()  # 触发唯一约束等；commit 由 endpoint 负责
@@ -180,6 +239,113 @@ def record_transaction(db: Session, *, created_by, **kw) -> CapitalTransaction:
     if kw.get("project_id"):
         _wf.after_action(db, kw["project_id"])
     return txn
+
+
+# ---------------- 四期 W4：资金池专用动作（记借款/还银行/预付/退回/核销） ----------------
+
+def _log_pool(db, user_id, action, txn, extra=None):
+    from app.services import audit_service as _audit
+    after = {"source_type": txn.source_type, "direction": txn.direction, "pool": txn.pool,
+             "amount": str(txn.amount)}
+    if extra:
+        after.update(extra)
+    _audit.log(db, user_id=user_id, action=action, target_type="capital_transaction",
+               target_id=txn.id, after_json=after)
+
+
+def record_bank_loan(db: Session, *, project_id, amount, transaction_date, created_by,
+                     bank_id=None, note=None, idempotency_key=None) -> CapitalTransaction:
+    """记一笔银行借款 → 银行池 IN（pool=BANK）。"""
+    proj = db.get(Project, project_id)
+    if not proj or proj.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "项目不存在", 404)
+    txn = CapitalTransaction(project_id=project_id, source_type="银行流贷", direction="IN",
+                             amount=amount, transaction_date=transaction_date, bank_id=bank_id,
+                             category="银行借款", note=note, created_by=created_by, pool="BANK",
+                             idempotency_key=idempotency_key or f"bankloan:{uuid.uuid4()}")
+    db.add(txn)
+    db.flush()
+    _log_pool(db, created_by, "CAPITAL_TXN", txn)
+    return txn
+
+
+def repay_bank(db: Session, *, project_id, amount, transaction_date, created_by,
+               bank_id=None, note=None, idempotency_key=None) -> CapitalTransaction:
+    """还银行 → 银行池 OUT（前置校验银行池余额充足）。银行池=持有的银行借款余额，还款即减少。"""
+    amount = Decimal(str(amount))
+    _assert_pool_sufficient(db, project_id, "BANK", amount)
+    txn = CapitalTransaction(project_id=project_id, source_type="归还银行", direction="OUT",
+                             amount=amount, transaction_date=transaction_date, bank_id=bank_id,
+                             category="还银行", note=note, created_by=created_by, pool="BANK",
+                             idempotency_key=idempotency_key or f"repaybank:{uuid.uuid4()}")
+    db.add(txn)
+    db.flush()
+    _log_pool(db, created_by, "CAPITAL_TXN", txn)
+    return txn
+
+
+def record_prepayment(db: Session, *, project_id, amount, transaction_date, created_by,
+                      contract_id=None, from_pool="BANK", note=None, idempotency_key=None):
+    """预付：现金池(from_pool) OUT + 预付款池(挂账) IN。返回 (现金流水, 挂账流水)。"""
+    amount = Decimal(str(amount))
+    if from_pool == "PREPAY":
+        raise BusinessError("BAD_REQUEST", "预付款不能从预付款池支出", 400)
+    if from_pool not in POOLS:
+        raise BusinessError("BAD_REQUEST", f"非法资金池 {from_pool}", 400)
+    _assert_pool_sufficient(db, project_id, from_pool, amount)
+    base = idempotency_key or f"prepay:{uuid.uuid4()}"
+    cash_out = CapitalTransaction(project_id=project_id, source_type="预付", direction="OUT",
+                                  amount=amount, transaction_date=transaction_date, contract_id=contract_id,
+                                  category="预付", note=note, created_by=created_by, pool=from_pool,
+                                  idempotency_key=f"{base}:cash")
+    hang_in = CapitalTransaction(project_id=project_id, source_type="预付", direction="IN",
+                                 amount=amount, transaction_date=transaction_date, contract_id=contract_id,
+                                 category="预付挂账", note=note, created_by=created_by, pool="PREPAY",
+                                 idempotency_key=f"{base}:hang")
+    db.add_all([cash_out, hang_in])
+    db.flush()
+    _log_pool(db, created_by, "CAPITAL_TXN", cash_out, {"side": "cash"})
+    _log_pool(db, created_by, "CAPITAL_TXN", hang_in, {"side": "hang"})
+    return cash_out, hang_in
+
+
+def refund_prepayment(db: Session, *, project_id, amount, transaction_date, created_by,
+                      to_pool="BANK", note=None, idempotency_key=None):
+    """预付退回（金租放款后供应商退回）：预付款池(挂账) OUT + 现金回到指定池(to_pool) IN。"""
+    amount = Decimal(str(amount))
+    if to_pool == "PREPAY":
+        raise BusinessError("BAD_REQUEST", "退回不能回到预付款池", 400)
+    _assert_pool_sufficient(db, project_id, "PREPAY", amount)  # 挂账余额须够
+    base = idempotency_key or f"prepay-refund:{uuid.uuid4()}"
+    hang_out = CapitalTransaction(project_id=project_id, source_type="预付", direction="OUT",
+                                  amount=amount, transaction_date=transaction_date,
+                                  category="预付退回", note=note, created_by=created_by, pool="PREPAY",
+                                  idempotency_key=f"{base}:hang")
+    cash_in = CapitalTransaction(project_id=project_id, source_type="预付", direction="IN",
+                                 amount=amount, transaction_date=transaction_date,
+                                 category="预付退回", note=note, created_by=created_by, pool=to_pool,
+                                 idempotency_key=f"{base}:cash")
+    db.add_all([hang_out, cash_in])
+    db.flush()
+    _log_pool(db, created_by, "CAPITAL_TXN", hang_out, {"side": "hang"})
+    _log_pool(db, created_by, "CAPITAL_TXN", cash_in, {"side": "cash"})
+    return hang_out, cash_in
+
+
+def offset_prepayment(db: Session, *, project_id, amount, transaction_date, created_by,
+                      invoice_id=None, contract_id=None, note=None, idempotency_key=None) -> CapitalTransaction:
+    """预付核销（采购验收拿到发票）：预付款池(挂账) OUT，抵减应付（不涉现金）。"""
+    amount = Decimal(str(amount))
+    _assert_pool_sufficient(db, project_id, "PREPAY", amount)  # 挂账余额须够
+    hang_out = CapitalTransaction(project_id=project_id, source_type="预付", direction="OUT",
+                                  amount=amount, transaction_date=transaction_date,
+                                  contract_id=contract_id, invoice_id=invoice_id,
+                                  category="预付核销", note=note, created_by=created_by, pool="PREPAY",
+                                  idempotency_key=idempotency_key or f"prepay-offset:{uuid.uuid4()}")
+    db.add(hang_out)
+    db.flush()
+    _log_pool(db, created_by, "CAPITAL_TXN", hang_out)
+    return hang_out
 
 
 def allocate(
@@ -264,6 +430,7 @@ def reverse_transaction(db: Session, *, txn_id, reversed_by, note: str | None = 
         reversal_of_id=orig.id,
         is_reversal=True,
         created_by=reversed_by,
+        pool=orig.pool,  # 四期 W4：红冲须同池反向，各池余额才能在 SUM 中自动抵消
         idempotency_key=f"reverse:{orig.id}",  # 每条原记录只能红冲一次（部分唯一索引兜底）
     )
     db.add(rev)

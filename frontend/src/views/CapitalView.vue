@@ -22,10 +22,13 @@ const activeTab = ref<'transactions' | 'projects'>('transactions')
 
 const form = reactive({
   project_id: (route.query.project_id as string) || '', source_type: '自有资金', direction: 'IN',
-  amount: null as number | null, transaction_date: '', note: '',
+  amount: null as number | null, transaction_date: '', note: '', pool: 'OWN',
 })
 const SOURCE_OPTS = ['自有资金', '银行流贷', '金租融资', '租金收入', '还款'].map((v) => ({ label: v, value: v }))
 const DIR_OPTS = [{ label: '入金 IN', value: 'IN' }, { label: '出金 OUT', value: 'OUT' }]
+// 四期 W4：资金池
+const POOL_OPTS = [{ label: '自有资金池', value: 'OWN' }, { label: '金租池', value: 'LEASING' }, { label: '银行池', value: 'BANK' }, { label: '预付款池(挂账)', value: 'PREPAY' }]
+const CASH_POOL_OPTS = [{ label: '银行池', value: 'BANK' }, { label: '金租池', value: 'LEASING' }, { label: '自有池', value: 'OWN' }]
 
 async function refresh() {
   try {
@@ -56,6 +59,42 @@ async function reverseTxn(row: any) {
   try {
     await api.post(`/capital/transactions/${row.id}/reverse`)
     msg.success('已红冲（生成等额反向流水）'); await refresh()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
+// —— 四期 W4：资金池分池 ——
+const poolCards = computed(() => {
+  const bp = summary.value.by_pool || {}
+  return ['LEASING', 'BANK', 'PREPAY', 'OWN'].map((k) => ({
+    key: k, label: (bp[k] && bp[k].label) || k, net: (bp[k] && bp[k].net) ?? 0,
+  }))
+})
+
+// 池操作：记银行借款 / 还银行 / 预付 / 预付退回 / 预付核销
+const showPoolAct = ref(false)
+const poolAct = reactive({ type: '' as string, project_id: '' as string, amount: null as number | null, transaction_date: tsToYmd(Date.now()), pool: 'BANK', note: '' })
+const POOL_ACT_TITLE: Record<string, string> = {
+  'bank-loan': '记银行借款（银行池 +）', 'repay-bank': '还银行（银行池 −）',
+  'prepay': '预付（现金池 → 预付款池挂账）', 'prepay-refund': '预付退回（预付款池 → 现金池）',
+  'prepay-offset': '预付核销（预付款池 ↓，抵应付）',
+}
+const needPool = computed(() => poolAct.type === 'prepay' || poolAct.type === 'prepay-refund')
+const poolFieldLabel = computed(() => (poolAct.type === 'prepay' ? '从哪个池预付' : '退回到哪个池'))
+function openPoolAct(t: string) {
+  poolAct.type = t; poolAct.amount = null; poolAct.note = ''
+  poolAct.project_id = form.project_id || (projects.value[0]?.id ?? '')
+  showPoolAct.value = true
+}
+async function submitPoolAct() {
+  if (!poolAct.project_id || !poolAct.amount || !poolAct.transaction_date) { msg.warning('请填齐 项目/金额/日期'); return }
+  const base: any = { project_id: poolAct.project_id, amount: poolAct.amount, transaction_date: poolAct.transaction_date, note: poolAct.note || null }
+  try {
+    if (poolAct.type === 'bank-loan') await api.post('/capital/bank-loan', base)
+    else if (poolAct.type === 'repay-bank') await api.post('/capital/repay-bank', base)
+    else if (poolAct.type === 'prepay') await api.post('/capital/prepayment', { ...base, from_pool: poolAct.pool })
+    else if (poolAct.type === 'prepay-refund') await api.post('/capital/prepayment/refund', { ...base, to_pool: poolAct.pool })
+    else if (poolAct.type === 'prepay-offset') await api.post('/capital/prepayment/offset', base)
+    msg.success('已记账'); showPoolAct.value = false; await refresh()
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
@@ -118,6 +157,7 @@ const txnCols = [
   { title: '日期', key: 'transaction_date', width: 110 },
   { title: '项目', key: 'project_id', width: 140, render: (r: any) => r.project_id ? projectName(r.project_id) : '—' },
   { title: '来源', key: 'source_type', width: 100 },
+  { title: '资金池', key: 'pool', width: 90, render: (r: any) => ({ OWN: '自有', LEASING: '金租', BANK: '银行', PREPAY: '预付' } as any)[r.pool] || r.pool || '自有' },
   { title: '方向', key: 'direction', width: 70 },
   { title: '金额', key: 'amount', align: 'right' as const, className: 'num', render: (r: any) => money(r.amount) },
   { title: '摘要', key: 'note', render: (r: any) => (r.is_reversal ? `【红冲】${r.note || ''}` : r.note) as string },
@@ -136,6 +176,24 @@ const txnCols = [
       <n-card class="kpi"><div class="kpi-label">累计入金</div><div class="kpi-val num in">{{ money(summary.total_in) }}</div></n-card>
       <n-card class="kpi"><div class="kpi-label">累计出金</div><div class="kpi-val num out">{{ money(summary.total_out) }}</div></n-card>
     </n-space>
+
+    <!-- 四期 W4：4 资金池余额 -->
+    <n-space :size="16" style="margin-top:12px">
+      <n-card v-for="pc in poolCards" :key="pc.key" class="kpi pool-kpi">
+        <div class="kpi-label">{{ pc.label }}</div>
+        <div class="kpi-val num">{{ money(pc.net) }}</div>
+      </n-card>
+    </n-space>
+    <n-card :bordered="false" size="small" style="margin-top:8px">
+      <n-space wrap>
+        <span class="muted tiny" style="align-self:center">资金池操作：</span>
+        <n-button size="small" @click="openPoolAct('bank-loan')">记银行借款</n-button>
+        <n-button size="small" @click="openPoolAct('repay-bank')">还银行</n-button>
+        <n-button size="small" @click="openPoolAct('prepay')">预付</n-button>
+        <n-button size="small" @click="openPoolAct('prepay-refund')">预付退回</n-button>
+        <n-button size="small" @click="openPoolAct('prepay-offset')">预付核销</n-button>
+      </n-space>
+    </n-card>
 
     <!-- v3.2 Tab：流水 / 分项目 -->
     <n-card style="margin-top:16px" :bordered="false" size="small">
@@ -169,6 +227,9 @@ const txnCols = [
           </n-form-item>
           <n-form-item label="方向" :show-feedback="false">
             <n-select v-model:value="form.direction" :options="DIR_OPTS" style="width:110px" />
+          </n-form-item>
+          <n-form-item label="资金池" :show-feedback="false">
+            <n-select v-model:value="form.pool" :options="POOL_OPTS" style="width:130px" />
           </n-form-item>
           <n-form-item label="金额(元)" :show-feedback="false">
             <n-input-number v-model:value="form.amount" style="width:150px" :show-button="false" placeholder="金额" />
@@ -245,6 +306,39 @@ const txnCols = [
         <n-space justify="end">
           <n-button @click="showReturn = false">取消</n-button>
           <n-button type="primary" :disabled="!returnForm.allocation_id" @click="submitReturn">确认归还</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- 四期 W4：资金池操作弹窗（记借款/还银行/预付/退回/核销） -->
+    <n-modal v-model:show="showPoolAct" preset="card" :title="POOL_ACT_TITLE[poolAct.type] || '资金池操作'" style="width:460px;max-width:94vw">
+      <n-space vertical :size="12">
+        <n-form-item label="项目">
+          <n-select v-model:value="poolAct.project_id" :options="projectOpts()" placeholder="选项目" filterable />
+        </n-form-item>
+        <n-form-item v-if="needPool" :label="poolFieldLabel">
+          <n-select v-model:value="poolAct.pool" :options="CASH_POOL_OPTS" />
+        </n-form-item>
+        <n-space>
+          <n-form-item label="金额(元)"><n-input-number v-model:value="poolAct.amount" :show-button="false" style="width:170px" /></n-form-item>
+          <n-form-item label="日期">
+            <n-date-picker type="date" :value="ymdToTs(poolAct.transaction_date)"
+              @update:value="(ts: number | null) => poolAct.transaction_date = tsToYmd(ts)" style="width:150px" />
+          </n-form-item>
+        </n-space>
+        <n-form-item label="摘要"><n-input v-model:value="poolAct.note" placeholder="可选" /></n-form-item>
+        <div class="muted tiny">
+          <template v-if="poolAct.type==='bank-loan'">银行借款入「银行池」（持有借款余额增加）。</template>
+          <template v-else-if="poolAct.type==='repay-bank'">从「银行池」出钱还银行，余额不足会被拦截。</template>
+          <template v-else-if="poolAct.type==='prepay'">从所选现金池出钱预付给供应商，同时「预付款池」挂账增加。</template>
+          <template v-else-if="poolAct.type==='prepay-refund'">供应商退回预付：「预付款池」挂账减少，现金回到所选池。</template>
+          <template v-else-if="poolAct.type==='prepay-offset'">拿到采购发票后核销：「预付款池」挂账减少，抵减应付（不动现金）。</template>
+        </div>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showPoolAct = false">取消</n-button>
+          <n-button type="primary" @click="submitPoolAct">确认</n-button>
         </n-space>
       </template>
     </n-modal>

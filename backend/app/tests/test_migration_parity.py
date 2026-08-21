@@ -489,3 +489,51 @@ def test_alembic_0021_creates_and_backfills():
     down = code.split("def downgrade")[1]
     for col in ("biz_type", "amount_incl_tax", "lease_months"):
         assert f"DROP COLUMN IF EXISTS {col}" in down
+
+
+# ---- 0022 四期 W4 期1：资金池分池（capital_transactions + pool 列 + source_type 扩枚举） ----
+
+ALEMBIC_0022 = ROOT / "alembic" / "versions" / "0022_capital_pools.py"
+
+
+def test_schema_sql_capital_pool():
+    sql = _read(SCHEMA_SQL)
+    assert "pool VARCHAR(20) NOT NULL DEFAULT 'OWN' CHECK (pool IN ('OWN','LEASING','BANK','PREPAY'))" in sql
+    assert "'预付','归还银行'" in sql  # source_type CHECK 扩枚举
+    assert "idx_ct_pool" in sql
+
+
+def test_alembic_0022_pool_and_source_type():
+    code = _read(ALEMBIC_0022)
+    assert 'revision = "0022_capital_pools"' in code
+    assert 'down_revision = "0021_contract_biz_type"' in code
+    assert "ADD COLUMN IF NOT EXISTS pool" in code
+    assert "pool IN ('OWN','LEASING','BANK','PREPAY')" in code
+    # source_type CHECK 扩 '预付'/'归还银行'
+    assert "'预付','归还银行'" in code
+    # 存量回填：金租融资→LEASING；银行流贷/归还流贷→BANK
+    assert "SET pool='LEASING' WHERE source_type='金租融资'" in code
+    assert "SET pool='BANK' WHERE source_type IN ('银行流贷','归还流贷','归还银行')" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP COLUMN IF EXISTS pool" in down
+
+
+# ---- 0023 四期 W4 期2：收入按开票确认（revenue_recognitions + invoice_id 幂等） ----
+
+ALEMBIC_0023 = ROOT / "alembic" / "versions" / "0023_revenue_from_invoice.py"
+
+
+def test_schema_sql_revenue_invoice_id():
+    sql = _read(SCHEMA_SQL)
+    assert "invoice_id UUID REFERENCES invoices(id)" in sql
+    assert "uq_rr_invoice" in sql
+
+
+def test_alembic_0023_revenue_invoice():
+    code = _read(ALEMBIC_0023)
+    assert 'revision = "0023_revenue_from_invoice"' in code
+    assert 'down_revision = "0022_capital_pools"' in code
+    assert "ADD COLUMN IF NOT EXISTS invoice_id" in code
+    assert "uq_rr_invoice" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP COLUMN IF EXISTS invoice_id" in down

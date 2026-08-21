@@ -9,7 +9,9 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.exceptions import BusinessError
 from app.models.user import User
-from app.schemas.capital import AllocationCreate, AllocationReturn, TransactionCreate, TransactionOut
+from app.schemas.capital import (AllocationCreate, AllocationReturn, BankLoanCreate, BankRepayCreate,
+                                 PrepaymentCreate, PrepaymentOffset, PrepaymentRefund,
+                                 TransactionCreate, TransactionOut)
 from app.services import capital_service as svc
 
 router = APIRouter()
@@ -44,6 +46,75 @@ def record_transaction(
 @router.get("/summary")
 def summary(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return svc.pool_summary(db)
+
+
+@router.get("/pools")
+def pools(project_id: UUID = Query(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """四期 W4：某项目 4 资金池余额（金租/银行/预付挂账/自有）。"""
+    return {"project_id": str(project_id), "pools": svc.pools_by_project(db, project_id),
+            "labels": svc.POOL_LABELS}
+
+
+# ---------------- 四期 W4：资金池专用动作 ----------------
+
+@router.post("/bank-loan", response_model=TransactionOut, status_code=201)
+def bank_loan(payload: BankLoanCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """记一笔银行借款 → 银行池 IN。"""
+    try:
+        txn = svc.record_bank_loan(db, created_by=user.id, **payload.model_dump())
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "重复请求（幂等键冲突）", 409)
+    return TransactionOut.model_validate(txn)
+
+
+@router.post("/repay-bank", response_model=TransactionOut, status_code=201)
+def repay_bank(payload: BankRepayCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """还银行 → 银行池 OUT（余额不足 400）。"""
+    try:
+        txn = svc.repay_bank(db, created_by=user.id, **payload.model_dump())
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "重复请求（幂等键冲突）", 409)
+    return TransactionOut.model_validate(txn)
+
+
+@router.post("/prepayment", status_code=201)
+def prepayment(payload: PrepaymentCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """预付：现金池(from_pool) OUT + 预付款池(挂账) IN。"""
+    try:
+        cash_out, hang_in = svc.record_prepayment(db, created_by=user.id, **payload.model_dump())
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "重复请求（幂等键冲突）", 409)
+    return {"cash_txn_id": str(cash_out.id), "hang_txn_id": str(hang_in.id), "amount": str(hang_in.amount)}
+
+
+@router.post("/prepayment/refund", status_code=201)
+def prepayment_refund(payload: PrepaymentRefund, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """预付退回：预付款池 OUT + 现金回到 to_pool IN。"""
+    try:
+        hang_out, cash_in = svc.refund_prepayment(db, created_by=user.id, **payload.model_dump())
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "重复请求（幂等键冲突）", 409)
+    return {"hang_txn_id": str(hang_out.id), "cash_txn_id": str(cash_in.id), "amount": str(cash_in.amount)}
+
+
+@router.post("/prepayment/offset", response_model=TransactionOut, status_code=201)
+def prepayment_offset(payload: PrepaymentOffset, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """预付核销：预付款池 OUT，抵减应付（不涉现金）。"""
+    try:
+        txn = svc.offset_prepayment(db, created_by=user.id, **payload.model_dump())
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "重复请求（幂等键冲突）", 409)
+    return TransactionOut.model_validate(txn)
 
 
 @router.get("/pool-by-project")

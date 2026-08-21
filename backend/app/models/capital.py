@@ -38,6 +38,8 @@ class CapitalTransaction(UUIDPK, TimestampMixin, Base):
     currency_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     settlement_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
     base_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # 四期 W4：资金池分池（OWN 自有/LEASING 金租/BANK 银行/PREPAY 预付款挂账），默认 OWN
+    pool: Mapped[str] = mapped_column(String(20), default="OWN", nullable=False)
 
 
 class CapitalAllocation(UUIDPK, TimestampMixin, Base):

@@ -37,17 +37,16 @@ def _customer(db):
 # ------------------------------ 维度 1：销售全链路 ------------------------------
 
 def test_dim1_flags_golden(db):
-    """计费 88495.58 > 开票 0 → 已计未开；确认收入(审批通过) > 开票 → 已确认未开。"""
+    """计费 > 开票 → 已计未开。（四期 W4 期2：收入按开票确认，recognized 与 invoiced 同源——
+    未开票时 recognized=0；「已确认未开」在新口径下不可达，不再断言。）"""
     p, c, d = _mk(db, prepayment=None, months=12)  # 销售合同 + 点亮设备
-    _bill(db, d, c, 1, date(2026, 1, 31))  # 计费 10000/1.13=8849.57 不含税（自动出确认草稿）
-    rec = rsvc.list_recognitions(db, project_id=p.id)[0]
-    approval_service.approve(db, rec.approval_id)  # 确认收入生效
+    _bill(db, d, c, 1, date(2026, 1, 31))  # 计费 10000/1.13=8849.57 不含税（不再自动出收入草稿）
     rows = svc.dim1_sales_chain(db)
     mine = next(r for r in rows if r["contract_id"] == str(c.id))
     assert mine["billed"] > 0
     assert mine["invoiced"] == Decimal("0")
-    assert mine["recognized"] == mine["billed"]  # 确认=计费不含税（本期一致）
-    assert "已计未开" in mine["flags"] and "已确认未开" in mine["flags"]
+    assert mine["recognized"] == Decimal("0")  # 未开票 → 无确认收入
+    assert "已计未开" in mine["flags"]
     assert "已开未收" not in mine["flags"]  # 无开票谈不上未收
 
 

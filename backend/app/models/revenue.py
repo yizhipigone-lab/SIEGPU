@@ -24,6 +24,8 @@ class RevenueRecognition(UUIDPK, TimestampMixin, Base):
     batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("devices.id"), nullable=True)
     billing_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("billings.id"), nullable=True)
+    # 四期 W4 期2：收入改按「开票」确认（不再按计费）。invoice_id 幂等（同一发票只出一张收入确认）。
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True)
     period_label: Mapped[str] = mapped_column(String(20), nullable=False)
     recognition_date: Mapped[date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)  # 不含税

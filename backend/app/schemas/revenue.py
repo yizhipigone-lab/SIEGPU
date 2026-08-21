@@ -12,6 +12,7 @@ class RecognitionOut(BaseModel):
     batch_id: UUID | None
     device_id: UUID | None
     billing_id: UUID | None
+    invoice_id: UUID | None = None  # 四期 W4 期2：收入按开票确认，关联来源发票
     period_label: str
     recognition_date: date
     amount: Decimal

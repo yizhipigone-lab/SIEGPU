@@ -43,6 +43,13 @@ def _batch(db, p, e) -> Order:
     db.add(b); db.flush(); return b
 
 
+def _purchase_accept(db, p, b):
+    """四期 W4 期3 硬流转#1：批次设备推进「在途」前须有已通过的采购验收。"""
+    from app.services import acceptance_service as asvc
+    ar = asvc.create_acceptance(db, project_id=p.id, acceptance_type="采购验收", order_id=b.id)
+    asvc.approve_acceptance(db, ar, approved_by=None)
+
+
 def _advance_through(db, device_id, target_stage, actual_date=date(2026, 9, 15)):
     for st in dsvc.DEVICE_STAGES[:dsvc.DEVICE_STAGES.index(target_stage) + 1]:
         dsvc.advance_device_stage(db, device_id=device_id, stage=st, status="进行中")
@@ -105,6 +112,7 @@ def test_auto_transport_policy_on_in_transit(db):
     d2 = _device(db, p, e, Decimal("400000"))
     dsvc.add_to_batch(db, device_id=d1.id, batch_id=b.id)
     dsvc.add_to_batch(db, device_id=d2.id, batch_id=b.id)
+    _purchase_accept(db, p, b)  # 期3 硬流转#1：在途前须先采购验收
     dsvc.advance_device_stage(db, device_id=d1.id, stage="在途", status="进行中")
     pols = _policies(db)
     assert len(pols) == 1
@@ -124,6 +132,7 @@ def test_no_config_no_auto_policy(db):
     b = _batch(db, p, e)
     d = _device(db, p, e, Decimal("960000"))
     dsvc.add_to_batch(db, device_id=d.id, batch_id=b.id)
+    _purchase_accept(db, p, b)  # 期3 硬流转#1
     dsvc.advance_device_stage(db, device_id=d.id, stage="在途", status="进行中")
     assert _policies(db) == []
 

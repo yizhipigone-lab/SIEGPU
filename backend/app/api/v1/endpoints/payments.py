@@ -35,10 +35,11 @@ def create_request(payload: PaymentRequestIn,
 @router.post("/payment-requests/{rid}/disburse", status_code=201)
 def disburse(rid: UUID, payload: DisburseIn,
              db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """登记付款（已批准 → 落资金流水；预付款冲抵视同结转）。"""
+    """登记付款（已批准 → 落资金流水；预付款冲抵视同结转；可按资金池拆分支付）。"""
     txn = svc.disburse(db, rid, transaction_date=payload.transaction_date,
                        settlement_rate=payload.settlement_rate, bank_id=payload.bank_id,
-                       actor_id=user.id)
+                       actor_id=user.id,
+                       pool_splits=[s.model_dump() for s in payload.pool_splits] if payload.pool_splits else None)
     db.commit()
     return {"txn_id": str(txn.id), "amount": str(txn.amount)}
 

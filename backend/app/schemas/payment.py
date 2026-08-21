@@ -32,10 +32,18 @@ class PaymentRequestOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PoolSplit(BaseModel):
+    """四期 W4：付款按资金池拆分的一笔（pool + amount）。"""
+    pool: Literal["OWN", "LEASING", "BANK"]
+    amount: Decimal = Field(gt=0)
+
+
 class DisburseIn(BaseModel):
     transaction_date: date
     settlement_rate: Decimal | None = Field(None, gt=0)
     bank_id: UUID | None = None
+    # 四期 W4：按资金池拆分支付（可选）。给则按各池金额生成多笔流水，Σ须等于实付现金；不给则单流入自有池。
+    pool_splits: list[PoolSplit] | None = None
 
 
 class ApprovalOut(BaseModel):

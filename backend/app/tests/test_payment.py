@@ -114,6 +114,51 @@ def test_disburse_rejected_request_blocked(db):
         svc.disburse(db, pr.id, transaction_date=date(2026, 8, 10))
 
 
+def test_disburse_split_by_pool(db):
+    """四期 W4：一笔付款按池拆分（金租+银行），各池余额正确扣减，source_type 随池映射。"""
+    p = _project(db)
+    # 备足金租池 600 + 银行池 400
+    capital_service.record_transaction(db, created_by=None, project_id=p.id, source_type="金租融资",
+                                       direction="IN", amount=Decimal("600"), transaction_date=date(2026, 8, 1),
+                                       pool="LEASING", idempotency_key=f"seed-lease-{uuid.uuid4().hex[:6]}")
+    capital_service.record_bank_loan(db, project_id=p.id, amount=Decimal("400"),
+                                     transaction_date=date(2026, 8, 1), created_by=None)
+    pr = _approved_request(db, p, Decimal("1000"))
+    svc.disburse(db, pr.id, transaction_date=date(2026, 8, 10),
+                 pool_splits=[{"pool": "LEASING", "amount": Decimal("600")},
+                              {"pool": "BANK", "amount": Decimal("400")}])
+    assert capital_service.pool_balance(db, p.id, "LEASING") == Decimal("0")
+    assert capital_service.pool_balance(db, p.id, "BANK") == Decimal("0")
+    # 金租池支出 source_type=金租融资（不被置换引擎当桥资），银行池支出=银行流贷
+    txns = db.execute(select(CapitalTransaction).where(
+        CapitalTransaction.note.like(f"付款申请 {pr.id}%"))).scalars().all()
+    by_pool = {t.pool: t for t in txns}
+    assert by_pool["LEASING"].source_type == "金租融资"
+    assert by_pool["BANK"].source_type == "银行流贷"
+    assert by_pool["LEASING"].amount == Decimal("600") and by_pool["BANK"].amount == Decimal("400")
+
+
+def test_disburse_split_sum_mismatch_blocked(db):
+    """拆分合计 ≠ 实付现金 → 拦。"""
+    p = _project(db)
+    pr = _approved_request(db, p, Decimal("1000"))
+    with pytest.raises(BusinessError):
+        svc.disburse(db, pr.id, transaction_date=date(2026, 8, 10),
+                     pool_splits=[{"pool": "LEASING", "amount": Decimal("600")}])  # 只有 600 ≠ 1000
+
+
+def test_disburse_split_insufficient_pool_blocked(db):
+    """某池余额不足 → 拦（不部分扣减）。"""
+    p = _project(db)
+    capital_service.record_bank_loan(db, project_id=p.id, amount=Decimal("100"),
+                                     transaction_date=date(2026, 8, 1), created_by=None)
+    pr = _approved_request(db, p, Decimal("1000"))
+    with pytest.raises(BusinessError):  # 银行池只有 100，却要付 400
+        svc.disburse(db, pr.id, transaction_date=date(2026, 8, 10),
+                     pool_splits=[{"pool": "LEASING", "amount": Decimal("600")},
+                                  {"pool": "BANK", "amount": Decimal("400")}])
+
+
 # ------------------------------ 核销多对多 golden ------------------------------
 
 def test_settle_one_txn_multi_invoices_golden(db):

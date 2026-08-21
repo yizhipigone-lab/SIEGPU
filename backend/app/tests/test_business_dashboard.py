@@ -41,9 +41,11 @@ def test_metrics_leasing_balance(db):
 
 
 def test_todo_center_counts(db):
-    """待办中心：审批待办（计费自动挂的收入确认审批）+ 预付款未结清设备计数。"""
+    """待办中心：审批待办（开票驱动的收入确认审批）+ 预付款未结清设备计数。"""
     p, c, d = _mk(db, prepayment=Decimal("12000"), months=12)
     _bill(db, d, c, 1, date(2026, 1, 31))
+    # 四期 W4 期2：收入按开票确认——开票即出收入草稿并挂审批
+    isvc.create_invoice(db, contract_id=c.id, amount=Decimal("113000"), issue_date=date(2026, 2, 1))
     todos = svc.business_board(db)["todo_center"]
     by_kind = {t["kind"]: t for t in todos}
     assert by_kind["付款/收入审批"]["count"] >= 1  # 收入确认草稿自动挂审批

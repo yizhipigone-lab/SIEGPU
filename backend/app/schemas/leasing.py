@@ -54,7 +54,9 @@ class LeasingNodeOut(BaseModel):
 class LeasingProcessDetail(BaseModel):
     id: UUID
     project_id: UUID
+    project_name: str | None = None  # 关联项目名称
     supplier_id: UUID
+    supplier_name: str | None = None  # 关联供应商名称
     total_amount: Decimal
     status: str
     disbursement_date: date | None

@@ -1,5 +1,6 @@
-"""收入确认测试（三期 §4.2）：计费自动出草稿（不含税+方法快照）→ 审批通过 → Mock 凭证 → EBS 出站。
+"""收入确认测试（四期 W4 期2 改版）：**开票**驱动收入（不再按计费）。
 
+口径：对账单确认 → 开票 → 开票即出收入确认草稿（不含税=发票不含税）→ 审批 → Mock 凭证 → EBS 出站。
 golden：凭证借贷科目按 gl_account_mappings（方法精确匹配优先，通用兜底）；EBS 载荷含凭证。
 db 夹具每用例回滚，互不污染。
 """
@@ -12,34 +13,67 @@ from sqlalchemy import select
 
 from app.core.exceptions import BusinessError
 from app.models.ebs import EbsSyncLog
+from app.models.master import Customer
+from app.models.project import Project
 from app.models.revenue import RevenueRecognition
 from app.services import approval_service
+from app.services import contract_service as csvc
+from app.services import invoice_service as isvc
 from app.services import revenue_recognition_service as svc
-from app.tests.test_prepayment import _mk, _bill  # 复用：项目+合同+点亮设备+按台计费
 
 
-def test_draft_auto_generated_on_billing(db):
-    """计费生成 → 自动出草稿：amount=不含税、revenue_method 快照、状态草稿、挂审批单。"""
-    p, c, d = _mk(db, prepayment=None, months=12)
-    b = _bill(db, d, c, 1, date(2026, 1, 31))
+def _mk_contract(db, *, revenue_method=None):
+    """项目 + 客户 + 销售合同（可带核算路径）。"""
+    p = Project(name=f"P-{uuid.uuid4().hex[:6]}", code=f"c{uuid.uuid4().hex[:6]}")
+    db.add(p); db.flush()
+    cust = Customer(name=f"C-{uuid.uuid4().hex[:6]}")
+    db.add(cust); db.flush()
+    c = csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
+                             amount=Decimal("1000000"), tax_rate=Decimal("0.13"))
+    if revenue_method:
+        c.revenue_method = revenue_method
+        db.flush()
+    return p, c
+
+
+def _invoice(db, c, amount=Decimal("113000"), issue_date=date(2026, 1, 31)):
+    """开一张销售方向发票（含税 113000 → 不含税 100000），自动出收入草稿。"""
+    return isvc.create_invoice(db, contract_id=c.id, amount=amount,
+                               invoice_no=f"INV-{uuid.uuid4().hex[:6]}", issue_date=issue_date)
+
+
+def test_draft_auto_generated_on_invoice(db):
+    """开票 → 自动出草稿：amount=发票不含税、invoice_id 关联、状态草稿、挂审批单。"""
+    p, c = _mk_contract(db)
+    inv = _invoice(db, c)
     recs = svc.list_recognitions(db, project_id=p.id)
     assert len(recs) == 1
     rec = recs[0]
     assert rec.status == "草稿"
-    assert rec.amount == b.amount_ex_tax  # 权责口径=不含税
-    assert rec.billing_id == b.id and rec.device_id == d.id
+    assert rec.amount == inv.amount_ex_tax  # 权责口径=发票不含税
+    assert rec.invoice_id == inv.id
     assert rec.approval_id is not None  # 自动挂审批
-    # 幂等：同 billing 再触发不重复
-    svc.generate_draft_for_billing(db, b)
+    # 幂等：同发票再触发不重复
+    svc.generate_draft_for_invoice(db, inv)
     assert len(svc.list_recognitions(db, project_id=p.id)) == 1
+
+
+def test_purchase_invoice_no_revenue(db):
+    """采购方向发票不确认收入（仅销售发票）。"""
+    from app.models.master import Supplier
+    p, c = _mk_contract(db)
+    sup = Supplier(name=f"S-{uuid.uuid4().hex[:6]}", type="设备供应商"); db.add(sup); db.flush()
+    pc = csvc.create_contract(db, project_id=p.id, type="PURCHASE", party_id=sup.id,
+                              amount=Decimal("1000000"), tax_rate=Decimal("0.13"),
+                              parent_contract_id=c.id)
+    isvc.create_invoice(db, contract_id=pc.id, amount=Decimal("113000"), issue_date=date(2026, 1, 31))
+    assert svc.list_recognitions(db, project_id=p.id) == []
 
 
 def test_draft_snapshots_contract_revenue_method(db):
     """revenue_method 快照自合同判定结果（W3-4 联动）。"""
-    p, c, d = _mk(db, prepayment=None, months=12)
-    c.revenue_method = "经营租赁"  # 模拟 W3-4 判定结果
-    db.flush()
-    _bill(db, d, c, 1, date(2026, 1, 31))
+    p, c = _mk_contract(db, revenue_method="经营租赁")
+    _invoice(db, c)
     rec = svc.list_recognitions(db, project_id=p.id)[0]
     assert rec.revenue_method == "经营租赁"
 
@@ -51,10 +85,8 @@ def test_approve_confirm_voucher_ebs_golden(db):
                        description_template="确认{period}经营租赁收入")
     svc.create_mapping(db, business_event="收入确认", revenue_method=None,
                        debit_account="1122.99", credit_account="6001.99")  # 通用兜底（不应命中）
-    p, c, d = _mk(db, prepayment=None, months=12)
-    c.revenue_method = "经营租赁"
-    db.flush()
-    b = _bill(db, d, c, 1, date(2026, 1, 31))
+    p, c = _mk_contract(db, revenue_method="经营租赁")
+    inv = _invoice(db, c)
     rec = svc.list_recognitions(db, project_id=p.id)[0]
     approval_service.approve(db, rec.approval_id)
     rec = db.get(RevenueRecognition, rec.id)
@@ -63,7 +95,7 @@ def test_approve_confirm_voucher_ebs_golden(db):
     v = rec.voucher_json
     assert v["debit_account"] == "1122.01" and v["credit_account"] == "6001.01"
     assert v["description"] == f"确认{rec.period_label}经营租赁收入"
-    assert v["amount"] == float(b.amount_ex_tax)
+    assert v["amount"] == float(inv.amount_ex_tax)
     # EBS 出站载荷含凭证
     log = db.execute(select(EbsSyncLog).where(
         EbsSyncLog.entity_type == "revenue_recognition",
@@ -76,10 +108,8 @@ def test_generic_mapping_fallback(db):
     """无方法精确映射 → 通用（NULL）兜底。"""
     svc.create_mapping(db, business_event="收入确认", revenue_method=None,
                        debit_account="1122.99", credit_account="6001.99")
-    p, c, d = _mk(db, prepayment=None, months=12)
-    c.revenue_method = "总额法"
-    db.flush()
-    _bill(db, d, c, 1, date(2026, 1, 31))
+    p, c = _mk_contract(db, revenue_method="总额法")
+    _invoice(db, c)
     rec = svc.list_recognitions(db, project_id=p.id)[0]
     approval_service.approve(db, rec.approval_id)
     rec = db.get(RevenueRecognition, rec.id)
@@ -89,8 +119,8 @@ def test_generic_mapping_fallback(db):
 
 def test_missing_mapping_marks_flag(db):
     """无映射：凭证仍出但 mapping_missing=True（不静默错账，提示补映射）。"""
-    p, c, d = _mk(db, prepayment=None, months=12)
-    _bill(db, d, c, 1, date(2026, 1, 31))
+    p, c = _mk_contract(db)
+    _invoice(db, c)
     rec = svc.list_recognitions(db, project_id=p.id)[0]
     approval_service.approve(db, rec.approval_id)
     rec = db.get(RevenueRecognition, rec.id)
@@ -99,25 +129,11 @@ def test_missing_mapping_marks_flag(db):
 
 
 def test_reject_keeps_draft(db):
-    p, c, d = _mk(db, prepayment=None, months=12)
-    _bill(db, d, c, 1, date(2026, 1, 31))
+    p, c = _mk_contract(db)
+    _invoice(db, c)
     rec = svc.list_recognitions(db, project_id=p.id)[0]
     approval_service.reject(db, rec.approval_id, reason="金额待复核")
     assert db.get(RevenueRecognition, rec.id).status == "草稿"
-
-
-def test_backfill_existing_billings(db):
-    """存量计费补草稿（幂等）：先删钩子产物模拟存量，再 backfill。"""
-    p, c, d = _mk(db, prepayment=None, months=12)
-    b = _bill(db, d, c, 1, date(2026, 1, 31))
-    # 模拟存量：删掉自动草稿后 backfill
-    rec = svc.list_recognitions(db, project_id=p.id)[0]
-    rec.deleted_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-    db.flush()
-    n = svc.backfill_drafts(db, project_id=p.id)
-    # 软删的草稿不算存在（查询自带 deleted 过滤）→ 补建 1 张；uq 索引只看活跃行不冲突
-    assert n == 1
-    assert svc.backfill_drafts(db, project_id=p.id) == 0  # 二次幂等
 
 
 def test_mapping_duplicate_blocked(db):

@@ -467,10 +467,14 @@ def test_advance_batch_isolates_asset_build_failure(db):
     在 row.status 已 flush 之后抛 BAD_REQUEST。必须随 SAVEPOINT 回滚该台（不落“已完成”无卡悬挂态），
     批内其余设备正常推进。修复前：失败台节点随端点 commit 落“已完成”却无资产卡，无法重推。"""
     from app.models.asset import Asset
+    from app.services import acceptance_service as _asvc
     p = _project(db); e = _equipment(db); b = _batch(db, p=p, e=e)
     d_ok = svc.create_device(db, project_id=p.id, equipment_model_id=e.id,
                              ownership="表内自有", purchase_value=Decimal("960000"))
     d_bad = svc.create_device(db, project_id=p.id, equipment_model_id=e.id, ownership="表内自有")  # 缺 purchase_value
+    # 四期 W4 期3 硬流转#1：批次设备推进「在途」前须有已通过的采购验收
+    _ar = _asvc.create_acceptance(db, project_id=p.id, acceptance_type="采购验收", order_id=b.id)
+    _asvc.approve_acceptance(db, _ar, approved_by=None)
     for d in (d_ok, d_bad):
         svc.add_to_batch(db, device_id=d.id, batch_id=b.id)
         for st in ("订货", "在途", "到货", "己方压测"):

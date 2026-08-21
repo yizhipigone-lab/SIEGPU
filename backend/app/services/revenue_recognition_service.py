@@ -8,7 +8,7 @@ biz_type='收入确认'，复用审批中心）→ 通过 → 已确认 + 按 gl
 service 不 commit 铁律：只 flush。
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -51,6 +51,48 @@ def generate_draft_for_billing(db: Session, billing: Billing,
     a = approval_service.submit(
         db, biz_type="收入确认", biz_id=rec.id,
         title=f"收入确认 {rec.period_label} 不含税 {rec.amount}（项目 {proj.name if proj else billing.project_id}）",
+        submitted_by=actor_id)
+    rec.approval_id = a.id
+    db.flush()
+    return rec
+
+
+def generate_draft_for_invoice(db: Session, invoice, actor_id=None) -> RevenueRecognition | None:
+    """四期 W4 期2：开票驱动收入。销售方向发票(RECEIVABLE)开具后自动出收入确认草稿。
+
+    - 不含税口径：amount = invoice.amount_ex_tax（对账单→开票的发票不含税，权责确认依据）。
+    - 幂等：同一发票只出一张（invoice_id 部分唯一索引兜底）。
+    - period_label 取开票所属期（issue_date 的 YYYY-MM），无 issue_date 用当天。
+    - revenue_method 快照合同判定结果；自动挂审批单（草稿→审批→确认流程不变）。
+    """
+    from app.models.billing import Invoice
+    inv = db.get(Invoice, invoice.id if hasattr(invoice, "id") else invoice)
+    if inv is None or inv.deleted_at is not None:
+        return None
+    if inv.direction != "RECEIVABLE":
+        return None  # 仅销售发票确认收入；采购发票不确认收入
+    existing = db.execute(select(RevenueRecognition).where(
+        RevenueRecognition.invoice_id == inv.id)).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    c = db.get(Contract, inv.contract_id)
+    if c is None:
+        return None
+    ref_date = inv.issue_date or date.today()
+    rec = RevenueRecognition(
+        project_id=c.project_id, contract_id=inv.contract_id, invoice_id=inv.id,
+        period_label=f"{ref_date.year}-{ref_date.month:02d}", recognition_date=ref_date,
+        amount=inv.amount_ex_tax,  # 不含税（权责口径）
+        currency_code=inv.currency_code, booked_rate=inv.invoice_rate,
+        revenue_method=c.revenue_method if c else None,
+        status="草稿",
+    )
+    db.add(rec)
+    db.flush()
+    proj = db.get(Project, c.project_id)
+    a = approval_service.submit(
+        db, biz_type="收入确认", biz_id=rec.id,
+        title=f"收入确认 开票 {inv.invoice_no or inv.id} 不含税 {rec.amount}（项目 {proj.name if proj else c.project_id}）",
         submitted_by=actor_id)
     rec.approval_id = a.id
     db.flush()
