@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,3 +32,13 @@ def create_project(
     wf.create_workflow(db, project_id=p.id, template_id=payload.template_id)
     db.commit()
     return ProjectOut.model_validate(p)
+
+@router.get("/{project_id}/relationships")
+def get_project_relationships(project_id: UUID,
+                              db: Session = Depends(get_db),
+                              user: User = Depends(get_current_user)):
+    """项目血缘树：销售合同(→销售订单/被参照采购合同→采购订单→预付款+单台设备) + 金租申请。"""
+    tree = project_service.project_relationships(db, project_id)
+    if tree is None:
+        raise HTTPException(404, "项目不存在")
+    return tree

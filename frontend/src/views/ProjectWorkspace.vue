@@ -11,6 +11,7 @@ import { errMsg } from '../utils/errMsg'
 import { roleName } from '../utils/role'
 import { useAuthStore } from '../stores/auth'
 import StepDrawer from '../components/StepDrawer.vue'
+import ProjectRelationTree from '../components/ProjectRelationTree.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -293,6 +294,9 @@ watch(() => route.params.id, load)
           </div>
         </div>
       </div>
+      <!-- 业务对象关联树：合同/订单/预付款/金租申请全链路 -->
+      <n-divider style="margin:20px 0 12px">业务对象关联</n-divider>
+      <project-relation-tree :project-id="projectId" />
     </div>
     <n-empty v-else description="项目暂无工作流" />
 
