@@ -51,7 +51,7 @@ test('二期全链串烧：立项→合同判定→采购→保险→点亮计�
 
   // ---- 2. 销售合同（USD）：R1 自动判定经营租赁 + EBS 判定快照出站 ----
   const sales = await post(request, headers, '/contracts', {
-    project_id: proj.id, type: 'SALES', party_id: cust.id, amount: 1000000,
+    project_id: proj.id, type: 'SALES', party_id: cust.id, amount: 3000000,
     contract_no: `HT-F${RUN}`, monthly_rent: 113000,
     start_date: '2026-09-01', end_date: '2027-08-31', currency_code: 'USD',
   }, '销售合同')
@@ -63,9 +63,10 @@ test('二期全链串烧：立项→合同判定→采购→保险→点亮计�
   expect(myJudge.length, '判定结果应出站 EBS Mock').toBeGreaterThanOrEqual(1)
   expect(myJudge[0].request_payload.revenue_method).toBe('经营租赁')
 
-  // ---- 3. 采购：采购合同 + 批次订单 + 2 台设备（60万/40万；device1 预付款 12000）----
+  // ---- 3. 采购：采购合同（参照销售合同，硬校验）+ 批次订单 + 2 台设备（60万/40万；device1 预付款 12000）----
   const purchase = await post(request, headers, '/contracts', {
     project_id: proj.id, type: 'PURCHASE', party_id: sup.id, amount: 2000000,
+    parent_contract_id: sales.id,
   }, '采购合同')
   const batch = await post(request, headers, '/orders', {
     project_id: proj.id, equipment_model_id: model.id, quantity: 2, unit_price: 600000, is_batch: true,
@@ -83,6 +84,12 @@ test('二期全链串烧：立项→合同判定→采购→保险→点亮计�
     await post(request, headers, '/devices/batch-assign', { device_id: d.id, batch_id: batch.id }, '挂批次')
     devices.push(d)
   }
+
+  // ---- 3.5 采购验收（硬流转闸门：未过采购验收的订单，设备不能登记在途）----
+  const acc = await post(request, headers, '/acceptances', {
+    project_id: proj.id, acceptance_type: '采购验收', order_id: batch.id,
+  }, '采购验收')
+  await post(request, headers, `/acceptances/${acc.id}/approve`, {}, '采购验收通过')
 
   // ---- 4. 设备推进 7 节点：在途自动运输险 → 点亮财产险 + 资产激活 ----
   for (const d of devices) {

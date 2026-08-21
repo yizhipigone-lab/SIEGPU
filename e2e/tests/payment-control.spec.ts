@@ -36,8 +36,16 @@ test('付款管控：申请(冲抵预付款) → 审批通过 → 登记 → 多
   const sup = await (await request.post(`${API}/suppliers`, {
     headers, data: { name: `E2E供应商-付款-${RUN}`, type: '设备供应商' },
   })).json()
+  // 硬校验：采购合同必须参照同项目销售合同 → 先造客户 + 销售合同（额 ≥ 采购额）
+  const cust = await (await request.post(`${API}/customers`, {
+    headers, data: { name: `E2E客户-付款-${RUN}` },
+  })).json()
+  const salesContract = await (await request.post(`${API}/contracts`, {
+    headers, data: { project_id: proj.id, type: 'SALES', party_id: cust.id, amount: 10000000 },
+  })).json()
   const contract = await (await request.post(`${API}/contracts`, {
-    headers, data: { project_id: proj.id, type: 'PURCHASE', party_id: sup.id, amount: 10000000 },
+    headers, data: { project_id: proj.id, type: 'PURCHASE', party_id: sup.id, amount: 10000000,
+      parent_contract_id: salesContract.id },
   })).json()
   const invA = await (await request.post(`${API}/invoices`, {
     headers, data: { contract_id: contract.id, amount: 400, invoice_no: `INV-E2E-A-${RUN}` },

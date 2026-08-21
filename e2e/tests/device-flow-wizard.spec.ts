@@ -95,7 +95,8 @@ test('3. 设备推进到货 → Step6「设备到货」翻绿（completion_check
     amount: 5_000_000, start_date: '2026-01-01', end_date: '2028-12-31' })
   expect(sc.ok()).toBeTruthy()
   const pc = await post('/contracts', { project_id: projectId, type: 'PURCHASE', party_id: supplierId,
-    amount: 4_000_000, start_date: '2026-01-01', end_date: '2026-12-31' })
+    amount: 4_000_000, start_date: '2026-01-01', end_date: '2026-12-31',
+    parent_contract_id: (await sc.json()).id })  // 硬校验：采购合同必须参照同项目销售合同
   expect(pc.ok()).toBeTruthy()
   // 批次订单：schema 仍要求 equipment_model_id/quantity/unit_price（service 的 is_batch 分支忽略其语义）
   // 自检迭代：断言响应体吐真值 is_batch=true / flow_type='batch'（修正前 create_order 手工构造漏字段→说谎 is_batch=false）

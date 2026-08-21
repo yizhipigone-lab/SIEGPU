@@ -37,8 +37,14 @@ test('退货：UI 申请 → 逐步推进到退款核销 → 全链追值', asyn
   const proj = await post(request, headers, '/projects', { name: `E2E-退货-${RUN}` }, '立项')
   const sup = await post(request, headers, '/suppliers',
     { name: `E2E供应商-退货-${RUN}`, type: '设备供应商' }, '供应商')
+  // 硬校验：采购合同必须参照同项目销售合同 → 先造客户 + 销售合同（额 ≥ 采购额）
+  const cust = await post(request, headers, '/customers', { name: `E2E客户-退货-${RUN}` }, '客户')
+  const salesContract = await post(request, headers, '/contracts', {
+    project_id: proj.id, type: 'SALES', party_id: cust.id, amount: 10000000,
+  }, '销售合同')
   const contract = await post(request, headers, '/contracts', {
     project_id: proj.id, type: 'PURCHASE', party_id: sup.id, amount: 10000000,
+    parent_contract_id: salesContract.id,
   }, '采购合同')
   const model = await post(request, headers, '/equipment-models',
     { name: `E2E-型号-退货-${RUN}`, category: '大卡', gpu_count: 8 }, '型号')

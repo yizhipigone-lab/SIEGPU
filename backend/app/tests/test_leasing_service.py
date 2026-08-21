@@ -51,7 +51,7 @@ def _full_process(db):
 
 def test_create_process_generates_9_nodes(db):
     u, p, proc = _full_process(db)
-    _, nodes = svc.get_process(db, proc.id)
+    _, nodes, _proj, _sup = svc.get_process(db, proc.id)
     assert len(nodes) == 9
     assert [n.node_name for n in nodes] == [
         "接触", "业务交流", "资料提交", "金租审核", "一次上会", "二次上会", "访谈", "批方案", "放款",
@@ -120,7 +120,7 @@ def test_create_rejects_non_lessor_supplier(db):
 
 def test_node_illegal_transition_blocked(db):
     u, p, proc = _full_process(db)
-    _, nodes = svc.get_process(db, proc.id)
+    _, nodes, _proj, _sup = svc.get_process(db, proc.id)
     # 未开始 → 已完成 非法
     with pytest.raises(BusinessError):
         svc.advance_node(db, node_id=nodes[0].id, status="已完成")

@@ -143,6 +143,7 @@ test('c. 抽屉办理资金入金 → 步骤自动推进', async ({ page, reques
   const pc = await post('/contracts', {
     project_id: projectId, type: 'PURCHASE', party_id: supplierId,
     amount: 4_000_000, start_date: '2026-01-01', end_date: '2026-12-31',
+    parent_contract_id: salesContractId,  // 硬校验：采购合同必须参照同项目销售合同
   })
   expect(pc.ok()).toBeTruthy()
   const purchaseContractId = (await pc.json()).id
