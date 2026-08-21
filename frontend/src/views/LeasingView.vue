@@ -104,10 +104,26 @@ async function advanceNode(node: any, status: '进行中' | '已完成') {
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
-function openStuck(node: any) { stuckTarget.value = node; stuckReason.value = node.stuck_reason || '' }
+function openStuck(node: any) {
+  stuckTarget.value = node
+  stuckReason.value = node.stuck_reason || ''
+}
 
 async function doStuck() {
   if (!stuckTarget.value) return
+  // 如果已经是卡住状态，则取消卡住（恢复进行中）
+  if (stuckTarget.value.status === '卡住') {
+    try {
+      await api.patch(`/leasing/nodes/${stuckTarget.value.id}`, {
+        status: '进行中', stuck_reason: null,
+      })
+      msg.success(`节点「${stuckTarget.value.node_name}」已恢复进行中`)
+      stuckTarget.value = null; stuckReason.value = ''
+      if (detail.value) await openDetail(detail.value)
+    } catch (e: any) { msg.error(errMsg(e)) }
+    return
+  }
+  // 标记卡住
   if (!stuckReason.value.trim()) { msg.warning('请填卡住原因'); return }
   try {
     await api.patch(`/leasing/nodes/${stuckTarget.value.id}`, {
@@ -233,6 +249,24 @@ const repayCols = [
     <n-drawer v-model:show="showDrawer" :width="600" placement="right">
       <n-drawer-content title="金租流程详情" closable>
         <template v-if="detail">
+          <!-- 项目/供应商信息 -->
+          <div style="margin-bottom: 12px; padding: 10px 12px; background: #F8FAFC; border-radius: 8px;">
+            <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+              <div>
+                <span class="muted tiny">项目</span>
+                <div style="font-weight: 600; font-size: 14px;">{{ detail.project_name || '—' }}</div>
+              </div>
+              <div>
+                <span class="muted tiny">金租公司</span>
+                <div style="font-weight: 600; font-size: 14px;">{{ detail.supplier_name || '—' }}</div>
+              </div>
+              <div>
+                <span class="muted tiny">申请金额</span>
+                <div style="font-weight: 600; font-size: 14px; color: #2563EB;">{{ money(detail.total_amount) }}</div>
+              </div>
+            </div>
+          </div>
+
           <n-space>
             <n-tag :type="detail.status === '已放款' ? 'success' : 'warning'" size="small" :bordered="false">{{ detail.status }}</n-tag>
             <n-tag v-if="detail.plan_generated" type="info" size="small" :bordered="false">{{ detail.term_periods }}期还款计划</n-tag>
@@ -256,6 +290,7 @@ const repayCols = [
                 <n-button v-if="n.status === '未开始'" size="tiny" quaternary type="info" @click="advanceNode(n, '进行中')">开始</n-button>
                 <n-button size="tiny" quaternary type="success" @click="advanceNode(n, '已完成')">完成</n-button>
                 <n-button v-if="n.status !== '卡住'" size="tiny" quaternary type="error" @click="openStuck(n)">卡住</n-button>
+                <n-button v-else size="tiny" quaternary type="warning" @click="openStuck(n)">取消卡住</n-button>
               </div>
               <div v-if="n.status === '卡住' && n.stuck_reason" class="tl-date" style="color:#DC2626">{{ n.stuck_reason }}</div>
             </div>
@@ -360,15 +395,19 @@ const repayCols = [
       </template>
     </n-modal>
 
-    <!-- 节点卡住原因 -->
-    <n-modal v-model:show="showStuck" preset="card" title="标记节点卡住" style="width:380px">
-      <n-form-item label="卡住原因">
+    <!-- 节点卡住/取消卡住弹窗 -->
+    <n-modal v-model:show="showStuck" preset="card" :title="stuckTarget?.status === '卡住' ? '取消节点卡住' : '标记节点卡住'" style="width:380px">
+      <n-form-item v-if="stuckTarget?.status !== '卡住'" label="卡住原因">
         <n-input v-model:value="stuckReason" type="textarea" :rows="2" placeholder="必填" />
       </n-form-item>
+      <div v-else style="color: var(--c-text-2); padding: 8px 0;">
+        确定要取消节点「{{ stuckTarget?.node_name }}」的卡住状态吗？取消后将恢复为"进行中"。
+      </div>
       <template #footer>
         <n-space justify="end">
           <n-button @click="stuckTarget = null">取消</n-button>
-          <n-button type="error" @click="doStuck">标记卡住</n-button>
+          <n-button v-if="stuckTarget?.status === '卡住'" type="warning" @click="doStuck">确认取消卡住</n-button>
+          <n-button v-else type="error" @click="doStuck">标记卡住</n-button>
         </n-space>
       </template>
     </n-modal>
