@@ -15,6 +15,7 @@ const d4 = ref<any[]>([])
 const d5 = ref<any[]>([])
 const d6 = ref<any[]>([])
 const d7 = ref<any[]>([])
+const d8 = ref<any[]>([])
 const injected = ref(false)
 const customers = ref<any[]>([])
 const suppliers = ref<any[]>([])
@@ -36,15 +37,16 @@ async function loadDim7() {
 }
 async function refresh() {
   try {
-    const [a, b, c, d, e] = await Promise.all([
+    const [a, b, c, d, e, f] = await Promise.all([
       api.get('/reconciliation-center/sales-chain'),
       api.get('/reconciliation-center/purchase-chain'),
       api.get('/reconciliation-center/asset-delivery'),
       api.get('/reconciliation-center/supervised-accounts'),
       api.get('/reconciliation-center/fx-check'),
+      api.get('/reconciliation-center/prepay-parity'),
     ])
     d1.value = a.data.items; d2.value = b.data.items; d3.value = c.data.items
-    d4.value = d.data.items; d5.value = e.data.items
+    d4.value = d.data.items; d5.value = e.data.items; d8.value = f.data.items
     await loadDim6(); await loadDim7()
   } catch (e: any) { msg.error(errMsg(e)) }
 }
@@ -178,6 +180,20 @@ const flagCol = { title: '差异标记', key: 'flags', render: (r: any) => flagC
           flagCol,
         ]" :data="d7">
         <template #empty>无差异——全域三流一致 ✅</template>
+      </n-data-table>
+    </n-card>
+
+    <n-card size="small" style="margin-top:14px">
+      <template #header>8. 预付款双轨勾稽（期1 R1：预付款池挂账 vs 设备预付剩余，同一笔钱两套口径）</template>
+      <n-data-table size="small" :bordered="false" striped :pagination="{ pageSize: 8 }" :row-class-name="rowClass"
+        :columns="[
+          { title: '项目', key: 'project_name' },
+          { title: '预付款池(挂账)', key: 'pool_balance', align: 'right' as const, render: (r: any) => money(r.pool_balance) },
+          { title: '设备预付剩余', key: 'device_remaining', align: 'right' as const, render: (r: any) => money(r.device_remaining) },
+          { title: '差异', key: 'diff', align: 'right' as const, render: (r: any) => money(r.diff) },
+          flagCol,
+        ]" :data="d8">
+        <template #empty>暂无预付款业务（两轨均无余额）</template>
       </n-data-table>
     </n-card>
   </div>

@@ -73,13 +73,28 @@ test('对账中心：7 维渲染 + 差异标红 + 业财注入管道 + 差异明
   })).json()
   await post(request, headers, `/approvals/${recs.items[0].approval_id}/approve`, {}, '确认审批')
 
-  // ---- UI：七维卡渲染 ----
+  // ---- 维度 8 备数：PREPAY 池挂账 5000（资金台账轨）而设备无预付（运营轨 0）→ 双轨差异 ----
+  await post(request, headers, '/capital/bank-loan', {
+    project_id: proj.id, amount: 5000, transaction_date: '2026-09-01',
+  }, '记银行借款（备预付资金）')
+  await post(request, headers, '/capital/prepayment', {
+    project_id: proj.id, amount: 5000, transaction_date: '2026-09-02', from_pool: 'BANK',
+  }, '预付挂账（池轨 +5000，设备轨 0）')
+
+  // ---- UI：八维卡渲染 ----
   await uiLogin(page)
   await page.goto('/reconciliation-center')
   await expect(page.getByRole('heading', { name: '对账中心' })).toBeVisible()
-  for (const t of ['销售全链路', '采购四单', '资产交付', '监管账户', '汇兑损益', '业财一致性', '三流差异明细']) {
+  for (const t of ['销售全链路', '采购四单', '资产交付', '监管账户', '汇兑损益', '业财一致性', '三流差异明细', '预付款双轨勾稽']) {
     await expect(page.locator('.n-card', { hasText: t }).first()).toBeVisible()
   }
+
+  // ---- 维度 8：本项目双轨差异行标红 ----
+  const d8Card = page.locator('.n-card', { hasText: '预付款双轨勾稽' })
+  const d8Row = d8Card.locator('.n-data-table-tr', { hasText: `E2E-对账-${RUN}` })
+  await expect(d8Row).toBeVisible({ timeout: 8000 })
+  await expect(d8Row).toContainText('双轨差异')
+  await expect(d8Row).toHaveClass(/diff-row/)
 
   // ---- 维度 1：本合同行 flags 正确且整行标红 ----
   const d1Card = page.locator('.n-card', { hasText: '销售全链路' })

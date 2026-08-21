@@ -48,3 +48,9 @@ def dim6(inject_demo: bool = False, db: Session = Depends(get_db),
 def dim7(customer_id: UUID | None = None, supplier_id: UUID | None = None,
          db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return {"items": svc.dim7_flow_diffs(db, customer_id=customer_id, supplier_id=supplier_id)}
+
+
+@router.get("/prepay-parity")
+def dim8(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """预付款双轨勾稽（期1 R1）：PREPAY 池余额 vs Σ设备预付剩余，按项目对比，差异标「双轨差异」。"""
+    return {"items": svc.dim8_prepay_parity(db)}

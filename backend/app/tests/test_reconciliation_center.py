@@ -172,3 +172,51 @@ def test_dim7_only_flagged_and_customer_filter(db):
     other = _customer(db)
     rows2 = svc.dim7_flow_diffs(db, customer_id=other.id)
     assert all(r["contract_no"] != (c.contract_no or "—") for r in rows2)
+
+
+# ------------------------------ 维度 8：预付款双轨勾稽（期1 R1 既定后续） ------------------------------
+
+def test_dim8_prepay_parity(db):
+    """PREPAY 池余额（资金台账轨）vs Σ设备预付剩余（运营轨）按项目勾稽：
+    一致 → 无 flag；双轨有差 → 标「双轨差异」。只列任一轨非零的项目。"""
+    p1 = _project(db)
+    # 项目1 双轨一致：池挂账 1000 + 设备预付 1000 未结清
+    capital_service.record_transaction(db, created_by=None, project_id=p1.id, source_type="预付",
+                                       direction="IN", amount=Decimal("1000"),
+                                       transaction_date=date(2026, 8, 1), pool="PREPAY",
+                                       idempotency_key=f"pp1-{uuid.uuid4().hex[:6]}")
+    em = EquipmentModel(name=f"em{uuid.uuid4().hex[:6]}", category="大卡")
+    db.add(em); db.flush()
+    db.add(Device(sn=f"GPU-{uuid.uuid4().hex[:8]}", project_id=p1.id, equipment_model_id=em.id,
+                  prepayment_amount=Decimal("1000")))
+    db.flush()
+
+    p2 = _project(db)
+    # 项目2 双轨差异：池挂账 500、无设备预付
+    capital_service.record_transaction(db, created_by=None, project_id=p2.id, source_type="预付",
+                                       direction="IN", amount=Decimal("500"),
+                                       transaction_date=date(2026, 8, 1), pool="PREPAY",
+                                       idempotency_key=f"pp2-{uuid.uuid4().hex[:6]}")
+
+    rows = svc.dim8_prepay_parity(db)
+    by_pid = {r["project_id"]: r for r in rows}
+    r1 = by_pid[str(p1.id)]
+    assert r1["pool_balance"] == Decimal("1000") and r1["device_remaining"] == Decimal("1000")
+    assert r1["diff"] == Decimal("0") and r1["flags"] == []
+    r2 = by_pid[str(p2.id)]
+    assert r2["diff"] == Decimal("500") and "双轨差异" in r2["flags"]
+
+
+def test_dim8_settled_device_counts_zero(db):
+    """已回核销设备（prepayment_settled=True）剩余按 0 计，不再占运营轨余额。"""
+    p = _project(db)
+    em = EquipmentModel(name=f"em{uuid.uuid4().hex[:6]}", category="大卡")
+    db.add(em); db.flush()
+    db.add(Device(sn=f"GPU-{uuid.uuid4().hex[:8]}", project_id=p.id, equipment_model_id=em.id,
+                  prepayment_amount=Decimal("800"), prepayment_settled=True,
+                  prepayment_settled_amount=Decimal("800")))
+    db.flush()
+    rows = svc.dim8_prepay_parity(db)
+    mine = [r for r in rows if r["project_id"] == str(p.id)]
+    # 设备已核销（运营轨 0）且无池流水 → 该项目不出现
+    assert mine == []

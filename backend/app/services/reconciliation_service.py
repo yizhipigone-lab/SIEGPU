@@ -260,3 +260,48 @@ def dim7_flow_diffs(db: Session, customer_id=None, supplier_id=None) -> list[dic
                      "gap_unbilled": None, "gap_uncollected": None,
                      "paid": r["paid"], "invoiced": r["invoiced"]})
     return rows
+
+# ------------------------------ 维度 8：预付款双轨勾稽（四期 W4 期1 R1 既定后续） --------------
+
+def dim8_prepay_parity(db: Session) -> list[dict]:
+    """PREPAY 池余额（资金台账轨）vs Σ设备预付剩余（运营轨），按项目勾稽。
+
+    计划书 R1：两套口径是同一笔钱——池只管资金进出（预付挂账/退回/核销），
+    devices 逐台字段管运营/计费结转。本维度把两轨余额摆在一起，差异即漏记/错轨。
+    只列任一轨非零的项目；|diff| > 0.01 → 「双轨差异」。
+    """
+    # 资金台账轨：PREPAY 池按项目 ΣIN−ΣOUT
+    pool_rows = db.execute(
+        select(CapitalTransaction.project_id, CapitalTransaction.direction,
+               func.coalesce(func.sum(CapitalTransaction.amount), 0))
+        .where(CapitalTransaction.pool == "PREPAY")
+        .group_by(CapitalTransaction.project_id, CapitalTransaction.direction)
+    ).all()
+    pool_by_proj: dict = {}
+    for pid, d, s in pool_rows:
+        cur = pool_by_proj.get(pid, Decimal(0))
+        pool_by_proj[pid] = cur + (Decimal(s) if d == "IN" else -Decimal(s))
+
+    # 运营轨：设备预付剩余（未结清；一期回租置位 settled=True 剩余按 0）
+    dev_by_proj: dict = {}
+    for d in db.execute(select(Device).where(Device.prepayment_amount > 0)).scalars().all():
+        if d.prepayment_settled:
+            continue
+        remaining = d.prepayment_amount - (d.prepayment_settled_amount or Decimal(0))
+        if remaining > 0:
+            dev_by_proj[d.project_id] = dev_by_proj.get(d.project_id, Decimal(0)) + remaining
+
+    rows = []
+    for pid in set(pool_by_proj) | set(dev_by_proj):
+        pool_bal = pool_by_proj.get(pid, Decimal(0))
+        dev_rem = dev_by_proj.get(pid, Decimal(0))
+        if pool_bal == 0 and dev_rem == 0:
+            continue
+        diff = pool_bal - dev_rem
+        proj = db.get(Project, pid)
+        rows.append({
+            "project_id": str(pid), "project_name": proj.name if proj else "—",
+            "pool_balance": q2(pool_bal), "device_remaining": q2(dev_rem), "diff": q2(diff),
+            "flags": ["双轨差异"] if abs(diff) > Decimal("0.01") else [],
+        })
+    return rows
