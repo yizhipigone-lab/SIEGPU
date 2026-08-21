@@ -1,9 +1,10 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 
 // 三期 §4.3 对账中心 —— 端到端（端到端铁律）：
-//   API 备数（销售合同 + 点亮计费 → 已计未开差异；确认收入审批通过 → 已确认未开）
+//   API 备数（销售合同 + 点亮计费 + 开半额票 → 已计未开/已开未收差异；确认收入审批通过）
 //   → UI 七维卡渲染 → 维度 1 行标红且 flags 文案正确 → 维度 6 注入 3 条模拟差异（验收管道）
 //   → 维度 7 差异明细含本合同 → API 追值（注入后恰好 3 条业财差异）。
+// 注：期2 换源后「已确认未开」不可达（确认恒 ≤ 开票），本 spec 按新口径断言。
 // 共享 dev 库无隔离：合同号 HT-F{RUN} 唯一锚点；cleanup_e2e 清理。
 
 const API = '/api'
@@ -59,6 +60,13 @@ test('对账中心：7 维渲染 + 差异标红 + 业财注入管道 + 差异明
     device_id: device.id, contract_id: contract.id, period_index: 1,
     billing_date: '2026-09-30', idempotency_key: `${device.id}-1`,
   }, '按台计费')
+  // 期2 换源：收入确认由开票驱动（计费不再出草稿）。开半额票 → 出草稿 → 审批通过。
+  // 金额关系：billed(88495.58) > invoiced(50000) → 已计未开 + 已开未收；
+  // 「已确认未开」在期2 口径下不可达（确认恒 ≤ 开票，rec 由发票驱动），不再断言。
+  await post(request, headers, '/invoices', {
+    contract_id: contract.id, amount: 56500, invoice_no: `INV-E2E-对账-${RUN}`,
+    issue_date: '2026-09-20',
+  }, '开半额票（含税 56500 → 不含税 50000）')
   // 确认收入审批通过
   const recs = await (await request.get(`${API}/revenue-recognitions`, {
     headers, params: { project_id: proj.id },
@@ -78,7 +86,7 @@ test('对账中心：7 维渲染 + 差异标红 + 业财注入管道 + 差异明
   const myRow = d1Card.locator('.n-data-table-tr', { hasText: contractNo })
   await expect(myRow).toBeVisible({ timeout: 8000 })
   await expect(myRow).toContainText('已计未开')
-  await expect(myRow).toContainText('已确认未开')
+  await expect(myRow).toContainText('已开未收')
   await expect(myRow).toHaveClass(/diff-row/)
 
   // ---- 维度 6：注入 3 条模拟差异（验收展示管道）----

@@ -80,7 +80,16 @@ test('收入判定：建合同预览 R1 → 保存自动判定 → 详情覆盖�
   await modal.waitFor()
 
   await selectRemoteByText(modal, '项目', projName, page)
-  await selectOptionByText(modal, '类型', '销售', page)
+  // 四期 W4 新增「合同类型」字段 → hasText '类型' 会双命中（类型/合同类型），此处 label 精确匹配
+  await modal.locator('.n-form-item')
+    .filter({ has: page.getByText('类型', { exact: true }) })
+    .locator('.n-base-selection').click()
+  await waitForMenu(page, true)
+  await page.waitForTimeout(280)
+  const typeOpt = page.locator('.n-base-select-option', { hasText: '销售' }).filter({ visible: true }).first()
+  await typeOpt.waitFor({ state: 'visible' })
+  await typeOpt.click()
+  await waitForMenu(page, false)
   // 实时预览：项目=经营租赁/自有 + 销售 → R1 经营租赁
   const preview = modal.getByTestId('judge-preview')
   await expect(preview, '选定项目+类型后应出现判定预览').toBeVisible({ timeout: 8000 })

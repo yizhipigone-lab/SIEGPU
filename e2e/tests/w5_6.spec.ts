@@ -165,19 +165,28 @@ test.describe.serial('W5-6 按台计费', () => {
   // ============ ② 双轨回归（HTTP 全栈）：旧订单维度 generate_billing 仍按 contract.monthly_rent ============
   test('② 双轨回归：seed 全新 legacy 订单 + light-on + generate_billing，device_id 空、金额>0', async ({ request }) => {
     const token = await apiLogin(request)
-    const auth = { Authorization: `Bearer ${token}` }
-    const [pj, eq, contracts] = await Promise.all([
-      request.get(`${API}/projects`, { headers: auth }).then(r => r.json()),
-      request.get(`${API}/equipment-models`, { headers: auth }).then(r => r.json()),
-      request.get(`${API}/contracts`, { headers: auth }).then(r => r.json()),
-    ])
-    // 去条件化（W5-6 审计）：显式选 monthly_rent>0 的 SALES 合同（legacy 金额来源）；不再用
-    // orders[length-1] + if/else——原实现可能选中已翻 device 的订单走 else 直接 PASS（假绿，没真测 legacy）。
-    const sales = contracts.items.find((c: any) => c.type === 'SALES' && Number(c.monthly_rent) > 0)
-    expect(sales, '应至少存在一个 monthly_rent>0 的 SALES 合同供 legacy 回归').toBeTruthy()
+    // 自造备数（原实现全局挑库中既有 monthly_rent>0 的 SALES 合同，库清后失稳假红；
+    // E2E 前缀 + cleanup_e2e 兜底清理）
+    const RUN2 = `lg${Date.now().toString(36)}`
+    const proj = await apiJson(request, token, 'POST', '/projects', { name: `E2E-legacy-${RUN2}` })
+    expect(proj.status).toBe(201)
+    const cust = await apiJson(request, token, 'POST', '/customers', { name: `客户-E2E-legacy-${RUN2}` })
+    expect(cust.status).toBe(201)
+    const eq = await apiJson(request, token, 'POST', '/equipment-models', {
+      name: `E2E-型号-legacy-${RUN2}`, category: '大卡', gpu_count: 8,
+    })
+    expect(eq.status).toBe(201)
+    // monthly_rent>0 的 SALES 合同（legacy 金额来源）
+    const salesRes = await apiJson(request, token, 'POST', '/contracts', {
+      project_id: proj.body.id, type: 'SALES', party_id: cust.body.id,
+      amount: '1000000', monthly_rent: '100000',
+      start_date: '2026-01-01', end_date: '2026-12-31',
+    })
+    expect(salesRes.status).toBe(201)
+    const sales = salesRes.body
     // seed 全新非批量订单（未挂设备 → assert_legacy_path 放行 legacy 路径，确定性消除 device 翻转风险）
     const order = await apiJson(request, token, 'POST', '/orders', {
-      project_id: pj.items[0].id, equipment_model_id: eq.items[0].id,
+      project_id: proj.body.id, equipment_model_id: eq.body.id,
       quantity: 3, unit_price: '50000',
     })
     expect(order.status).toBe(201)

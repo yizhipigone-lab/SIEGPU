@@ -1,7 +1,9 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 
-// 三期 §4.2 收入确认 —— 端到端（端到端铁律）：
-//   API 备数（经营租赁/自有项目 + 点亮设备 + 按台计费）→ 确认草稿自动出（不含税 + R1 方法快照）
+// 收入确认 —— 端到端（端到端铁律）：
+//   四期 W4 期2 起收入换源：开票（销售发票）→ 自动出确认草稿（不含税=发票不含税 + R1 方法快照）；
+//   计费仅作内部应收参考，不再出收入草稿。
+//   API 备数（经营租赁/自有项目 + 点亮设备 + 按台计费 + 开票）→ 确认草稿自动出
 //   → 科目映射（经营租赁 → 1122.01/6001.01）→ UI 收入确认页草稿可见
 //   → 审批中心通过（锚点=项目名）→ UI 状态 已同步EBS → 凭证弹窗追值借贷科目
 //   → API 追值：确认单状态/凭证/EBS 出站日志。
@@ -32,10 +34,10 @@ async function uiLogin(page: Page, username = 'cfo') {
   await expect(page).toHaveURL(/\/$/, { timeout: 8000 })
 }
 
-test('收入确认：计费出草稿 → 审批通过 → Mock 凭证 → 已同步EBS → 追值', async ({ page, request }) => {
+test('收入确认：开票出草稿 → 审批通过 → Mock 凭证 → 已同步EBS → 追值', async ({ page, request }) => {
   const headers = await apiLogin(request)
 
-  // ---- 备数：R1 项目 + 点亮设备 + 按台计费（自动出草稿）+ 科目映射 ----
+  // ---- 备数：R1 项目 + 点亮设备 + 按台计费（内部应收参考）+ 开票（期2：驱动收入确认）+ 科目映射 ----
   const proj = await post(request, headers, '/projects',
     { name: `E2E-确认-${RUN}`, business_type: '经营租赁', leasing_mode: '自有' }, '立项')
   const cust = await post(request, headers, '/customers', { name: `客户-E2E-确认-${RUN}` }, '客户')
@@ -60,6 +62,11 @@ test('收入确认：计费出草稿 → 审批通过 → Mock 凭证 → 已同
     device_id: device.id, contract_id: contract.id, period_index: 1,
     billing_date: '2026-09-30', idempotency_key: `${device.id}-1`,
   }, '按台计费')
+  // 期2 换源：销售发票开具 → 自动出收入确认草稿（无销售订单→无对账单前置，期3#4 注释见 invoice_service）
+  const invoice = await post(request, headers, '/invoices', {
+    contract_id: contract.id, amount: 113000, invoice_no: `INV-E2E-确认-${RUN}`,
+    issue_date: '2026-09-20',
+  }, '开票（含税 113000 → 不含税 100000）')
   await post(request, headers, '/gl-account-mappings', {
     business_event: '收入确认', revenue_method: '经营租赁',
     debit_account: '1122.01', credit_account: '6001.01',
@@ -100,7 +107,7 @@ test('收入确认：计费出草稿 → 审批通过 → Mock 凭证 → 已同
   expect(recs.items.length).toBe(1)
   const rec = recs.items[0]
   expect(rec.status).toBe('已同步EBS')
-  expect(Number(rec.amount)).toBeCloseTo(Number(billing.amount_ex_tax), 2) // 权责=不含税
+  expect(Number(rec.amount)).toBeCloseTo(Number(invoice.amount_ex_tax), 2) // 权责=发票不含税（期2 换源）
   expect(rec.revenue_method).toBe('经营租赁') // R1 快照
   expect(rec.voucher_json.debit_account).toBe('1122.01')
   const logs = await (await request.get(`${API}/ebs/logs`, {

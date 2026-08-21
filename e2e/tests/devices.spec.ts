@@ -154,7 +154,8 @@ test.describe('设备清单', () => {
     const sn = await createDeviceViaUI(page)
     // 勾选本设备行（按 sn 定位，不靠首行）
     await rowBySn(page, sn).locator('.n-checkbox').first().click()
-    await page.getByRole('button', { name: /批次组合/ }).click()
+    // W4 起页面有「批次组合」+「销售批次组合」两个按钮 → 开头锚定防 strict 双命中
+    await page.getByRole('button', { name: /^批次组合/ }).click()
 
     const modal = page.locator('.n-modal')
     await modal.waitFor()

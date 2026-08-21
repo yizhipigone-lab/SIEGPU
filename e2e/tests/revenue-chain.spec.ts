@@ -95,6 +95,12 @@ test('营收全链路串烧：立项→销售合同→采购→设备点亮→�
     ownership: '表内自有', leasing_mode: '自有',
   }, '设备')
 
+  // ---- 6.5 采购验收（期3 硬流转#1：未过采购验收的订单，设备不能登记在途）----
+  const acc = await apiPostJson(request, headers, '/acceptances', {
+    project_id: proj.id, acceptance_type: '采购验收', order_id: order.id,
+  }, '采购验收')
+  await apiPostJson(request, headers, `/acceptances/${acc.id}/approve`, {}, '采购验收通过')
+
   // ---- 7. 推进到点亮验收（点亮日=2026-09-01 月初 → 整月计费，算术干净）----
   await advanceToLit(request, headers, device.id, '2026-09-01')
 

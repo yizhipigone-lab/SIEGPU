@@ -178,6 +178,13 @@ test('② 放款阈值达成：批次 threshold=50，推 1 台点亮(50%)自动�
     expect(r.ok(), `batch-assign ${id}: ${await r.text()}`).toBeTruthy()
   }
 
+  // 期3 硬流转#1：采购验收通过 → 批次设备才能登记在途（发货）
+  const acc = await (await request.post(`${API}/acceptances`, {
+    headers, data: { project_id: proj.id, acceptance_type: '采购验收', order_id: order.id },
+  })).json()
+  const accOk = await request.post(`${API}/acceptances/${acc.id}/approve`, { headers })
+  expect(accOk.ok(), `采购验收通过: ${await accOk.text()}`).toBeTruthy()
+
   const procsOf = async () => (await (await request.get(`${API}/leasing/processes`, {
     headers, params: { project_id: proj.id },
   })).json()).items
