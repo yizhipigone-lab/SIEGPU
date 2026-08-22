@@ -1,11 +1,13 @@
 /**
- * client 入口：注册 conversation.composer.dock 槽位。
- * 参照 dshmarket / dsh-i18n 的 slots.inject/register 形态。
+ * client 入口：
+ * - 指数条挂 conversation.composer.dock（输入框正下方居中），正常文档流；
+ * - 新闻条同样挂 conversation.composer.dock（指数条下方），在对话窗口内滚动，
+ *   不做 fixed 浮层，避免遮挡设置等其他 UI。
  */
 
 import React from 'react'
 import type { Context } from '@deepseek-ai/cordis'
-import { TickerBar } from './TickerBar.tsx'
+import { QuotesBar, NewsBar } from './TickerBar.tsx'
 
 export const name = 'dsh-live-ticker'
 export const inject = ['slots']
@@ -14,9 +16,18 @@ export function apply(ctx: Context) {
   ctx.slots.inject('conversation.composer.dock', () =>
     ctx.slots.register({
       name: 'conversation.composer.dock',
-      id: 'live-ticker',
-      order: 100,
+      id: 'live-ticker-quotes',
+      order: 10,
       label: () => 'live-ticker',
-    }, () => React.createElement(TickerBar)),
+    }, () => React.createElement(QuotesBar)),
+  )
+
+  ctx.slots.inject('conversation.composer.dock', () =>
+    ctx.slots.register({
+      name: 'conversation.composer.dock',
+      id: 'live-ticker-news',
+      order: 20,
+      label: () => 'live-ticker',
+    }, () => React.createElement(NewsBar)),
   )
 }

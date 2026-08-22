@@ -82,118 +82,92 @@ window.__ModuleLoader__.load({
     var import_jsx_runtime = require("react/jsx-runtime");
     var QUOTE_POLL_MS = 5e3;
     var NEWS_POLL_MS = 6e4;
-    function TickerBar() {
+    var NEWS_BAR_H = 26;
+    function QuotesBar() {
       const [quotes, setQuotes] = (0, import_react.useState)([]);
-      const [quotesAt, setQuotesAt] = (0, import_react.useState)(null);
       const [quotesOk, setQuotesOk] = (0, import_react.useState)(true);
-      const [news, setNews] = (0, import_react.useState)([]);
-      const [newsStale, setNewsStale] = (0, import_react.useState)(false);
-      const [newsAt, setNewsAt] = (0, import_react.useState)(null);
-      const [newsErr, setNewsErr] = (0, import_react.useState)("");
-      const pausedRef = (0, import_react.useRef)(false);
       (0, import_react.useEffect)(() => {
         let alive = true;
-        let quoteTimer = 0;
-        let newsTimer = 0;
+        let timer = 0;
+        const pausedRef = { current: false };
         const onVisibility = () => {
           pausedRef.current = document.hidden;
-          if (!document.hidden) {
-            refreshQuotes();
-            refreshNews();
-          }
+          if (!document.hidden) void refresh();
         };
-        async function refreshQuotes() {
+        async function refresh() {
           if (pausedRef.current || !alive) return;
           const r = await fetchQuotes();
           if (!alive) return;
-          if (r.quotes.length > 0) {
-            setQuotes(r.quotes);
-            setQuotesAt(r.fetchedAt);
-          }
+          if (r.quotes.length > 0) setQuotes(r.quotes);
           setQuotesOk(r.ok);
-          scheduleQuotes();
+          timer = window.setTimeout(refresh, QUOTE_POLL_MS);
         }
-        async function refreshNews() {
-          if (pausedRef.current || !alive) return;
-          const r = await fetchNews();
-          if (!alive) return;
-          if (r.snapshot) {
-            setNews(r.snapshot.items);
-            setNewsStale(r.snapshot.stale);
-            setNewsAt(r.snapshot.fetchedAt);
-            setNewsErr("");
-          }
-          if (!r.ok && r.error) setNewsErr(r.error);
-          scheduleNews();
-        }
-        function scheduleQuotes() {
-          if (!alive) return;
-          quoteTimer = window.setTimeout(refreshQuotes, QUOTE_POLL_MS);
-        }
-        function scheduleNews() {
-          if (!alive) return;
-          newsTimer = window.setTimeout(refreshNews, NEWS_POLL_MS);
-        }
-        refreshQuotes();
-        refreshNews();
+        void refresh();
         document.addEventListener("visibilitychange", onVisibility);
         return () => {
           alive = false;
-          clearTimeout(quoteTimer);
-          clearTimeout(newsTimer);
+          clearTimeout(timer);
           document.removeEventListener("visibilitychange", onVisibility);
         };
       }, []);
-      const fmtTime = (t) => t ? new Date(t).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "";
-      return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+      return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quotesRoot, title: quotesOk ? "" : "\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u663E\u793A\u4E0A\u6B21\u6570\u636E", children: [
+        quotes.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.empty, children: "\u6682\u65E0\u884C\u60C5\u6570\u636E" }),
+        quotes.map((q) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteChip, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.quoteName, children: q.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.quotePrice, children: q.price.toFixed(2) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: changeStyle(q.changePct), children: [
+            q.changePct > 0 ? "\u25B2" : q.changePct < 0 ? "\u25BC" : "\u2014",
+            " ",
+            q.changePct > 0 ? "+" : "",
+            q.changePct.toFixed(2),
+            "%"
+          ] })
+        ] }, q.name))
+      ] });
+    }
+    function NewsBar() {
+      const [news, setNews] = (0, import_react.useState)([]);
+      (0, import_react.useEffect)(() => {
+        let alive = true;
+        let timer = 0;
+        const pausedRef = { current: false };
+        const onVisibility = () => {
+          pausedRef.current = document.hidden;
+          if (!document.hidden) void refresh();
+        };
+        async function refresh() {
+          if (pausedRef.current || !alive) return;
+          const r = await fetchNews();
+          if (!alive) return;
+          const items = r.snapshot?.items;
+          if (Array.isArray(items) && items.length > 0) {
+            setNews(items);
+          }
+          timer = window.setTimeout(refresh, NEWS_POLL_MS);
+        }
+        void refresh();
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => {
+          alive = false;
+          clearTimeout(timer);
+          document.removeEventListener("visibilitychange", onVisibility);
+        };
+      }, []);
+      return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.newsRoot, className: "lt-news-root", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("style", { children: `
             .lt-ticker-inner { animation: lt-ticker-scroll 100s linear infinite; }
-            .lt-ticker-scroll:hover .lt-ticker-inner { animation-play-state: paused; }
+            .lt-news-root:hover .lt-ticker-inner { animation-play-state: paused; }
             @keyframes lt-ticker-scroll {
               0% { transform: translateX(0); }
               100% { transform: translateX(-50%); }
             }
           ` }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "lt-ticker", style: styles.root, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("details", { open: true, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("summary", { style: styles.summary, children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.summaryTitle, children: "\u884C\u60C5" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: styles.meta, children: [
-                quotesAt ? `\u66F4\u65B0\u4E8E ${fmtTime(quotesAt)}` : "\u52A0\u8F7D\u4E2D\u2026",
-                !quotesOk && quotes.length > 0 ? "\uFF08\u8FDE\u63A5\u4E2D\u65AD\uFF0C\u663E\u793A\u4E0A\u6B21\u6570\u636E\uFF09" : ""
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteRow, children: [
-              quotes.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.empty, children: "\u6682\u65E0\u884C\u60C5\u6570\u636E" }),
-              quotes.map((q) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.quoteChip, children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.quoteName, children: q.name }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.quotePrice, children: q.price.toFixed(2) }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: changeStyle(q.changePct), children: [
-                  q.changePct > 0 ? "\u25B2" : q.changePct < 0 ? "\u25BC" : "\u2014",
-                  " ",
-                  q.changePct > 0 ? "+" : "",
-                  q.changePct.toFixed(2),
-                  "%"
-                ] })
-              ] }, q.name))
-            ] })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("details", { open: true, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("summary", { style: styles.summary, children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.summaryTitle, children: "\u8D22\u7ECF\u5FEB\u8BAF" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: styles.meta, children: [
-                newsAt ? `\u66F4\u65B0\u4E8E ${fmtTime(newsAt)}` : "\u52A0\u8F7D\u4E2D\u2026",
-                newsStale || newsErr ? `\uFF08${newsErr || "\u66F4\u65B0\u5931\u8D25\uFF0C\u663E\u793A\u4E0A\u6B21\u6570\u636E"}\uFF09` : ""
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.tickerWrap, className: "lt-ticker-scroll", children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.tickerInner, className: "lt-ticker-inner", children: [
-              news.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.empty, children: "\u6682\u65E0\u65B0\u95FB" }),
-              [...news, ...news].map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("a", { href: n.url, target: "_blank", rel: "noreferrer", title: n.title, style: styles.tickerItem, children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.tickerTime, children: n.showTime.slice(11) }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: n.title })
-              ] }, `${n.url}-${i}`))
-            ] }) })
-          ] })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.tickerInner, className: "lt-ticker-inner", children: [
+          news.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.empty, children: "\u6682\u65E0\u65B0\u95FB" }),
+          [...news, ...news].map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("a", { href: n.url, target: "_blank", rel: "noreferrer", title: n.title, style: styles.tickerItem, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.tickerTime, children: typeof n.showTime === "string" ? n.showTime.slice(11) : "" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: n.title })
+          ] }, `${n.url}-${i}`))
         ] })
       ] });
     }
@@ -203,20 +177,39 @@ window.__ModuleLoader__.load({
       return { ...styles.quotePct, color: "var(--dsw-alias-label-secondary, #9ca3af)" };
     }
     var styles = {
-      root: { fontSize: 13, color: "var(--dsw-alias-label-primary, #e5e7eb)" },
-      summary: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0", userSelect: "none" },
-      summaryTitle: { fontWeight: 600 },
-      meta: { fontSize: 11, color: "var(--dsw-alias-label-secondary, #9ca3af)" },
-      quoteRow: { display: "flex", flexWrap: "wrap", columnGap: 18, rowGap: 4, paddingBottom: 6 },
+      // 指数条：正常文档流（槽位本身在卡片下方），内容水平居中。
+      quotesRoot: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexWrap: "nowrap",
+        columnGap: 22,
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        fontSize: 13,
+        padding: "2px 0",
+        color: "var(--dsw-alias-label-primary, #e5e7eb)"
+      },
       quoteChip: { display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap", fontSize: 13 },
       quoteName: { color: "var(--dsw-alias-label-secondary, #9ca3af)", fontSize: 12 },
       quotePrice: { fontWeight: 700, fontVariantNumeric: "tabular-nums" },
       quotePct: { fontSize: 12, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
-      tickerWrap: { overflow: "hidden", paddingBottom: 4 },
-      tickerInner: { display: "flex", gap: 20, whiteSpace: "nowrap" },
+      // 新闻条：对话窗口内正常文档流（composer.dock 槽位，输入框下方），不浮层、不遮挡其他 UI。
+      newsRoot: {
+        display: "flex",
+        alignItems: "center",
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        fontSize: 12,
+        height: NEWS_BAR_H,
+        padding: "2px 0",
+        borderTop: "1px solid var(--dsw-alias-border-l1, #374151)",
+        color: "var(--dsw-alias-label-primary, #e5e7eb)"
+      },
+      tickerInner: { display: "flex", gap: 20, whiteSpace: "nowrap", alignItems: "baseline" },
       tickerItem: { display: "inline-flex", gap: 6, alignItems: "baseline", color: "var(--dsw-alias-label-primary, #e5e7eb)", textDecoration: "none", fontSize: 12 },
       tickerTime: { color: "var(--dsw-alias-label-secondary, #9ca3af)", fontVariantNumeric: "tabular-nums" },
-      empty: { color: "var(--dsw-alias-label-secondary, #9ca3af)" }
+      empty: { color: "var(--dsw-alias-label-secondary, #9ca3af)", padding: "0 8px" }
     };
     
     // src/client/index.tsx
@@ -227,10 +220,19 @@ window.__ModuleLoader__.load({
         "conversation.composer.dock",
         () => ctx.slots.register({
           name: "conversation.composer.dock",
-          id: "live-ticker",
-          order: 100,
+          id: "live-ticker-quotes",
+          order: 10,
           label: () => "live-ticker"
-        }, () => import_react2.default.createElement(TickerBar))
+        }, () => import_react2.default.createElement(QuotesBar))
+      );
+      ctx.slots.inject(
+        "conversation.composer.dock",
+        () => ctx.slots.register({
+          name: "conversation.composer.dock",
+          id: "live-ticker-news",
+          order: 20,
+          label: () => "live-ticker"
+        }, () => import_react2.default.createElement(NewsBar))
       );
     }
     
