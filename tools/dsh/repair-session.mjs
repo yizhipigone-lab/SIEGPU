@@ -56,8 +56,12 @@ for (const line of eventLines) {
 
 const newText = out.join('\n') + '\n'
 
-// 用 DSH 的 zstd 帧压缩写回（一帧装全部内容；DSH 的 scanZstdFrames 支持多帧，单帧也合法）
-const compressed = await compressZstdFrame(Buffer.from(newText, 'utf8'))
+// 按产品装帧格式写回：header 单独一帧 + 事件体一帧（参照 encodeMaterialization，
+// 启动器 assertZstdHeaderFrame 要求第一帧恰好只有一行头部，绝不能合并）。
+const headerFrame = await compressZstdFrame(Buffer.from(out[0] + '\n', 'utf8'))
+const bodyText = out.slice(1).join('\n') + '\n'
+const bodyFrame = await compressZstdFrame(Buffer.from(bodyText, 'utf8'))
+const compressed = Buffer.concat([headerFrame, bodyFrame])
 
 // 备份原文件再写回
 copyFileSync(file, file + '.bak')
