@@ -13,7 +13,7 @@ from app.models.billing import Billing, Invoice
 from app.models.capital import CapitalTransaction
 from app.models.delivery import DeliveryStage, Order
 from app.models.device import Device, DeviceStage
-from app.models.leasing import LeasingProcess
+from app.models.leasing import LeasingDisbursement, LeasingProcess
 from app.models.project import Contract, Project
 from app.models.project_workflow import ProjectWorkflow
 from app.models.sales_order import SalesOrder
@@ -338,18 +338,43 @@ def mark_step_done(db: Session, project_id: uuid.UUID, seq: int, note: str | Non
 
 
 def portfolio(db: Session) -> list[dict]:
-    """项目组合总览：每项目 current_step/状态/角色/停滞天数。"""
+    """项目组合总览：每项目 current_step/状态/角色/停滞天数 + 财务聚合（销售合同额/金租放款/预付余额）。
+
+    财务口径：sales_total=Σ销售合同 coalesce(含税,不含税)；leasing_disbursed=Σ leasing_disbursements
+    放款记录（W7-8 多笔放款不回写 actual_disbursement_amount，放款记录才是真源）；prepay_remaining=
+    Σ设备预付剩余（未结清）。三个 group_by 聚合查询，不逐项目循环（无 N+1）。"""
     wfs = db.execute(
         select(ProjectWorkflow).where(ProjectWorkflow.deleted_at.is_(None))
     ).scalars().all()
 
     project_ids = [wf.project_id for wf in wfs]
     project_map: dict[uuid.UUID, Project] = {}
+    sales_map: dict = {}
+    disbursed_map: dict = {}
+    prepay_map: dict = {}
     if project_ids:
         projects = db.execute(
             select(Project).where(Project.id.in_(project_ids))
         ).scalars().all()
         project_map = {p.id: p for p in projects}
+        sales_map = {pid: s for pid, s in db.execute(
+            select(Contract.project_id,
+                   func.coalesce(func.sum(func.coalesce(Contract.amount_incl_tax, Contract.amount)), 0))
+            .where(Contract.project_id.in_(project_ids), Contract.type == "SALES")
+            .group_by(Contract.project_id)).all()}
+        disbursed_map = {pid: s for pid, s in db.execute(
+            select(LeasingProcess.project_id,
+                   func.coalesce(func.sum(LeasingDisbursement.amount), 0))
+            .join(LeasingDisbursement, LeasingDisbursement.process_id == LeasingProcess.id)
+            .where(LeasingProcess.project_id.in_(project_ids))
+            .group_by(LeasingProcess.project_id)).all()}
+        prepay_map = {pid: s for pid, s in db.execute(
+            select(Device.project_id,
+                   func.coalesce(func.sum(Device.prepayment_amount
+                                          - func.coalesce(Device.prepayment_settled_amount, 0)), 0))
+            .where(Device.project_id.in_(project_ids),
+                   Device.prepayment_amount > 0, Device.prepayment_settled.is_(False))
+            .group_by(Device.project_id)).all()}
 
     rows = []
     for wf in wfs:
@@ -364,6 +389,9 @@ def portfolio(db: Session) -> list[dict]:
             "doer_role": current.get("doer_role", "") if current else "",
             "status": wf.status, "stagnation_days": stagnation,
             "total_steps": len(wf.steps), "done_count": sum(1 for s in wf.steps if s.get("status") == "done"),
+            "sales_total": float(sales_map.get(wf.project_id, 0)),
+            "leasing_disbursed": float(disbursed_map.get(wf.project_id, 0)),
+            "prepay_remaining": float(prepay_map.get(wf.project_id, 0)),
         })
     return rows
 

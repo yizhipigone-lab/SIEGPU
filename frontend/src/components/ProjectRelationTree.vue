@@ -118,8 +118,8 @@ async function submitLease() {
           <n-tag size="small" :bordered="false" type="warning">{{ lp.financing_type || lp.leasing_mode || '金租' }}</n-tag>
           <span style="flex:1">{{ lp.supplier_name || '—' }}</span>
           <span class="num" style="color:#64748B">申请 {{ money(lp.total_amount) }}</span>
-          <span v-if="lp.actual_disbursement_amount" class="num" style="color:#64748B">
-            已放款 {{ money(lp.actual_disbursement_amount) }}
+          <span v-if="lp.disbursed_total" class="num" style="color:#64748B">
+            已放款 {{ money(lp.disbursed_total) }}
           </span>
           <n-tag size="small" :type="statusTagType(lp.status) as any">{{ lp.status }}</n-tag>
         </div>

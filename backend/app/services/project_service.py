@@ -74,12 +74,12 @@ def project_relationships(db: Session, project_id) -> dict | None:
     孤儿数据不丢：无参照的采购合同进 orphan_purchase_contracts，
     未挂合同的采购订单/批次进 unlinked_orders。
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from app.models.billing import Invoice
     from app.models.delivery import Order
     from app.models.device import Device
-    from app.models.leasing import LeasingProcess
+    from app.models.leasing import LeasingDisbursement, LeasingProcess
     from app.models.master import Customer, Supplier
     from app.models.project import Contract
     from app.models.sales_order import SalesBatchDevice, SalesOrder
@@ -104,6 +104,12 @@ def project_relationships(db: Session, project_id) -> dict | None:
     leasing = db.execute(
         select(LeasingProcess).where(LeasingProcess.project_id == project_id)
     ).scalars().all()
+    # 放款真源：按申请聚合 Σ leasing_disbursements.amount
+    lp_ids = [lp.id for lp in leasing]
+    disbursed_by_proc = {pid: s for pid, s in db.execute(
+        select(LeasingDisbursement.process_id, func.coalesce(func.sum(LeasingDisbursement.amount), 0))
+        .where(LeasingDisbursement.process_id.in_(lp_ids))
+        .group_by(LeasingDisbursement.process_id)).all()} if lp_ids else {}
 
     # P1：发票（挂合同）与对账单（挂销售订单）——血缘树的资金/确认节点
     contract_ids = [c.id for c in contracts]
@@ -227,7 +233,9 @@ def project_relationships(db: Session, project_id) -> dict | None:
             "id": str(lp.id), "financing_type": lp.financing_type,
             "leasing_mode": lp.leasing_mode,
             "total_amount": _f(lp.total_amount),
-            "actual_disbursement_amount": _f(lp.actual_disbursement_amount),
+            # W7-8 多笔放款真源：Σ leasing_disbursements.amount（actual_disbursement_amount
+            # 仅旧一次性 disburse 回写，多笔下失真）
+            "disbursed_total": _f(disbursed_by_proc.get(lp.id)),
             "status": lp.status, "supplier_name": sup.get(lp.supplier_id),
             "start_date": lp.start_date.isoformat() if lp.start_date else None,
         } for lp in leasing],

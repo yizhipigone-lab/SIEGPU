@@ -169,3 +169,63 @@ test('P1：工作台直接发起金租申请（预填项目）→ 卡片树实�
   expect(Number(procs.items[0].total_amount)).toBe(800000)
   expect(procs.items[0].supplier_id).toBe(fund.id)
 })
+test('P1：项目总览增强——KPI 行 + 财务列 + 搜索/状态筛选', async ({ page, request }) => {
+  const headers = await apiLogin(request)
+  const RUN3 = `${RUN}pf`
+  // 造两个项目：A 带财务数据（销售合同 1000 + 金租放款 600 + 预付 500），B 空项目（筛选用对照）
+  const projA = await post(request, headers, '/projects', { name: `E2E-总览A-${RUN3}` }, '立项A')
+  const projB = await post(request, headers, '/projects', { name: `E2E-总览B-${RUN3}` }, '立项B')
+  const cust = await post(request, headers, '/customers', { name: `E2E客户-总览-${RUN3}` }, '客户')
+  const fund = await post(request, headers, '/suppliers',
+    { name: `E2E金租-总览-${RUN3}`, type: '资金供应商' }, '金租机构')
+  const model = await post(request, headers, '/equipment-models',
+    { name: `E2E-型号-总览-${RUN3}`, category: '大卡' }, '型号')
+  await post(request, headers, '/contracts', {
+    project_id: projA.id, type: 'SALES', party_id: cust.id, amount: 900, amount_incl_tax: 1000,
+  }, '销售合同')
+  const lpRes = await post(request, headers, '/leasing/processes', {
+    project_id: projA.id, supplier_id: fund.id, total_amount: 800,
+    annual_rate: 0.048, term_periods: 12, payment_freq: '月', repayment_method: '等额本息',
+  }, '金租申请')
+  // 期3 #5：验收通过才能放款 → 先造采购订单 + 采购验收通过
+  const order = await post(request, headers, '/orders', {
+    project_id: projA.id, equipment_model_id: model.id, quantity: 1, unit_price: 450000,
+  }, '采购订单')
+  const acc = await post(request, headers, '/acceptances', {
+    project_id: projA.id, acceptance_type: '采购验收', order_id: order.id,
+  }, '采购验收')
+  await post(request, headers, `/acceptances/${acc.id}/approve`, {}, '采购验收通过')
+  // 放款 600（disbursements 端点，actual_disbursement_amount 聚合来源）
+  await post(request, headers, `/leasing/processes/${lpRes.id}/disbursements`, {
+    amount: 600, disbursement_date: '2026-02-01', acceptance_id: acc.id,
+  }, '金租放款')
+  const dev = await post(request, headers, '/devices', {
+    project_id: projA.id, equipment_model_id: model.id, prepayment_amount: 500,
+    purchase_value: 450000, monthly_price: 50000, ownership: '表内自有',
+  }, '设备（预付 500）')
+  expect(dev.id).toBeTruthy()
+
+  await uiLogin(page)
+  await page.goto('/portfolio')
+  // KPI 行渲染
+  await expect(page.getByText('项目总数')).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText('销售合同总额')).toBeVisible()
+  // 项目 A 行：财务三列真值
+  const rowA = page.locator(`tr[data-project="E2E-总览A-${RUN3}"]`)
+  await expect(rowA).toBeVisible()
+  await expect(rowA).toContainText('1,000.00')   // 销售合同额（含税优先）
+  await expect(rowA).toContainText('600.00')     // 金租已放款
+  await expect(rowA).toContainText('500.00')     // 预付余额
+  // 搜索收窄：搜 A 见 A 不见 B
+  await page.getByTestId('pf-search').locator('input').fill(`总览A-${RUN3}`)
+  await expect(rowA).toBeVisible()
+  await expect(page.locator(`tr[data-project="E2E-总览B-${RUN3}"]`)).toBeHidden()
+  // 状态筛选：两个项目都是「进行中」→ 选中后两行都在
+  await page.getByTestId('pf-search').locator('input').clear()
+  await page.getByTestId('pf-status').locator('.n-base-selection').click()
+  const opt = page.locator('.n-base-select-option', { hasText: '进行中' }).filter({ visible: true }).first()
+  await opt.waitFor({ state: 'visible' })
+  await opt.click()
+  await expect(rowA).toBeVisible()
+  await expect(page.locator(`tr[data-project="E2E-总览B-${RUN3}"]`)).toBeVisible()
+})

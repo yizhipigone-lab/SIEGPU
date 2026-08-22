@@ -124,3 +124,51 @@ def test_invoice_matched_amount_defaults_zero(db):
     out = InvoiceOut.model_validate(isvc.list_invoices(db, contract_id=c.id)[0])
     assert out.matched_amount == D("0")
     assert inv.status == "已开"
+
+
+# ---------- 项目总览增强：财务聚合列 ----------
+def test_portfolio_financial_aggregates(db):
+    """portfolio 每项目带 销售合同额(含税优先)/金租放款/预付余额 三个聚合字段。"""
+    from app.models.device import Device
+    from app.models.leasing import LeasingProcess
+    from app.models.master import EquipmentModel, Supplier
+
+    p = _proj(db, name="聚合项目")
+    wfsvc.create_workflow(db, project_id=p.id)
+    cust = Customer(name=f"c{uuid.uuid4().hex[:6]}")
+    sup = Supplier(name=f"s{uuid.uuid4().hex[:6]}", type="资金供应商")
+    db.add_all([cust, sup]); db.flush()
+    # 销售合同：含税 1000（amount_incl_tax 优先于不含税 amount）
+    csvc.create_contract(db, project_id=p.id, type="SALES", party_id=cust.id,
+                         amount=D("900"), tax_rate=D("0.13"), amount_incl_tax=D("1000"))
+    # 金租放款 600（多笔放款口径：Σ leasing_disbursements.amount——
+    # add_disbursement 不回写 actual_disbursement_amount，只有旧一次性 disburse 写）
+    from datetime import date as _date
+
+    from app.models.leasing import LeasingDisbursement
+    lp = LeasingProcess(project_id=p.id, supplier_id=sup.id, total_amount=D("800"), status="已放款")
+    db.add(lp); db.flush()
+    db.add(LeasingDisbursement(process_id=lp.id, amount=D("600"),
+                               disbursement_date=_date(2026, 2, 1)))
+    # 设备预付 500 未结清 + 400 已回核销（只计剩余）
+    em = EquipmentModel(name=f"em{uuid.uuid4().hex[:6]}", category="大卡")
+    db.add(em); db.flush()
+    db.add(Device(sn=f"GPU-{uuid.uuid4().hex[:8]}", project_id=p.id, equipment_model_id=em.id,
+                  prepayment_amount=D("500")))
+    db.add(Device(sn=f"GPU-{uuid.uuid4().hex[:8]}", project_id=p.id, equipment_model_id=em.id,
+                  prepayment_amount=D("400"), prepayment_settled=True,
+                  prepayment_settled_amount=D("400")))
+    db.flush()
+
+    rows = wfsvc.portfolio(db)
+    row = next(r for r in rows if r["project_id"] == str(p.id))
+    assert row["sales_total"] == 1000.0
+    assert row["leasing_disbursed"] == 600.0
+    assert row["prepay_remaining"] == 500.0
+
+    # 无业务项目：三字段为 0 且不报错
+    p2 = _proj(db, name="空项目")
+    wfsvc.create_workflow(db, project_id=p2.id)
+    rows2 = wfsvc.portfolio(db)
+    row2 = next(r for r in rows2 if r["project_id"] == str(p2.id))
+    assert row2["sales_total"] == 0.0 and row2["leasing_disbursed"] == 0.0 and row2["prepay_remaining"] == 0.0
