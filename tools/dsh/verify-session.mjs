@@ -10,8 +10,8 @@ import { readFileSync } from 'node:fs'
 const file = process.argv[2]
 const buf = readFileSync(file)
 
-const dshZstd = 'file:///D:/Program Files/DSH/packages/session/session-persistence-jsonl/src/zstd.ts'
-const dshFormat = 'file:///D:/Program Files/DSH/packages/session/session-persistence-jsonl/src/format.ts'
+const dshZstd = 'file:///D:/Program Files/DSH/packages/session/session-persistence-jsonl/lib/types/zstd.js'
+const dshFormat = 'file:///D:/Program Files/DSH/packages/session/session-persistence-jsonl/lib/types/format.js'
 const { scanZstdFrames, decompressZstdFrame } = await import(dshZstd)
 const { scanLog } = await import(dshFormat)
 

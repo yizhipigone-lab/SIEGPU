@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 const file = process.argv[2]
 if (!file) { console.error('usage: node repair-session.mjs <session.jsonl.zstd>'); process.exit(2) }
 
-const dshZstd = 'file:///D:/Program Files/DSH/packages/session/session-persistence-jsonl/src/zstd.ts'
+const dshZstd = 'file:///D:/Program Files/DSH/packages/session/session-persistence-jsonl/lib/types/zstd.js'
 const { scanZstdFrames, decompressZstdFrame, compressZstdFrame } = await import(dshZstd)
 
 const buf = readFileSync(file)
