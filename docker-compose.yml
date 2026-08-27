@@ -19,6 +19,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://siegpu:${DB_PASSWORD:-pw}@db:5432/siegpu
       JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      # 智能助手（对话大脑）：DeepSeek API key 只走环境变量，在项目根 .env 配置
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-deepseek-chat}
     depends_on:
       db:
         condition: service_healthy

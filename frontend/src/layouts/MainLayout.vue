@@ -7,7 +7,7 @@ import {
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import {
-  Bell, Boxes, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Coins, Cpu,
+  Bell, Bot, Boxes, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Coins, Cpu,
   Eye, EyeOff, Info,
   FileSignature, FileText, FolderKanban, GitCompareArrows, HelpCircle, Landmark, LayoutDashboard, LogOut, Package, Receipt,
   Share2, ShieldCheck, TrendingUp, User, Users, Wallet,
@@ -21,6 +21,7 @@ import { HELP_TERMS } from '../utils/glossary'
 import { isMenuAllowed, readShowAllMenus, writeShowAllMenus } from '../utils/roleMenu'
 import { api } from '../api/client'
 import CommandPalette from '../components/CommandPalette.vue'
+import AssistantDrawer from '../components/AssistantDrawer.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -207,10 +208,16 @@ let notifTimer: number | undefined
 
 // —— 命令面板（Ctrl+K / ⌘K）：按动作搜索直达页面，新手不用记菜单归属 ——
 const paletteOpen = ref(false)
+// —— 智能助手（Ctrl+J / ⌘J）：右侧抽屉对话，与命令面板互补——面板管「去哪」，助手管「怎么办」——
+const assistantOpen = ref(false)
 function onGlobalKey(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     paletteOpen.value = !paletteOpen.value
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+    e.preventDefault()
+    assistantOpen.value = !assistantOpen.value
   }
 }
 
@@ -254,6 +261,14 @@ onUnmounted(() => {
           <n-breadcrumb-item>{{ currentTitle }}</n-breadcrumb-item>
         </n-breadcrumb>
         <div class="topbar-actions">
+          <n-button
+            quaternary size="small" aria-label="智能助手"
+            title="智能助手：问数据、问流程（Ctrl+J）"
+            data-testid="assistant-btn"
+            @click="assistantOpen = true"
+          >
+            <template #icon><n-icon><Bot /></n-icon></template>
+          </n-button>
           <n-button
             quaternary size="small" aria-label="命令面板"
             title="按动作搜索页面（Ctrl+K）"
@@ -337,6 +352,7 @@ onUnmounted(() => {
     </n-layout>
 
     <command-palette v-model:show="paletteOpen" />
+    <assistant-drawer v-model:show="assistantOpen" :page-context="`${currentTitle} ${route.path}`" />
   </n-layout>
 </template>
 

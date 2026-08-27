@@ -1168,6 +1168,52 @@ CREATE TABLE gl_account_mappings (
 CREATE UNIQUE INDEX uq_glam_event_method ON gl_account_mappings(business_event, COALESCE(revenue_method, '')) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_glam_updated BEFORE UPDATE ON gl_account_mappings FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ============================ 智能助手（对话大脑 P0，2026-08-27） ============================
+-- 与 alembic 0024 双写一致。会话线：(user_id, channel) 部分唯一；消息流水承担审计 + 配额原料。
+CREATE TABLE assistant_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    channel VARCHAR(64) NOT NULL DEFAULT 'main',
+    title VARCHAR(200),
+    page_context VARCHAR(200),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_asst_session_channel ON assistant_sessions(user_id, channel) WHERE deleted_at IS NULL;
+CREATE INDEX idx_asst_session_user ON assistant_sessions(user_id, updated_at DESC) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_asst_sessions_updated BEFORE UPDATE ON assistant_sessions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE assistant_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES assistant_sessions(id),
+    role VARCHAR(16) NOT NULL CHECK (role IN ('user','assistant','tool')),
+    content TEXT NOT NULL DEFAULT '',
+    tool_calls JSONB,
+    tokens_used INTEGER NOT NULL DEFAULT 0,
+    feedback VARCHAR(8),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_asst_msg_session ON assistant_messages(session_id, created_at) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_asst_messages_updated BEFORE UPDATE ON assistant_messages FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- ============================ 助手反馈与问题缺口（体验包 #7，2026-08-27） ============================
+-- 与 alembic 0025 双写一致。messages.feedback=👍/👎；gaps=👎 问题落表，驱动补工具/补 KB。
+CREATE TABLE assistant_gaps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    question TEXT NOT NULL DEFAULT '',
+    answer_head VARCHAR(200),
+    tools_used JSONB,
+    reason VARCHAR(32) NOT NULL DEFAULT 'user_downvote',
+    resolved BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_asst_gap_user ON assistant_gaps(user_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_asst_gaps_updated BEFORE UPDATE ON assistant_gaps FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 -- ============================ 完成：52 张表 ============================
 -- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
 -- projects, contracts, leasing_processes, leasing_nodes,

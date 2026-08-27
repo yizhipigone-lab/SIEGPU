@@ -537,3 +537,59 @@ def test_alembic_0023_revenue_invoice():
     assert "uq_rr_invoice" in code
     down = code.split("def downgrade")[1]
     assert "DROP COLUMN IF EXISTS invoice_id" in down
+
+# ---- 0024 智能助手（对话大脑 P0）：assistant_sessions + assistant_messages（2 新表，纯加法） ----
+
+ALEMBIC_0024 = ROOT / "alembic" / "versions" / "0024_assistant.py"
+
+ASST_TABLES = ("assistant_sessions", "assistant_messages")
+
+
+def test_schema_sql_assistant_tables():
+    sql = _read(SCHEMA_SQL)
+    for t in ASST_TABLES:
+        assert f"CREATE TABLE {t}" in sql
+    assert "uq_asst_session_channel" in sql
+    assert "idx_asst_msg_session" in sql
+    assert "trg_asst_sessions_updated" in sql
+    assert "trg_asst_messages_updated" in sql
+    assert "role IN ('user','assistant','tool')" in sql
+    # P0 不做写操作/认知沉淀：不得出现 confirm_tokens / cognition 空表
+    assert "assistant_confirm_tokens" not in sql
+    assert "assistant_cognition" not in sql
+
+
+def test_alembic_0024_creates_and_drops_all():
+    code = _read(ALEMBIC_0024)
+    assert 'revision = "0024_assistant"' in code
+    assert 'down_revision = "0023_revenue_from_invoice"' in code
+    for t in ASST_TABLES:
+        assert f"CREATE TABLE {t}" in code
+    down = code.split("def downgrade")[1]
+    for t in ASST_TABLES:
+        assert f"DROP TABLE IF EXISTS {t}" in down
+    # 纯加表无损可逆：downgrade 无数据清理语句
+    assert "DELETE FROM" not in down
+# ---- 0025 助手反馈与问题缺口（体验包 #7）：messages + feedback；assistant_gaps 新表 ----
+
+ALEMBIC_0025 = ROOT / "alembic" / "versions" / "0025_assistant_feedback.py"
+
+
+def test_schema_sql_assistant_feedback():
+    sql = _read(SCHEMA_SQL)
+    assert "feedback VARCHAR(8)" in sql
+    assert "CREATE TABLE assistant_gaps" in sql
+    assert "idx_asst_gap_user" in sql
+    assert "trg_asst_gaps_updated" in sql
+
+
+def test_alembic_0025_creates_and_drops_all():
+    code = _read(ALEMBIC_0025)
+    assert 'revision = "0025_assistant_feedback"' in code
+    assert 'down_revision = "0024_assistant"' in code
+    assert "ADD COLUMN IF NOT EXISTS feedback" in code
+    assert "CREATE TABLE assistant_gaps" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP TABLE IF EXISTS assistant_gaps" in down
+    assert "DROP COLUMN IF EXISTS feedback" in down
+    assert "DELETE FROM" not in down
