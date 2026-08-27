@@ -1,8 +1,9 @@
-"""审计留痕测试：关键业务动作写入 audit_logs + user_id 降级路径。"""
+"""审计留痕测试：关键业务动作写入 audit_logs + FK 兜底契约（#4）。"""
 import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.master import Customer, EquipmentModel, Supplier
@@ -102,7 +103,7 @@ def test_allocate_and_return_write_audit(db):
     assert len(al) == 1 and al[0].entity_type == "capital_allocation" and al[0].entity_id == alloc.id
     assert al[0].user_id == u.id and al[0].after_json["amount"] == "200000"
     assert len(rt) == 1 and rt[0].entity_type == "capital_allocation" and rt[0].entity_id == alloc.id
-    assert rt[0].after_json["return_date"] == "2026-02-01"
+    assert rt[0].after_json["actual_return_date"] == "2026-02-01"  # #4：字段名规范化为实体属性
 
 
 # ---------- 验收通过 → ACCEPT_APPROVE ----------
@@ -134,17 +135,13 @@ def test_light_on_writes_light_on(db):
     assert lo[0].user_id == u.id and lo[0].after_json["date"] == "2026-09-15"
 
 
-# ---------- 降级路径：user_id 不存在 → 仍写入且 user_id 为 None ----------
-def test_audit_log_unknown_user_degrades_to_null(db):
-    ghost = uuid.uuid4()  # 不在 users 表
+# ---------- #4 契约变更：user_id 不再查库降级——FK 约束兜底（认证链保证 user_id 恒有效） ----------
+def test_audit_log_rejects_unknown_user_by_fk(db):
+    ghost = uuid.uuid4()  # 不在 users 表 → flush 时 FK 拦截（原先降级 NULL 的行为已删）
     audit.log(db, user_id=ghost, action="DISBURSE", target_type="leasing_process",
               target_id=None, after_json={"amount": "1"})
-    db.flush()
-
-    logs = _logs(db)
-    assert len(logs) == 1
-    assert logs[0].user_id is None
-    assert logs[0].action == "DISBURSE" and logs[0].entity_type == "leasing_process"
+    with pytest.raises(Exception):  # noqa: B017 —— IntegrityError（FK violation）
+        db.flush()  # session 由夹具 close/rollback 兜底清理
 
 
 def test_capital_txn_writes_audit(db):

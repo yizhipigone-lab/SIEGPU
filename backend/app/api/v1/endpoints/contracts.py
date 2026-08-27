@@ -131,6 +131,11 @@ def delete_contract(cid: UUID, db: Session = Depends(get_db), user: User = Depen
     c = svc.get_contract_or_404(db, cid)
     from datetime import datetime, timezone
     c.deleted_at = datetime.now(timezone.utc)
+    # #4 审计补漏：走查发现端点级软删除原先不留审计（架构评审 2026-08-27 §3.1）
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=user.id, action="DELETE", target_type="contract",
+               target_id=c.id, after_json={"contract_no": c.contract_no or "",
+                                           "status": c.status, "soft_deleted": True})
     db.commit()
 
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BusinessError, InsufficientAllocatable
 from app.models.capital import CapitalAllocation, CapitalTransaction
 from app.models.project import Project
+from app.services.audit_service import audited
 
 
 # ---------------- 查询 ----------------
@@ -222,6 +223,8 @@ def pool_summary(db: Session) -> dict:
 
 # ---------------- 写入 ----------------
 
+@audited(action="CAPITAL_TXN", target_type="capital_transaction",
+         fields=["source_type", "direction", "amount"])
 def record_transaction(db: Session, *, created_by, **kw) -> CapitalTransaction:
     proj = db.get(Project, kw["project_id"])
     if not proj or proj.deleted_at is not None:
@@ -230,17 +233,16 @@ def record_transaction(db: Session, *, created_by, **kw) -> CapitalTransaction:
     # （付款按池拆分 disburse、预付、还银行 repay_bank）里，用 _assert_pool_sufficient。
     txn = CapitalTransaction(created_by=created_by, **kw)
     db.add(txn)
-    db.flush()  # 触发唯一约束等；commit 由 endpoint 负责
-    from app.services import audit_service as _audit
-    _audit.log(db, user_id=created_by, action="CAPITAL_TXN", target_type="capital_transaction",
-               target_id=txn.id, after_json={"source_type": kw.get("source_type", ""),
-               "direction": kw.get("direction", ""), "amount": str(txn.amount)})
+    db.flush()  # 触发唯一约束等；commit 由 endpoint 负责（审计由 @audited 声明式留痕）
     return txn
 
 
 # ---------------- 四期 W4：资金池专用动作（记借款/还银行/预付/退回/核销） ----------------
 
 def _log_pool(db, user_id, action, txn, extra=None):
+    """#4 渐进豁免：record_prepayment / refund_prepayment 返回双实体、审计带 side
+    区分两路流水——计算型 payload 不适合声明式装饰器，保留函数体留痕（audit_service
+    「用法二」），其余资金池动作已全部迁移 @audited。"""
     from app.services import audit_service as _audit
     after = {"source_type": txn.source_type, "direction": txn.direction, "pool": txn.pool,
              "amount": str(txn.amount)}
@@ -250,6 +252,8 @@ def _log_pool(db, user_id, action, txn, extra=None):
                target_id=txn.id, after_json=after)
 
 
+@audited(action="CAPITAL_TXN", target_type="capital_transaction",
+         fields=["source_type", "direction", "pool", "amount"])
 def record_bank_loan(db: Session, *, project_id, amount, transaction_date, created_by,
                      bank_id=None, note=None, idempotency_key=None) -> CapitalTransaction:
     """记一笔银行借款 → 银行池 IN（pool=BANK）。"""
@@ -262,10 +266,11 @@ def record_bank_loan(db: Session, *, project_id, amount, transaction_date, creat
                              idempotency_key=idempotency_key or f"bankloan:{uuid.uuid4()}")
     db.add(txn)
     db.flush()
-    _log_pool(db, created_by, "CAPITAL_TXN", txn)
     return txn
 
 
+@audited(action="CAPITAL_TXN", target_type="capital_transaction",
+         fields=["source_type", "direction", "pool", "amount"])
 def repay_bank(db: Session, *, project_id, amount, transaction_date, created_by,
                bank_id=None, note=None, idempotency_key=None) -> CapitalTransaction:
     """还银行 → 银行池 OUT（前置校验银行池余额充足）。银行池=持有的银行借款余额，还款即减少。"""
@@ -277,7 +282,6 @@ def repay_bank(db: Session, *, project_id, amount, transaction_date, created_by,
                              idempotency_key=idempotency_key or f"repaybank:{uuid.uuid4()}")
     db.add(txn)
     db.flush()
-    _log_pool(db, created_by, "CAPITAL_TXN", txn)
     return txn
 
 
@@ -329,6 +333,8 @@ def refund_prepayment(db: Session, *, project_id, amount, transaction_date, crea
     return hang_out, cash_in
 
 
+@audited(action="CAPITAL_TXN", target_type="capital_transaction",
+         fields=["source_type", "direction", "pool", "amount"])
 def offset_prepayment(db: Session, *, project_id, amount, transaction_date, created_by,
                       invoice_id=None, contract_id=None, note=None, idempotency_key=None) -> CapitalTransaction:
     """预付核销（采购验收拿到发票）：预付款池(挂账) OUT，抵减应付（不涉现金）。"""
@@ -341,10 +347,11 @@ def offset_prepayment(db: Session, *, project_id, amount, transaction_date, crea
                                   idempotency_key=idempotency_key or f"prepay-offset:{uuid.uuid4()}")
     db.add(hang_out)
     db.flush()
-    _log_pool(db, created_by, "CAPITAL_TXN", hang_out)
     return hang_out
 
 
+@audited(action="ALLOCATE", target_type="capital_allocation",
+         fields=["from_project_id", "to_project_id", "amount"])
 def allocate(
     db: Session,
     *,
@@ -391,9 +398,6 @@ def allocate(
     )
     db.add(alloc)
     db.flush()
-    from app.services import audit_service as _audit2
-    _audit2.log(db, user_id=approved_by, action="ALLOCATE", target_type="capital_allocation",
-                target_id=alloc.id, after_json={"from": str(from_project_id), "to": str(to_project_id), "amount": str(amount)})
     return alloc
 
 
@@ -432,12 +436,15 @@ def reverse_transaction(db: Session, *, txn_id, reversed_by, note: str | None = 
     )
     db.add(rev)
     db.flush()
+    # #4 渐进豁免：审计对象=被红冲的原流水（entity_id 语义），装饰器只读返回实体，保留函数体留痕
     from app.services import audit_service as _audit4
     _audit4.log(db, user_id=reversed_by, action="REVERSE", target_type="capital_transaction",
                 target_id=orig.id, after_json={"reversal_id": str(rev.id), "amount": str(orig.amount)})
     return rev
 
 
+@audited(action="ALLOCATE_RETURN", target_type="capital_allocation",
+         fields=["status", "actual_return_date", "amount"])
 def return_allocation(db: Session, *, allocation_id, returned_by, return_date) -> CapitalAllocation:
     """调配归还：反向 2 条流水（B 出 / A 入，source=调配归还）+ 状态→已归还。净 0。"""
     alloc = db.get(CapitalAllocation, allocation_id)
@@ -461,7 +468,4 @@ def return_allocation(db: Session, *, allocation_id, returned_by, return_date) -
     alloc.status = "已归还"
     alloc.actual_return_date = return_date
     db.flush()
-    from app.services import audit_service as _audit3
-    _audit3.log(db, user_id=returned_by, action="ALLOCATE_RETURN", target_type="capital_allocation",
-                target_id=alloc.id, after_json={"amount": str(alloc.amount), "return_date": str(return_date)})
     return alloc
