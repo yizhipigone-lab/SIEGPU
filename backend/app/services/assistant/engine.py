@@ -44,7 +44,7 @@ def _headers() -> dict:
 
 
 def chat_completion(messages: list[dict], *, tools: list[dict] | None = None,
-                    max_tokens: int = 2048, _retried: bool = False) -> dict[str, Any]:
+                    max_tokens: int = 4096, _retried: bool = False) -> dict[str, Any]:
     """非流式补全（工具轮用）。返回 {success, message|None, usage, error_kind, error}。"""
     if not available():
         return {"success": False, "error_kind": "NO_API_KEY",
@@ -70,7 +70,14 @@ def chat_completion(messages: list[dict], *, tools: list[dict] | None = None,
                     "error": f"LLM 服务返回 {r.status_code}: {r.text[:200]}",
                     "message": None, "usage": {}}
         data = r.json()
-        return {"success": True, "message": data["choices"][0]["message"],
+        msg = data["choices"][0]["message"]
+        # reasoning 模型（v4-flash）思考可能耗尽 token 预算 → content 为空：按可重试错误处理
+        if not (msg.get("content") or msg.get("tool_calls")):
+            if not _retried:
+                return chat_completion(messages, tools=tools, max_tokens=max_tokens, _retried=True)
+            return {"success": False, "error_kind": "EMPTY",
+                    "error": "模型返回空内容（reasoning 耗尽预算）", "message": None, "usage": {}}
+        return {"success": True, "message": msg,
                 "usage": data.get("usage", {}), "error_kind": None, "error": None}
     except httpx.HTTPError as exc:
         if _is_transient(None, str(exc)) and not _retried:
@@ -82,7 +89,7 @@ def chat_completion(messages: list[dict], *, tools: list[dict] | None = None,
                 "message": None, "usage": {}}
 
 
-def chat_stream(messages: list[dict], *, max_tokens: int = 2048) -> Generator[dict[str, Any], None, None]:
+def chat_stream(messages: list[dict], *, max_tokens: int = 4096) -> Generator[dict[str, Any], None, None]:
     """流式补全（最终成文用）。逐 yield {"delta": str}；结尾 {"done": True, "usage": {...}}；
     失败 yield 单个 {"error_kind": ..., "error": ...} 后结束——同样不抛异常。"""
     if not available():

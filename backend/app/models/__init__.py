@@ -1,7 +1,8 @@
 """导入全部模型，便于 Alembic autogenerate 与 ORM 关系解析。"""
 from app.models.acceptance import AcceptanceRecord
 from app.models.asset import Asset
-from app.models.assistant import AssistantGap, AssistantMessage, AssistantSession
+from app.models.assistant import (AssistantCognition, AssistantConfirmToken, AssistantGap,
+                                     AssistantMessage, AssistantSession)
 from app.models.base import Base
 from app.models.billing import Billing, Invoice
 from app.models.capital import CapitalAllocation, CapitalTransaction
@@ -53,7 +54,7 @@ __all__ = [
     "AcceptanceRecord",
     "Billing", "Invoice",
     "Repayment",
-    "Asset", "AssistantSession", "AssistantMessage", "AssistantGap",
+    "Asset", "AssistantSession", "AssistantMessage", "AssistantGap", "AssistantCognition", "AssistantConfirmToken",
     "ProfitScenario",
     "ServiceConfirmation",
     "WorkflowTemplate", "ProjectWorkflow", "StepAuditLog",

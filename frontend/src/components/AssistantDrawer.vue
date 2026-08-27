@@ -20,6 +20,13 @@ const route = useRoute()
 const router = useRouter()
 
 interface Link { label: string; route: string }
+interface ConfirmCard {
+  kind: 'confirm'; token_id: string; action: string; label: string
+  params: Record<string, any>; impact_amount: number | null; impact_desc: string
+  warnings: string[]; expires_in_minutes: number
+  status?: 'pending' | 'done' | 'failed' | 'cancelled' | 'expired'
+  message?: string
+}
 interface Msg {
   id?: string
   role: 'user' | 'assistant'
@@ -29,6 +36,7 @@ interface Msg {
   progress?: string[]
   links?: Link[]
   feedback?: 'up' | 'down' | null
+  cards?: ConfirmCard[]
 }
 
 const messages = ref<Msg[]>([])
@@ -138,6 +146,9 @@ async function send(q?: string) {
           else if (data.type === 'progress') {
             if (bot.progress && !bot.progress.includes(data.text)) bot.progress.push(data.text)
             scrollBottom()
+          } else if (data.type === 'card' && data.card) {
+            bot.cards = [...(bot.cards || []), { ...data.card, status: 'pending' as const }]
+            scrollBottom()
           } else if (data.type === 'done') {
             bot.lowConfidence = !!data.low_confidence
             bot.links = data.links || []
@@ -181,6 +192,38 @@ async function resetChat() {
   messages.value = []
 }
 
+async function confirmCard(m: Msg, card: ConfirmCard) {
+  if (card.status && card.status !== 'pending') return
+  try {
+    const r = await fetch('/api/assistant/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+      body: JSON.stringify({ token_id: card.token_id }),
+    })
+    const data = await r.json()
+    card.status = data.ok ? 'done' : (data.status === 410 ? 'expired' : 'failed')
+    card.message = data.message || ''
+  } catch (e: any) {
+    card.status = 'failed'; card.message = e?.message || '网络异常'
+  }
+}
+
+async function cancelCard(m: Msg, card: ConfirmCard) {
+  if (card.status && card.status !== 'pending') return
+  try {
+    await fetch('/api/assistant/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+      body: JSON.stringify({ token_id: card.token_id }),
+    })
+  } catch { /* 静默 */ }
+  card.status = 'cancelled'; card.message = '已取消'
+}
+
+function statusText(s?: string): string {
+  return ({ pending: '待确认', done: '✅ 已执行', failed: '❌ 失败', cancelled: '已取消', expired: '⏰ 已过期' } as Record<string, string>)[s || 'pending'] || ''
+}
+
 function go(l: Link) {
   router.push(l.route)
 }
@@ -197,7 +240,7 @@ function onEnter(e: KeyboardEvent) {
       <template #header>
         <div style="display:flex;align-items:center;gap:8px">
           <n-icon size="18" color="#2563eb"><Bot /></n-icon>
-          <span>智能助手</span>
+          <span>AI 老虎</span>
           <n-tag v-if="quotaLeft !== null" size="tiny" :bordered="false" type="info">
             今日额度 {{ Math.round(quotaLeft / 1000) }}k
           </n-tag>
@@ -250,6 +293,24 @@ function onEnter(e: KeyboardEvent) {
               <n-spin v-if="m.pending && !m.content" size="small" style="margin-top:4px" />
               <div v-if="m.lowConfidence" class="low-conf">⚠️ 低置信：部分数字未溯源到系统数据，请核实</div>
             </div>
+            <div v-for="card in m.cards || []" :key="card.token_id" class="confirm-card">
+              <div class="cc-head">
+                <span class="cc-badge">{{ card.label }}</span>
+                <span class="cc-status" :class="card.status">{{ statusText(card.status) }}</span>
+              </div>
+              <table class="cc-params">
+                <tr v-for="(v, k) in card.params" :key="k"><td>{{ k }}</td><td>{{ v ?? '—' }}</td></tr>
+              </table>
+              <div v-if="card.impact_amount !== null" class="cc-amount">¥ {{ card.impact_amount.toLocaleString() }}</div>
+              <div class="cc-desc">{{ card.impact_desc }}</div>
+              <div v-for="(w, j) in card.warnings" :key="j" class="cc-warn">⚠️ {{ w }}</div>
+              <div v-if="card.status === 'pending'" class="cc-actions">
+                <n-button size="tiny" type="primary" @click="confirmCard(m, card)">确认执行</n-button>
+                <n-button size="tiny" quaternary @click="cancelCard(m, card)">取消</n-button>
+                <span class="cc-ttl">{{ card.expires_in_minutes }} 分钟内有效</span>
+              </div>
+              <div v-if="card.message" class="cc-msg">{{ card.message }}</div>
+            </div>
             <div v-if="m.role === 'assistant' && !m.pending" class="msg-actions">
               <n-button
                 v-for="l in m.links || []" :key="l.route"
@@ -295,6 +356,20 @@ function onEnter(e: KeyboardEvent) {
   background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 4px 8px;
 }
 .msg-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.confirm-card { border: 1px solid #FDE68A; background: #FFFBEB; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.cc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.cc-badge { background: #D97706; color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 12px; font-weight: 600; }
+.cc-status { font-size: 12px; color: #64748B; }
+.cc-status.done { color: #16A34A; } .cc-status.failed { color: #DC2626; }
+.cc-params { border-collapse: collapse; margin: 4px 0; width: 100%; }
+.cc-params td { border: 1px solid #FDE68A; padding: 3px 8px; font-size: 12px; }
+.cc-params td:first-child { color: #92400E; width: 40%; }
+.cc-amount { font-size: 18px; font-weight: 700; color: #B45309; margin: 4px 0; }
+.cc-desc { font-size: 12px; color: #64748B; }
+.cc-warn { font-size: 12px; color: #B45309; margin-top: 4px; }
+.cc-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.cc-ttl { font-size: 11px; color: #92400E; }
+.cc-msg { font-size: 12px; color: #475569; margin-top: 6px; }
 .bubble :deep(.md-table) { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
 .bubble :deep(.md-table td) { border: 1px solid #CBD5E1; padding: 3px 8px; }
 </style>

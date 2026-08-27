@@ -554,9 +554,6 @@ def test_schema_sql_assistant_tables():
     assert "trg_asst_sessions_updated" in sql
     assert "trg_asst_messages_updated" in sql
     assert "role IN ('user','assistant','tool')" in sql
-    # P0 不做写操作/认知沉淀：不得出现 confirm_tokens / cognition 空表
-    assert "assistant_confirm_tokens" not in sql
-    assert "assistant_cognition" not in sql
 
 
 def test_alembic_0024_creates_and_drops_all():
@@ -593,3 +590,46 @@ def test_alembic_0025_creates_and_drops_all():
     assert "DROP TABLE IF EXISTS assistant_gaps" in down
     assert "DROP COLUMN IF EXISTS feedback" in down
     assert "DELETE FROM" not in down
+# ---- 0026 认知沉淀（M-A）----
+
+def test_schema_sql_assistant_cognition():
+    sql = _read(SCHEMA_SQL)
+    assert "CREATE TABLE assistant_cognition" in sql
+    assert "uq_asst_cog_user_key" in sql
+    assert "kind IN ('entity_alias','glossary_pref','query_hint')" in sql
+    assert "source IN ('auto','user')" in sql
+
+
+def test_alembic_0026_creates_and_drops_all():
+    code = _read(ROOT / "alembic" / "versions" / "0026_assistant_cognition.py")
+    assert 'revision = "0026_assistant_cognition"' in code
+    assert 'down_revision = "0025_assistant_feedback"' in code
+    assert "CREATE TABLE assistant_cognition" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP TABLE IF EXISTS assistant_cognition" in down
+    assert "DELETE FROM" not in down
+# ---- 0027 写操作确认令牌（M-C）----
+
+def test_schema_sql_confirm_tokens_and_audit_widen():
+    sql = _read(SCHEMA_SQL)
+    assert "CREATE TABLE assistant_confirm_tokens" in sql
+    assert "idempotency_key VARCHAR(128) NOT NULL UNIQUE" in sql
+    assert "idx_asst_ct_user_used" in sql
+    # audit CHECK 扩枚举：旧 20 值全保留 + ASSISTANT_WRITE（只扩不窄）
+    assert "'REVENUE_OVERRIDE','ASSISTANT_WRITE'" in sql
+    assert "'ALLOCATE'" in sql
+
+
+def test_alembic_0027_creates_drops_and_guards():
+    code = _read(ROOT / "alembic" / "versions" / "0027_assistant_writes.py")
+    assert 'revision = "0027_assistant_writes"' in code
+    assert 'down_revision = "0026_assistant_cognition"' in code
+    assert "CREATE TABLE assistant_confirm_tokens" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP TABLE IF EXISTS assistant_confirm_tokens" in down
+    # 收窄前先清 ASSISTANT_WRITE 行（0008/0011 guard 范式）
+    assert "DELETE FROM audit_logs WHERE action = 'ASSISTANT_WRITE'" in down
+    # upgrade 段 CHECK 含全部旧枚举（只扩不窄）
+    upgrade = code.split("def downgrade")[0]
+    for act in ("'ALLOCATE'", "'REVENUE_OVERRIDE'", "'LEASEBACK_SALE'"):
+        assert act in code

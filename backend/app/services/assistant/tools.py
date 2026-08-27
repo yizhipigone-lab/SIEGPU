@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+# 用户上下文传递：contextvars 在 StreamingResponse 的 threadpool 迭代中跨 yield 丢失
+# （2026-08-27 e2e 实测），改为 call_tool 显式注入 user（needs_user 标记的工具才收）。
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -330,6 +333,77 @@ TOOL_REGISTRY: dict[str, dict] = {
             db, entity, filters=filters, fields=fields, group_by=group_by,
             metrics=metrics, order_by=order_by, limit=limit),
     },
+    "request_record_income": {
+        "desc": "生成「登记回款」预览确认卡（不执行！需用户在界面上点确认）。参数：project_name 项目名（必填）、amount 金额元（必填>0）、transaction_date 日期YYYY-MM-DD（可选默认今天）、note 备注（可选）",
+        "params": {"type": "object", "properties": {
+            "project_name": {"type": "string"}, "amount": {"type": "number"},
+            "transaction_date": {"type": "string"}, "note": {"type": "string"}},
+            "required": ["project_name", "amount"]},
+        "handler": lambda db, user, project_name, amount, transaction_date=None, note=None: _write_dry(
+            db, user, "record_income", {"project_name": project_name, "amount": amount,
+                                  "transaction_date": transaction_date, "note": note}),
+        "write_action": "record_income",
+        "needs_user": True,
+    },
+    "request_draft_billing": {
+        "desc": "生成「计费草稿」预览确认卡（不执行！需用户确认）。参数：device_sn 设备序列号（必填）、period_index 计费期数（必填≥1）、billing_date（可选）",
+        "params": {"type": "object", "properties": {
+            "device_sn": {"type": "string"}, "period_index": {"type": "integer"},
+            "billing_date": {"type": "string"}}, "required": ["device_sn", "period_index"]},
+        "handler": lambda db, user, device_sn, period_index, billing_date=None: _write_dry(
+            db, user, "draft_billing", {"device_sn": device_sn, "period_index": period_index,
+                                  "billing_date": billing_date}),
+        "write_action": "draft_billing",
+        "needs_user": True,
+    },
+    "request_advance_step": {
+        "desc": "生成「流程推进」预览确认卡（不执行！需用户确认）。参数：project_name（必填）、seq 步骤号（可选默认当前步）、note 备注（可选）",
+        "params": {"type": "object", "properties": {
+            "project_name": {"type": "string"}, "seq": {"type": "integer"}, "note": {"type": "string"}},
+            "required": ["project_name"]},
+        "handler": lambda db, user, project_name, seq=None, note=None: _write_dry(
+            db, user, "advance_step", {"project_name": project_name, "seq": seq, "note": note}),
+        "write_action": "advance_step",
+        "needs_user": True,
+    },
+    "request_allocate_funds": {
+        "desc": "生成「资金调配」预览确认卡（不执行！需用户确认）。参数：from_project_name/to_project_name（必填）、amount（必填>0）、allocation_date/expected_return_date/reason（可选）",
+        "params": {"type": "object", "properties": {
+            "from_project_name": {"type": "string"}, "to_project_name": {"type": "string"},
+            "amount": {"type": "number"}, "allocation_date": {"type": "string"},
+            "expected_return_date": {"type": "string"}, "reason": {"type": "string"}},
+            "required": ["from_project_name", "to_project_name", "amount"]},
+        "handler": lambda db, user, from_project_name, to_project_name, amount,
+                              allocation_date=None, expected_return_date=None, reason=None: _write_dry(
+            db, user, "allocate_funds", {"from_project_name": from_project_name, "to_project_name": to_project_name,
+                                   "amount": amount, "allocation_date": allocation_date,
+                                   "expected_return_date": expected_return_date, "reason": reason}),
+        "write_action": "allocate_funds",
+        "needs_user": True,
+    },
+    "save_cognition": {
+        "desc": "保存长期认知（助手自身数据，非业务单据）：用户说「记住：我说X指Y」时用它。kind=entity_alias(实体别名)/glossary_pref(口径偏好)/query_hint(查询习惯)。value 里不许带金额数字",
+        "params": {"type": "object", "properties": {
+            "key": {"type": "string", "description": "检索键，如「七号项目」"},
+            "value": {"type": "string", "description": "认知内容，如「指项目 商机5090」"},
+            "kind": {"type": "string", "description": "entity_alias/glossary_pref/query_hint"}}, "required": ["key", "value", "kind"]},
+        "handler": lambda db, user, key, value, kind: _cog_save(db, user, key, value, kind),
+        "needs_user": True,
+    },
+    "list_cognition": {
+        "desc": "查看我的长期认知列表（助手自身数据）：已记住的别名/口径偏好，可按关键词过滤",
+        "params": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "可选关键词过滤"}}, "required": []},
+        "handler": lambda db, user, query=None: _cog_list(db, user, query),
+        "needs_user": True,
+    },
+    "forget_cognition": {
+        "desc": "删除一条我的长期认知（助手自身数据）：用户说「忘掉XX」时用它",
+        "params": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "认知条目 id（从 list_cognition 拿）"}}, "required": ["id"]},
+        "handler": lambda db, user, id: _cog_forget(db, user, id),
+        "needs_user": True,
+    },
     "search_guide": {
         "desc": "新手流程指引知识库：怎么操作某流程、术语是什么意思、概念区别（不需要业务数据）",
         "params": {"type": "object", "properties": {
@@ -339,17 +413,80 @@ TOOL_REGISTRY: dict[str, dict] = {
 }
 
 
+# ---------------------------------------------------------------- 认知工具（M-A；助手自身数据）
+
+def _cog_save(db, user, key, value, kind):
+    """保存认知：user 由 call_tool 显式注入（needs_user 工具）。"""
+    from app.services.assistant import memory
+    row, msg = memory.save_cognition(db, user.id, key, value, kind, source="user")
+    return {"saved": row is not None, "message": msg, "id": str(row.id) if row else None}
+
+
+def _cog_list(db, user, query=None):
+    from sqlalchemy import select as _s
+    from app.models.assistant import AssistantCognition
+    rows = db.execute(_s(AssistantCognition).where(
+        AssistantCognition.user_id == user.id)).scalars().all()
+    out = [{"id": str(r.id), "kind": r.kind, "key": r.key, "value": r.value,
+            "source": r.source, "usage_count": r.usage_count} for r in rows]
+    if query:
+        out = [o for o in out if query in o["key"] or query in o["value"]]
+    return {"items": out}
+
+
+def _cog_forget(db, user, id):
+    import datetime as _dt
+    import uuid as _u
+    from sqlalchemy import select as _s
+    from app.models.assistant import AssistantCognition
+    try:
+        row = db.execute(_s(AssistantCognition).where(
+            AssistantCognition.id == _u.UUID(id),
+            AssistantCognition.user_id == user.id)).scalars().first()
+    except ValueError:
+        return {"forgotten": False, "message": "id 格式不对"}
+    if not row:
+        return {"forgotten": False, "message": "没找到这条认知（只能删自己的）"}
+    row.deleted_at = _dt.datetime.now(_dt.timezone.utc)
+    db.flush()
+    return {"forgotten": True, "message": f"已忘掉「{row.key}」"}
+
+
+# ---------------------------------------------------------------- 写操作 dry-run 入口（M-C）
+# 不变量：LLM 只有 dry_run 通道；execute 在 writes.py，仅由 /confirm 端点调用。
+
+def _write_dry(db, user, action: str, params: dict):
+    from app.services.assistant import writes
+    return writes.dry_run(db, user, action, params or {})
+
+
 def openai_tools() -> list[dict]:
-    """OpenAI function calling 格式的工具声明。"""
-    return [{"type": "function",
-             "function": {"name": name, "description": spec["desc"],
-                          "parameters": spec["params"]}}
-            for name, spec in TOOL_REGISTRY.items()]
+    """OpenAI function calling 格式的工具声明。写工具只在白名单开放时暴露（不变量5：开关断电即隐身）。"""
+    from app.services.assistant import writes
+    enabled = set(writes.enabled_actions())
+    out = []
+    for name, spec in TOOL_REGISTRY.items():
+        wa = spec.get("write_action")
+        if wa and wa not in enabled:
+            continue
+        out.append({"type": "function",
+                    "function": {"name": name, "description": spec["desc"],
+                                 "parameters": spec["params"]}})
+    return out
 
 
-def call_tool(db: Session, name: str, args: dict):
-    """agent loop 统一调用口；未知名称抛 KeyError 由上层捕获（不炸主流程）。"""
+def call_tool(db: Session, name: str, args: dict, user=None):
+    """agent loop 统一调用口；未知名称抛 KeyError；needs_user 工具显式收 user（无则结构化报错）。"""
     spec = TOOL_REGISTRY.get(name)
     if not spec:
         raise KeyError(f"未知工具: {name}")
+    wa = spec.get("write_action")
+    if wa:
+        from app.services.assistant import writes
+        if wa not in writes.enabled_actions():
+            raise KeyError(f"写动作未开放: {name}")
+    if spec.get("needs_user"):
+        if user is None:
+            return {"error": "该工具需要在对话中使用"}
+        return spec["handler"](db, user, **(args or {}))
     return spec["handler"](db, **(args or {}))

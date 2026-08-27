@@ -7,7 +7,7 @@ import {
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import {
-  Bell, Bot, Boxes, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Coins, Cpu,
+  Bell, Bot, Boxes, Search, Briefcase, Building2, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Coins, Cpu,
   Eye, EyeOff, Info,
   FileSignature, FileText, FolderKanban, GitCompareArrows, HelpCircle, Landmark, LayoutDashboard, LogOut, Package, Receipt,
   Share2, ShieldCheck, TrendingUp, User, Users, Wallet,
@@ -262,12 +262,14 @@ onUnmounted(() => {
         </n-breadcrumb>
         <div class="topbar-actions">
           <n-button
-            quaternary size="small" aria-label="智能助手"
-            title="智能助手：问数据、问流程（Ctrl+J）"
+            quaternary size="small" aria-label="AI 老虎"
+            title="AI 老虎：问数据、问流程（Ctrl+J）"
             data-testid="assistant-btn"
             @click="assistantOpen = true"
           >
             <template #icon><n-icon><Bot /></n-icon></template>
+            <span class="ai-label">AI 老虎</span>
+            <span class="kbd-hint">Ctrl J</span>
           </n-button>
           <n-button
             quaternary size="small" aria-label="命令面板"
@@ -275,6 +277,8 @@ onUnmounted(() => {
             data-testid="command-palette-btn"
             @click="paletteOpen = true"
           >
+            <template #icon><n-icon><Search /></n-icon></template>
+            <span class="ai-label">搜索直达</span>
             <span class="kbd-hint">Ctrl K</span>
           </n-button>
           <n-button
@@ -416,6 +420,7 @@ onUnmounted(() => {
   padding: 0 20px; background: var(--c-surface);
 }
 .topbar-actions { display: flex; align-items: center; gap: 4px; }
+.ai-label { font-size: 12px; color: #2563eb; font-weight: 600; margin-left: 2px; }
 .kbd-hint {
   font-size: 11px; color: #64748B; padding: 2px 7px;
   border: 1px solid #E2E8F0; border-bottom-width: 2px; border-radius: 5px;

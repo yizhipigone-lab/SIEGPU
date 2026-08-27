@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     assistant_max_tool_calls: int = 8
     assistant_daily_token_quota: int = 200000
     assistant_timeout_seconds: int = 120
+    # M-A 认知层开关（回滚用：一键关闭注入/捕获）
+    assistant_cognition_enabled: bool = True
+    # M-C 写操作（默认全关；白名单动作逐个放开）
+    assistant_writes_enabled: bool = False
+    assistant_write_actions: str = "record_income"
+    assistant_write_daily_limit: int = 20
+    assistant_confirm_ttl_minutes: int = 5
 
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":

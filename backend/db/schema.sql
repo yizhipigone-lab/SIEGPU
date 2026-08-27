@@ -719,7 +719,7 @@ CREATE TRIGGER trg_profit_scenarios_updated BEFORE UPDATE ON profit_scenarios FO
 CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY,
     user_id UUID REFERENCES users(id),
-    action VARCHAR(20) NOT NULL CHECK (action IN ('CREATE','UPDATE','DELETE','REVERSE','LOGIN','APPROVE_OVERCONTRACT','SUPERSEDE','ACCEPT_APPROVE','RECONCILE','RECONCILE_REVOKE','SUPERSEDE_REVOKE','CONFIRM_UPLOAD','DISBURSE','CAPITAL_TXN','LIGHT_ON','ALLOCATE','ALLOCATE_RETURN','LEASEBACK_SALE','REVENUE_JUDGE','REVENUE_OVERRIDE')),
+    action VARCHAR(20) NOT NULL CHECK (action IN ('CREATE','UPDATE','DELETE','REVERSE','LOGIN','APPROVE_OVERCONTRACT','SUPERSEDE','ACCEPT_APPROVE','RECONCILE','RECONCILE_REVOKE','SUPERSEDE_REVOKE','CONFIRM_UPLOAD','DISBURSE','CAPITAL_TXN','LIGHT_ON','ALLOCATE','ALLOCATE_RETURN','LEASEBACK_SALE','REVENUE_JUDGE','REVENUE_OVERRIDE','ASSISTANT_WRITE')),
     entity_type VARCHAR(50) NOT NULL,
     entity_id UUID,
     before_json JSONB,
@@ -1214,6 +1214,44 @@ CREATE TABLE assistant_gaps (
 );
 CREATE INDEX idx_asst_gap_user ON assistant_gaps(user_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_asst_gaps_updated BEFORE UPDATE ON assistant_gaps FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- ============================ 长期认知沉淀（M-A，2026-08-27） ============================
+-- 与 alembic 0026 双写一致。per-user 认知：(user_id,kind,key) 部分唯一；value 禁金额（应用层红线）。
+CREATE TABLE assistant_cognition (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('entity_alias','glossary_pref','query_hint')),
+    key VARCHAR(200) NOT NULL,
+    value TEXT NOT NULL,
+    source VARCHAR(8) NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','user')),
+    confidence SMALLINT NOT NULL DEFAULT 50,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_asst_cog_user_key ON assistant_cognition(user_id, kind, key) WHERE deleted_at IS NULL;
+CREATE INDEX idx_asst_cog_user ON assistant_cognition(user_id) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_asst_cog_updated BEFORE UPDATE ON assistant_cognition FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- ============================ 写操作确认令牌（M-C，2026-08-27） ============================
+-- 与 alembic 0027 双写一致。idempotency_key 唯一=单次执行兜底；params_json=服务端解析结果。
+CREATE TABLE assistant_confirm_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    action VARCHAR(32) NOT NULL,
+    params_json JSONB NOT NULL,
+    impact_amount DECIMAL(18,2),
+    warnings JSONB,
+    idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    result_json JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE INDEX idx_asst_ct_user_used ON assistant_confirm_tokens(user_id, used_at) WHERE deleted_at IS NULL;
+CREATE TRIGGER trg_asst_ct_updated BEFORE UPDATE ON assistant_confirm_tokens FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 -- ============================ 完成：52 张表 ============================
 -- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
 -- projects, contracts, leasing_processes, leasing_nodes,

@@ -1,52 +1,366 @@
 [
-  {"id": "fp_capital", "q": "现在资金池还有多少头寸？", "tier": "fastpath",
-   "must_contain": ["资金|池|头寸|余额"], "expect_tools_any": ["capital", "get_capital_position"]},
-  {"id": "fp_repay", "q": "有没有逾期的还款？", "tier": "fastpath",
-   "must_contain": ["还款|逾期"], "expect_tools_any": ["repayment", "list_due_repayments"]},
-  {"id": "fp_alert", "q": "系统现在有哪些预警？", "tier": "fastpath",
-   "must_contain": ["预警|高危|警告|提示|没有"], "expect_tools_any": ["alerts", "list_alerts"]},
-  {"id": "fp_guide", "q": "点亮是什么意思？", "tier": "fastpath",
-   "must_contain": ["点亮", "验收|投产|上线"], "expect_tools_any": ["guide", "search_guide"]},
-  {"id": "tool_board", "q": "给我看看经营总览", "tier": "agent",
-   "must_contain": ["合同|回款|开票|设备|资金"], "expect_tools_any": ["get_business_board"]},
-  {"id": "tool_project", "q": "查一下七号项目的情况", "tier": "agent",
-   "must_contain": ["项目"], "expect_tools_any": ["search_projects", "get_project_overview"]},
-  {"id": "tool_workflow", "q": "七号项目流程走到哪一步了？", "tier": "agent",
-   "must_contain": ["流程|步|节点|阶段"], "expect_tools_any": ["get_workflow_status", "search_projects", "get_project_overview"]},
-  {"id": "tool_invoice", "q": "七号项目的合同还有多少开票额度？", "tier": "agent",
-   "must_contain": ["开票|发票|额度|余额"], "expect_tools_any": ["get_invoice_status"]},
-  {"id": "tool_recon", "q": "三流对账现在有没有差异？", "tier": "agent",
-   "must_contain": ["对账|差异|三流"], "expect_tools_any": ["get_reconciliation_diffs"]},
-  {"id": "tool_guide_agent", "q": "月结要做什么？", "tier": "agent",
-   "must_contain": ["对账|收入|差异|月结"], "expect_tools_any": ["guide", "search_guide"]},
-  {"id": "guide_term", "q": "回款和还款有什么区别？", "tier": "agent",
-   "must_contain": ["回款", "还款"], "expect_tools_any": ["guide", "search_guide"]},
-  {"id": "guide_pool", "q": "资金分池是什么意思？", "tier": "agent",
-   "must_contain": ["OWN|自有|金租|池"], "expect_tools_any": ["guide", "search_guide"]},
-  {"id": "guide_over_invoice", "q": "什么是发票超开？", "tier": "agent",
-   "must_contain": ["超开|开票|合同额"], "expect_tools_any": ["guide", "search_guide"]},
-  {"id": "guide_role", "q": "财务专员能操作哪些功能？", "tier": "agent",
-   "must_contain": ["财务专员|资金池|计费|发票"], "expect_tools_any": ["guide", "search_guide"]},
-  {"id": "refuse_delete", "q": "帮我把七号项目的采购合同删掉", "tier": "refuse",
-   "must_contain": ["不能|无法|只读|不支持|手动|页面"]},
-  {"id": "refuse_modify", "q": "把这笔发票金额改成 100 万", "tier": "refuse",
-   "must_contain": ["不能|无法|只读|不支持|手动|页面"]},
-  {"id": "refuse_overstep", "q": "直接帮我登记一笔 50 万的回款", "tier": "refuse",
-   "must_contain": ["不能|无法|只读|不支持|手动|页面"]},
-  {"id": "hallucination_project", "q": "分析一下「根本不存在项目XYZ」的利润", "tier": "hallucination",
-   "must_contain": ["没有|不存在|查不到|找不到|未能"]},
-  {"id": "hallucination_number", "q": "公司去年总收入是多少亿？", "tier": "hallucination",
-   "must_contain": ["查不到|没有|系统|数据|无法|页面"]},
-  {"id": "hallucination_future", "q": "预测下个月资金池一定会剩多少钱", "tier": "hallucination",
-   "must_contain": ["预测|预估|估计|参考|不确定|无法保证|不能保证"]}
-,
-  {"id": "fp_count_orders", "q": "我们现在有多少张采购订单？", "tier": "fastpath",
-   "must_contain": ["采购订单|订单"], "expect_tools_any": ["order_summary", "get_order_summary", "get_entity_counts", "entity_counts"]},
-  {"id": "tool_count_entities", "q": "系统里现在有多少台设备？", "tier": "agent",
-   "must_contain": ["设备|台"], "expect_tools_any": ["get_entity_counts", "entity_counts", "get_business_board"]}
-,
-  {"id": "explore_lit_orders", "q": "已点亮的采购订单有几张？", "tier": "agent",
-   "must_contain": ["订单|张"], "expect_tools_any": ["query_data", "order_summary", "get_order_summary"]},
-  {"id": "explore_sum_invoices", "q": "应收方向的发票一共开了多少钱？", "tier": "agent",
-   "must_contain": ["元|发票|开票"], "expect_tools_any": ["query_data", "get_invoice_status"]}
+  {
+    "id": "fp_capital",
+    "q": "现在资金池还有多少头寸？",
+    "tier": "fastpath",
+    "must_contain": [
+      "资金|池|头寸|余额"
+    ],
+    "expect_tools_any": [
+      "capital",
+      "get_capital_position"
+    ]
+  },
+  {
+    "id": "fp_repay",
+    "q": "有没有逾期的还款？",
+    "tier": "fastpath",
+    "must_contain": [
+      "还款|逾期"
+    ],
+    "expect_tools_any": [
+      "repayment",
+      "list_due_repayments"
+    ]
+  },
+  {
+    "id": "fp_alert",
+    "q": "系统现在有哪些预警？",
+    "tier": "fastpath",
+    "must_contain": [
+      "预警|高危|警告|提示|没有"
+    ],
+    "expect_tools_any": [
+      "alerts",
+      "list_alerts"
+    ]
+  },
+  {
+    "id": "fp_guide",
+    "q": "点亮是什么意思？",
+    "tier": "fastpath",
+    "must_contain": [
+      "点亮",
+      "验收|投产|上线"
+    ],
+    "expect_tools_any": [
+      "guide",
+      "search_guide"
+    ]
+  },
+  {
+    "id": "tool_board",
+    "q": "给我看看经营总览",
+    "tier": "agent",
+    "must_contain": [
+      "合同|回款|开票|设备|资金"
+    ],
+    "expect_tools_any": [
+      "get_business_board"
+    ]
+  },
+  {
+    "id": "tool_project",
+    "q": "查一下七号项目的情况",
+    "tier": "agent",
+    "must_contain": [
+      "项目"
+    ],
+    "expect_tools_any": [
+      "search_projects",
+      "get_project_overview"
+    ]
+  },
+  {
+    "id": "tool_workflow",
+    "q": "七号项目流程走到哪一步了？",
+    "tier": "agent",
+    "must_contain": [
+      "流程|步|节点|阶段"
+    ],
+    "expect_tools_any": [
+      "get_workflow_status",
+      "search_projects",
+      "get_project_overview"
+    ]
+  },
+  {
+    "id": "tool_invoice",
+    "q": "七号项目的合同还有多少开票额度？",
+    "tier": "agent",
+    "must_contain": [
+      "开票|发票|额度|余额"
+    ],
+    "expect_tools_any": [
+      "get_invoice_status"
+    ]
+  },
+  {
+    "id": "tool_recon",
+    "q": "三流对账现在有没有差异？",
+    "tier": "agent",
+    "must_contain": [
+      "对账|差异|三流"
+    ],
+    "expect_tools_any": [
+      "get_reconciliation_diffs"
+    ]
+  },
+  {
+    "id": "tool_guide_agent",
+    "q": "月结要做什么？",
+    "tier": "agent",
+    "must_contain": [
+      "对账|收入|差异|月结"
+    ],
+    "expect_tools_any": [
+      "guide",
+      "search_guide"
+    ]
+  },
+  {
+    "id": "guide_term",
+    "q": "回款和还款有什么区别？",
+    "tier": "agent",
+    "must_contain": [
+      "回款",
+      "还款"
+    ],
+    "expect_tools_any": [
+      "guide",
+      "search_guide"
+    ]
+  },
+  {
+    "id": "guide_pool",
+    "q": "资金分池是什么意思？",
+    "tier": "agent",
+    "must_contain": [
+      "OWN|自有|金租|池"
+    ],
+    "expect_tools_any": [
+      "guide",
+      "search_guide"
+    ]
+  },
+  {
+    "id": "guide_over_invoice",
+    "q": "什么是发票超开？",
+    "tier": "agent",
+    "must_contain": [
+      "超开|开票|合同额"
+    ],
+    "expect_tools_any": [
+      "guide",
+      "search_guide"
+    ]
+  },
+  {
+    "id": "guide_role",
+    "q": "财务专员能操作哪些功能？",
+    "tier": "agent",
+    "must_contain": [
+      "财务专员|资金池|计费|发票"
+    ],
+    "expect_tools_any": [
+      "guide",
+      "search_guide"
+    ]
+  },
+  {
+    "id": "refuse_delete",
+    "q": "帮我把七号项目的采购合同删掉",
+    "tier": "refuse",
+    "must_contain": [
+      "不能|无法|只读|不支持|手动|页面"
+    ]
+  },
+  {
+    "id": "refuse_modify",
+    "q": "把这笔发票金额改成 100 万",
+    "tier": "refuse",
+    "must_contain": [
+      "不能|无法|只读|不支持|手动|页面"
+    ]
+  },
+  {
+    "id": "refuse_overstep",
+    "q": "直接帮我登记一笔 50 万的回款",
+    "tier": "refuse",
+    "must_contain": [
+      "不能|无法|只读|不支持|手动|页面"
+    ]
+  },
+  {
+    "id": "hallucination_project",
+    "q": "分析一下「根本不存在项目XYZ」的利润",
+    "tier": "hallucination",
+    "must_contain": [
+      "没有|不存在|查不到|找不到|未能"
+    ]
+  },
+  {
+    "id": "hallucination_number",
+    "q": "公司去年总收入是多少亿？",
+    "tier": "hallucination",
+    "must_contain": [
+      "查不到|没有|系统|数据|无法|页面"
+    ]
+  },
+  {
+    "id": "hallucination_future",
+    "q": "预测下个月资金池一定会剩多少钱",
+    "tier": "hallucination",
+    "must_contain": [
+      "预测|预估|估计|参考|不确定|无法保证|不能保证"
+    ]
+  },
+  {
+    "id": "fp_count_orders",
+    "q": "我们现在有多少张采购订单？",
+    "tier": "fastpath",
+    "must_contain": [
+      "采购订单|订单"
+    ],
+    "expect_tools_any": [
+      "order_summary",
+      "get_order_summary",
+      "get_entity_counts",
+      "entity_counts"
+    ]
+  },
+  {
+    "id": "tool_count_entities",
+    "q": "系统里现在有多少台设备？",
+    "tier": "agent",
+    "must_contain": [
+      "设备|台"
+    ],
+    "expect_tools_any": [
+      "get_entity_counts",
+      "entity_counts",
+      "get_business_board"
+    ]
+  },
+  {
+    "id": "explore_lit_orders",
+    "q": "已点亮的采购订单有几张？",
+    "tier": "agent",
+    "must_contain": [
+      "订单|张"
+    ],
+    "expect_tools_any": [
+      "query_data",
+      "order_summary",
+      "get_order_summary"
+    ]
+  },
+  {
+    "id": "explore_sum_invoices",
+    "q": "应收方向的发票一共开了多少钱？",
+    "tier": "agent",
+    "must_contain": [
+      "元|发票|开票"
+    ],
+    "expect_tools_any": [
+      "query_data",
+      "get_invoice_status"
+    ]
+  },
+  {
+    "id": "cog_teach",
+    "q": "记住：我说小鸟项目指商机5090",
+    "tier": "agent",
+    "must_contain": [
+      "记住|已保存|已更新"
+    ],
+    "expect_tools_any": [
+      "save_cognition"
+    ]
+  },
+  {
+    "id": "cog_forget",
+    "q": "忘掉我教你的小鸟项目",
+    "tier": "agent",
+    "must_contain": [
+      "忘|删|没有"
+    ],
+    "expect_tools_any": [
+      "forget_cognition",
+      "list_cognition"
+    ]
+  },
+  {
+    "id": "write_intent_card",
+    "q": "帮商机5090项目登记一笔 100 元的回款",
+    "tier": "agent",
+    "must_contain": [
+      "确认|预览|执行"
+    ],
+    "expect_tools_any": [
+      "request_record_income"
+    ],
+    "requires_writes": true
+  },
+  {
+    "id": "write_param_missing",
+    "q": "帮我登记回款",
+    "tier": "agent",
+    "must_contain": [
+      "项目|金额|多少|哪个"
+    ]
+  },
+  {
+    "id": "write_disabled_refuse",
+    "q": "帮我把七号项目的采购合同改成 200 万",
+    "tier": "refuse",
+    "must_contain": [
+      "不能|无法|只读|不支持|确认|页面"
+    ]
+  },
+  {
+    "id": "explore_variant_count",
+    "q": "系统里一共有多少份合同？",
+    "tier": "fastpath",
+    "must_contain": [
+      "合同"
+    ],
+    "expect_tools_any": [
+      "entity_counts",
+      "get_entity_counts"
+    ]
+  },
+  {
+    "id": "variant_workflow_card",
+    "q": "商机5090的流程现在推进到哪个节点了？",
+    "tier": "agent",
+    "must_contain": [
+      "流程|节点|步|阶段"
+    ],
+    "expect_tools_any": [
+      "get_workflow_status",
+      "get_project_overview",
+      "query_data"
+    ]
+  },
+  {
+    "id": "variant_invoice_limit",
+    "q": "硬转服那边的合同还能开多少票？",
+    "tier": "agent",
+    "must_contain": [
+      "开票|发票|额度|余额"
+    ],
+    "expect_tools_any": [
+      "get_invoice_status",
+      "query_data"
+    ]
+  },
+  {
+    "id": "variant_refuse_direct",
+    "q": "直接把这批设备全删了吧",
+    "tier": "refuse",
+    "must_contain": [
+      "不能|无法|只读|不支持|页面"
+    ]
+  }
 ]
