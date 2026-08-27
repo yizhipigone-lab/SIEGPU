@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIEGPU 架构评审 — 深模块/浅模块优化方向</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark', flowchart:{curve:'basis', useMaxWidth:true}});</script>
+<style>
+  body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Cascadia Code',monospace;}
+  .card{background:#161b22;border:1px solid#30363d;border-radius:12px;}
+  .badge{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;}
+  .badge-strong{background:#da3633;color:#fff;}
+  .badge-explore{background:#d29922;color:#0d1117;}
+  .badge-spec{background:#6366f1;color:#fff;}
+  .before-box{background:#1c1f26;border:1px dashed #f85149;border-radius:8px;padding:12px;}
+  .after-box{background:#0d2818;border:1px dashed #3fb950;border-radius:8px;padding:12px;}
+  .label{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;}
+  h1,h2,h3{color:#f0f6fc;}
+  .mono{font-family:inherit;}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:768px){.grid-2{grid-template-columns:1fr;}}
+  .tag{font-size:10px;background:#30363d;padding:1px 6px;border-radius:4px;color#8b949e;}
+  .callout{background:#1c2128;border-left:3px solid #f85149;padding:8px 12px;margin:8px 0;border-radius:0 6px 6px 0;}
+  .callout-warn{border-left-color:#d29922;}
+</style>
+</head>
+<body class="p-6 max-w-6xl mx-auto">
+
+<h1 class="text-2xl font-bold mb-1">SIEGPU 架构评审</h1>
+<p class="text-sm text-gray-400 mb-6">深模块 / 浅模块优化方向 · 基于全代码库走查（19 个摩擦点） · 2026-08-27</p>
+
+<div class="card p-4 mb-6">
+  <div class="label mb-2">词汇</div>
+  <p class="text-xs text-gray-400">本报告使用 codebase-design 词汇：<b class="text-blue-400">模块</b>（有接口+实现的任何东西）· <b class="text-green-400">深度</b>（接口小、实现大=深；接口≈实现=浅）· <b class="text-yellow-400">缝（seam）</b>（不改此处就能改行为的地方）· <b class="text-red-400">杠杆</b>（调用方获益：一个实现服务 N 个调用点）· <b class="text-purple-400">局部性</b>（维护方获益：改一次全改对）</p>
+</div>
+
+<h2 class="text-lg font-bold mb-3">5 个优化候选</h2>
+
+<!-- ============ 候选 1 ============ -->
+<div class="card p-5 mb-4">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="badge badge-strong">强烈推荐</span>
+    <h3 class="text-lg font-bold">#1 工作流自动检测：17 个手动 after_action 散弹枪 → 单点事件</h3>
+  </div>
+  <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+    <div><div class="label">文件</div>workflow_service.py（30-54, 477-508, 577-686）+ 9 个 service × 17 个调用点</div>
+    <div><div class="label">分类</div>耦合问题 / 缺失缝 / 局部性</div>
+  </div>
+  <p class="text-sm mb-3"><b>问题：</b><code>_wf.after_action(db, project_id)</code> 被 <b>手动散布在 9 个 service 的 17 个函数体里</b>（acceptance/billing/capital/confirmation/contract/device/invoice/leasing/order/profit/sales_order）。加一个被工作流追踪的实体，要改：新 service 加 after_action → <code>_TABLE_CLASSES</code> 白名单 → 可能改 <code>_FK_TO_PROJECT</code> → 模板定义 → 前端 <code>STEP_HINTS</code>/<code>MODULE_ROUTE</code> → <code>roleGuide.ts</code>。<b>六文件散弹枪</b>。</p>
+  <p class="text-sm mb-3"><b>方案：</b>把 after_action 从 17 个调用点收回，改为 SQLAlchemy 的 <code>after_flush</code> 事件监听——flush 后扫描 dirty 实体，按 <code>_TABLE_CLASSES</code> 判定哪些项目的步骤可能完成，集中调 <code>_refresh_steps</code>。service 不再知道工作流的存在。</p>
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="before-box">
+      <div class="label text-red-400 mb-1">Before：17 个散弹枪调用点</div>
+      <div class="mermaid">
+graph TD
+  A[device_service] -->|after_action| W[workflow_service]
+  B[billing_service] -->|after_action x2| W
+  C[capital_service] -->|after_action| W
+  D[contract_service] -->|after_action| W
+  E[invoice_service] -->|after_action| W
+  F[leasing_service] -->|after_action x3| W
+  G[order_service] -->|after_action x4| W
+  H[acceptance_service] -->|after_action| W
+  I[...] -->|after_action| W
+  style W fill:#f85149
+      </div>
+    </div>
+    <div class="after-box">
+      <div class="label text-green-400 mb-1">After：单点事件</div>
+      <div class="mermaid">
+graph TD
+  A[device_service] --> B[db.flush]
+  C[billing_service] --> B
+  D[capital_service] --> B
+  E[...] --> B
+  B -->|after_flush event| F[workflow_refresher]
+  F -->|scan dirty entities| G[refresh steps]
+  style F fill:#3fb950
+      </div>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 gap-2 text-xs">
+    <div><div class="label">杠杆</div>新实体追踪从 6 文件改动 → 1 处注册</div>
+    <div><div class="label">局部性</div>步骤刷新逻辑收敛到 1 个函数；忘记调 after_action 的 bug 根除</div>
+  </div>
+  <div class="callout callout-warn text-xs mt-2">⚠️ 风险：after_flush 在 commit 前触发；若 endpoint commit 失败回滚，步骤不能推进——需确保只在 commit 成功后推进，或接受回滚后步骤也回退（语义上自洽）。</div>
+</div>
+
+<!-- ============ 候选 2 ============ -->
+<div class="card p-5 mb-4">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="badge badge-strong">强烈推荐</span>
+    <h3 class="text-lg font-bold">#2 Invoice.matched_amount：三份实现 → 单一真源</h3>
+  </div>
+  <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+    <div><div class="label">文件</div>billing.py:80-99 · payment_service.py:218-226 · reconciliation_service.py:84-90</div>
+    <div><div class="label">分类</div>耦合 / 浅模块 / 局部性</div>
+  </div>
+  <p class="text-sm mb-3"><b>问题：</b>"发票已核销额"（matched_amount）有 <b>三份独立实现</b>：① billing.py 的 column_property（跨表 ORM 聚合）② payment_service._invoice_matched（Python 两条查询手加）③ reconciliation_service.dim2（第三遍查）。同一条不变量（旧链接流水 + 新核销行），三种写法，漂移风险高——改任何一份，另两份不会同步。</p>
+  <p class="text-sm mb-3"><b>方案：</b>column_property 已是 DB 层单一真源。让 payment_service 和 reconciliation_service <b>直接读 <code>inv.matched_amount</code></b>（已由 ORM 计算好），删掉 _invoice_matched 和 dim2 里的手加聚合。<b>删除测试</b>通过——删掉两份 Python 实现后，复杂度没有在调用方重新出现，反而集中了。</p>
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="before-box">
+      <div class="label text-red-400 mb-1">Before：三份实现漂移</div>
+      <div class="mermaid">
+graph LR
+  M[model column_property] ---|口径 A| K[matched_amount]
+  P[payment_service._invoice_matched] ---|口径 B| K
+  R[reconciliation dim2] ---|口径 C| K
+  style K fill:#f85149
+      </div>
+    </div>
+    <div class="after-box">
+      <div class="label text-green-400 mb-1">After：单一真源</div>
+      <div class="mermaid">
+graph TD
+  M[model column_property] -->|inv.matched_amount| P[payment_service]
+  M -->|inv.matched_amount| R[reconciliation dim2]
+  style M fill:#3fb950
+      </div>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 gap-2 text-xs">
+    <div><div class="label">杠杆</div>改核销口径从改 3 处 → 改 1 处</div>
+    <div><div class="label">测试面</div>直接断言 inv.matched_amount 即可，不再需要 3 个函数各测一遍</div>
+  </div>
+</div>
+
+<!-- ============ 候选 3 ============ -->
+<div class="card p-5 mb-4">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="badge badge-explore">值得探索</span>
+    <h3 class="text-lg font-bold">#3 device_service：God 模块拆分（728 行 / 20 函数 / 4 职责）</h3>
+  </div>
+  <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+    <div><div class="label">文件</div>device_service.py（全文件，728 行）</div>
+    <div><div class="label">分类</div>浅模块 / 缺失缝 / 局部性</div>
+  </div>
+  <p class="text-sm mb-3"><b>问题：</b><code>advance_device_stage</code>（ln 440-500）一次调用触发：状态机校验 → 采购验收前置 → 返工守卫 → 状态重算 → 资产卡创建/激活 → 保险自动投保 → 批次状态聚合 → 放款阈值触发 → 审计 → workflow after_action。<b>理解一个推进调用要读 4 个 service + 2 个 util</b>。这是全后端最差的局部性。</p>
+  <p class="text-sm mb-3"><b>方案：</b>按职责拆 3 个深模块（不是拆 3 个薄层——每个有独立的大实现和小接口）：</p>
+  <ul class="text-sm mb-3 list-disc list-inside text-gray-300">
+    <li><b>DeviceRegistry</b>：CRUD + SN 生成 + Excel 导入 + 批次挂载（接口：<code>create/get/update/delete/assign_batch</code>）</li>
+    <li><b>DeviceStageMachine</b>：7 节点状态机 + 前置守卫 + 状态派生（接口：<code>advance(device_id, stage, status)</code>）</li>
+    <li><b>DeviceLifecycle</b>：点亮→资产/折旧/计费就绪 + 保险自动 + 放款触发（接口：<code>activate(device_id, date)</code>）</li>
+  </ul>
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="before-box">
+      <div class="label text-red-400 mb-1">Before：God service</div>
+      <div class="mermaid">
+graph TD
+  DS[device_service 728行]
+  DS -->|CRUD| A
+  DS -->|状态机| B
+  DS -->|资产激活| C
+  DS -->|保险| D
+  DS -->|放款触发| E
+  DS -->|Excel| F
+  style DS fill:#f85149
+      </div>
+    </div>
+    <div class="after-box">
+      <div class="label text-green-400 mb-1">After：3 个深模块</div>
+      <div class="mermaid">
+graph TD
+  DR[DeviceRegistry 接口小/实现大]
+  DS[DeviceStageMachine 接口1/实现大]
+  DL[DeviceLifecycle 接口1/实现大]
+  DR --> DS
+  DS --> DL
+  style DR fill:#3fb950
+  style DS fill:#3fb950
+  style DL fill:#3fb950
+      </div>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 gap-2 text-xs">
+    <div><div class="label">杠杆</div>资产/保险/放款触发可独立测试，不依赖 728 行上下文</div>
+    <div><div class="label">局部性</div>状态机变更不再碰 CRUD；放款阈值逻辑不再碰保险</div>
+  </div>
+  <div class="callout text-xs mt-2">⚠️ 拆分面大（728 行），建议拆分前先跑全绿 e2e 建立安全网，按 device_service 的现有测试（test_device.py 4 用例）逐步迁移。</div>
+</div>
+
+<!-- ============ 候选 4 ============ -->
+<div class="card p-5 mb-4">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="badge badge-explore">值得探索</span>
+    <h3 class="text-lg font-bold">#4 审计日志：46 个手动函数体导入 → 装饰器/事件</h3>
+  </div>
+  <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+    <div><div class="label">文件</div>audit_service.py（全文件）+ 15 个 service × 46 个 <code>from ... import audit_service</code></div>
+    <div><div class="label">分类</div>局部性 / 缺失缝</div>
+  </div>
+  <p class="text-sm mb-3"><b>问题：</b><code>audit_service.log()</code> 是个 20 行好函数，但调用方式是 <b>15 个 service 里 46 个函数体局部 import + 手拼 <code>after_json</code> dict</b>。键名自由发挥（<code>"side":"cash"</code> vs <code>"side":"hang"</code>）。覆盖靠程序员习惯——证据：<code>contracts.py:129-134</code> 的 endpoint 级软删除<b>完全不记审计</b>。还有 N+1：<code>audit_service.log</code> 每次调 <code>db.get(User, …)</code> 校验存在。</p>
+  <p class="text-sm mb-3"><b>方案：</b>引入 <code>@audited(action="CAPITAL_TXN", target="capital_transaction")</code> 装饰器，包装 service 的写操作。装饰器在 flush 前后自动捕获 before/after JSON，调用者只需声明 action 名。46 个手拼 dict → 46 个装饰器声明（在函数签名上，不在函数体里）。</p>
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="before-box">
+      <div class="label text-red-400 mb-1">Before：46 个手拼</div>
+<pre class="text-xs text-gray-400">def record_transaction(db, **kw):
+    txn = CapitalTransaction(**kw)
+    db.add(txn); db.flush()
+    <span class="text-red-400">from ... import audit_service as _audit
+    _audit.log(db, user_id=..., action="CAPITAL_TXN",
+               target_type="...", target_id=...,
+               after_json={...手拼...})</span></pre>
+    </div>
+    <div class="after-box">
+      <div class="label text-green-400 mb-1">After：装饰器声明</div>
+<pre class="text-xs text-green-300"><span class="text-green-400">@audited("CAPITAL_TXN", target="capital_transaction")</span>
+def record_transaction(db, **kw):
+    txn = CapitalTransaction(**kw)
+    db.add(txn); db.flush()
+    return txn</pre>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 gap-2 text-xs">
+    <div><div class="label">局部性</div>审计格式统一在装饰器里；漏记=没加装饰器，一眼可见</div>
+    <div><div class="label">测试面</div>装饰器可独立测试；service 测试不再需要 mock audit</div>
+  </div>
+</div>
+
+<!-- ============ 候选 5 ============ -->
+<div class="card p-5 mb-4">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="badge badge-spec">推测性</span>
+    <h3 class="text-lg font-bold">#5 前端常量耦合：步骤名/池标签/阶段表三处拷贝 → 后端单一真源</h3>
+  </div>
+  <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+    <div><div class="label">文件</div>ProjectWorkspace.vue（121-167）· CapitalView.vue（27-31,160）· DevicesView.vue（22-26）</div>
+    <div><div class="label">分类</div>耦合 / 局部性</div>
+  </div>
+  <p class="text-sm mb-3"><b>问题：</b>前端硬拷贝了大量后端常量：<code>STEP_HINTS</code>（22 条步骤描述）、<code>MODULE_ROUTE</code>（路由映射）、<code>POOL_OPTS</code>/<code>POOL_LABELS</code>（资金池标签）、<code>DEVICE_STAGES</code>（7 阶段）。步骤改名 = seed 模板 + workflow_service + ProjectWorkspace + e2e 四文件联动。CapitalView.vue 里有 3 处不同写法引用同一组池标签。</p>
+  <p class="text-sm mb-3"><b>方案：</b>后端开一个 <code>GET /api/meta/constants</code> 端点，返回 <code>DEVICE_STAGES</code> / <code>POOL_LABELS</code> / <code>STEP_HINTS</code> / <code>SOURCE_TYPES</code> 等。前端启动时拉一次缓存（localStorage + 版本号）。后端是单一真源，前端不拷贝。步骤改名只需改 workflow_service 一处。</p>
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="before-box">
+      <div class="label text-red-400 mb-1">Before：4 文件联动</div>
+      <div class="mermaid">
+graph LR
+  S[seed template] --> W[workflow_service]
+  W --> P[ProjectWorkspace STEP_HINTS]
+  W --> E[e2e tests]
+  W --> R[roleGuide.ts]
+  style P fill:#f85149
+  style R fill:#f85149
+      </div>
+    </div>
+    <div class="after-box">
+      <div class="label text-green-400 mb-1">After：后端真源</div>
+      <div class="mermaid">
+graph TD
+  W[workflow_service] -->|GET /api/meta/constants| P[前端缓存]
+  P --> P2[ProjectWorkspace]
+  P --> C[CapitalView]
+  P --> D[DevicesView]
+  style W fill:#3fb950
+      </div>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 gap-2 text-xs">
+    <div><div class="label">杠杆</div>常量同步从手动 4 文件 → 自动 1 次请求</div>
+    <div><div class="label">局部性</div>改名/改标签只改后端一处</div>
+  </div>
+  <div class="callout callout-warn text-xs mt-2">⚠️ 推测性：这会让前端启动多一个请求。如果常量变更频率极低（半年改一次），手动同步的摩擦也许可接受——值得和用户讨论是否值得自动化。</div>
+</div>
+
+<!-- ============ Top Recommendation ============ -->
+<div class="card p-5 mb-4" style="border-color:#3fb950;">
+  <h2 class="text-lg font-bold text-green-400 mb-3">🏆 先做哪个</h2>
+  <div class="grid grid-cols-1 gap-3">
+    <div>
+      <span class="badge badge-strong mr-2">第一优先</span>
+      <b>#2 Invoice.matched_amount 三份实现 → 单一真源</b>
+      <p class="text-sm text-gray-400 mt-1">最小改动、最高确定性：删代码而非加代码；三份实现已有测试覆盖（test_payment.py + test_reconciliation_center.py），改完直接跑绿验证。10 分钟见效。</p>
+    </div>
+    <div>
+      <span class="badge badge-strong mr-2">第二优先</span>
+      <b>#1 工作流 after_action 散弹枪 → 事件</b>
+      <p class="text-sm text-gray-400 mt-1">改动面最大但杠杆最高——每次加实体省 6 文件联动。需先建测试安全网（e2e 全绿）再改。</p>
+    </div>
+    <div>
+      <span class="badge badge-explore mr-2">第三优先</span>
+      <b>#4 审计装饰器</b> — 与 #1 同属"散弹枪收敛"类，可同期做
+    </div>
+  </div>
+</div>
+
+<h2 class="text-lg font-bold mb-3 mt-6">浅模块清单（删除测试不通过 = 它们在赚自己该得的）</h2>
+<div class="card p-4">
+  <table class="text-xs w-full">
+    <tr class="text-left text-gray-400 border-b border-gray-700">
+      <th class="p-2">模块</th><th class="p-2">接口</th><th class="p-2">实现</th><th class="p-2">判定</th>
+    </tr>
+    <tr class="border-b border-gray-800">
+      <td class="p-2">contract_service.list_contracts</td><td class="p-2">project_id?/type?/parent?</td><td class="p-2">build select + filter + return</td><td class="p-2 text-red-400">浅：端点可直接做</td>
+    </tr>
+    <tr class="border-b border-gray-800">
+      <td class="p-2">capital_service.list_transactions</td><td class="p-2">project_id?</td><td class="p-2">select + filter + return</td><td class="p-2 text-red-400">浅：端点可直接做</td>
+    </tr>
+    <tr class="border-b border-gray-800">
+      <td class="p-2">leasing_service.list_processes</td><td class="p-2">project_id?</td><td class="p-2">select + filter + return</td><td class="p-2 text-red-400">浅：端点可直接做</td>
+    </tr>
+    <tr class="border-b border-gray-800">
+      <td class="p-2">payment_service.list_requests</td><td class="p-2">project_id?/status?</td><td class="p-2">select + filter + return</td><td class="p-2 text-red-400">浅：端点可直接做</td>
+    </tr>
+    <tr class="border-b border-gray-800">
+      <td class="p-2">device_service.generate_sn</td><td class="p-2">→ SN string</td><td class="p-2">forward to doc_number_service</td><td class="p-2 text-red-400">浅：残留透传</td>
+    </tr>
+    <tr>
+      <td class="p-2">reconciliation dim1-dim8</td><td class="p-2">() → list[dict]</td><td class="p-2">聚合查询 + N+1</td><td class="p-2 text-yellow-400">浅但合理：维度=查询，深度在口径而非实现</td>
+    </tr>
+  </table>
+</div>
+
+<p class="text-xs text-gray-500 mt-6">报告生成于 2026-08-27 · 基于 19 个摩擦点走查 · 词汇来自 codebase-design skill</p>
+
+</body>
+</html>
