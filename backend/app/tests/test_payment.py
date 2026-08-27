@@ -244,6 +244,54 @@ def test_fx_diff_split_to_devices_golden(db):
     # 幂等：重复结算同发票同流水不再出汇兑（fx:{txn}:{inv} 哨兵）——由超额拦截间接保证，此处直调钩子了 
 
 
+# ------------------------------ #2 架构深化：matched_amount 单一真源防护网 ------------------------------
+
+def test_matched_amount_single_source_golden(db):
+    """#2 防护网：matched_amount 四处口径必须一致（真源 = column_property）。
+
+    A = Invoice.matched_amount column_property（billing.py，真源；B/C/D 手工实现已删/已迁）
+    覆盖：纯旧 1:1 链接 / 纯新多对多核销 / 混合；混合满额必须就地「已核销」。
+    """
+    p = _project(db)
+    c = _purchase_contract(db, p)
+
+    # 场景 1：纯旧路径（1:1 链接核销 300/1000）→ 两口径一致，未满不关
+    inv1 = _invoice(db, c, Decimal("1000"))
+    t1 = _txn(db, p, Decimal("300"))
+    isvc.reconcile_invoice(db, invoice_id=inv1.id, txn_id=t1.id, reconciled_by=None)
+    db.expire_all()
+    assert db.get(Invoice, inv1.id).matched_amount == Decimal("300.00")
+    assert db.get(Invoice, inv1.id).status != "已核销"
+
+    # 场景 2：纯新路径（settle 400/1000）→ 两口径一致
+    inv2 = _invoice(db, c, Decimal("1000"))
+    t2 = _txn(db, p, Decimal("400"))
+    svc.settle(db, txn_id=t2.id, allocations=[{"invoice_id": inv2.id, "amount": "400"}])
+    db.expire_all()
+    assert db.get(Invoice, inv2.id).matched_amount == Decimal("400.00")
+
+    # 场景 3：混合满额（旧链接 300 在前 + 新核销 700 收尾）→ 就地已核销
+    inv3 = _invoice(db, c, Decimal("1000"))
+    t3 = _txn(db, p, Decimal("300"))
+    isvc.reconcile_invoice(db, invoice_id=inv3.id, txn_id=t3.id, reconciled_by=None)
+    t4 = _txn(db, p, Decimal("700"))
+    svc.settle(db, txn_id=t4.id, allocations=[{"invoice_id": inv3.id, "amount": "700"}])
+    db.expire_all()
+    assert db.get(Invoice, inv3.id).matched_amount == Decimal("1000.00")
+    assert db.get(Invoice, inv3.id).status == "已核销"
+
+    # 场景 4（D 漂移回归点）：新核销 700 在前 + 旧链接 300 收尾 → 满额也必须已核销。
+    # 现状：reconcile_invoice 内联聚合只算旧链接（300 < 1000）→ 漏关；真源口径 = 1000 应关。
+    inv4 = _invoice(db, c, Decimal("1000"))
+    t5 = _txn(db, p, Decimal("700"))
+    svc.settle(db, txn_id=t5.id, allocations=[{"invoice_id": inv4.id, "amount": "700"}])
+    t6 = _txn(db, p, Decimal("300"))
+    isvc.reconcile_invoice(db, invoice_id=inv4.id, txn_id=t6.id, reconciled_by=None)
+    db.expire_all()
+    assert db.get(Invoice, inv4.id).matched_amount == Decimal("1000.00")
+    assert db.get(Invoice, inv4.id).status == "已核销"
+
+
 # ------------------------------ 拆分付款对抗用例（审计发现） ------------------------------
 
 def test_disburse_split_invalid_pool_rejected(db):

@@ -78,16 +78,14 @@ def dim2_purchase_chain(db: Session) -> list[dict]:
         invoiced = _sum(db, Invoice.amount,
                         Invoice.contract_id == c.id, Invoice.direction == "PAYABLE",
                         Invoice.status != "已红冲")
-        inv_ids = list(db.execute(select(Invoice.id).where(
-            Invoice.contract_id == c.id, Invoice.direction == "PAYABLE",
-            Invoice.status != "已红冲")).scalars().all())
-        paid_legacy = _sum(db, CapitalTransaction.amount,
-                           CapitalTransaction.invoice_id.in_(inv_ids),
-                           CapitalTransaction.deleted_at.is_(None)) if inv_ids else Decimal(0)
-        paid_new = _sum(db, PaymentSettlement.amount,
-                        PaymentSettlement.invoice_id.in_(inv_ids),
-                        PaymentSettlement.deleted_at.is_(None)) if inv_ids else Decimal(0)
-        paid = paid_legacy + paid_new
+        # #2 单一真源：paid 读 Invoice.matched_amount column_property（旧 1:1 链接 + 新核销行
+        # 两路合计）。SUM 内联标量子查询列，单条 SQL（每合同 3 查询 → 1 查询，无 N+1）；
+        # 删除口径 = 未红冲发票的 matched 合计，与原 legacy/new 双聚合逐一致。
+        paid = db.execute(
+            select(func.coalesce(func.sum(Invoice.matched_amount), 0)).where(
+                Invoice.contract_id == c.id, Invoice.direction == "PAYABLE",
+                Invoice.status != "已红冲")
+        ).scalar() or Decimal(0)
         # 预付款核销核对：项目设备预付款总额 / 已结转（冲抵视同结转）
         prepay_total = _sum(db, Device.prepayment_amount, Device.project_id == c.project_id)
         prepay_settled = _sum(db, Device.prepayment_settled_amount, Device.project_id == c.project_id)

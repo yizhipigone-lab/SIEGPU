@@ -254,11 +254,12 @@ def reconcile_invoice(db: Session, *, invoice_id, txn_id,
     # （端到端铁律）。不依赖 autoflush 做「写入后立即查」的正确性，显式 flush 才是生产可靠写法。
     db.flush()
 
-    # 检查是否全部匹配：Σ已关联流水金额 >= 发票金额
-    matched = db.execute(
-        select(func.coalesce(func.sum(CapitalTransaction.amount), 0)).where(
-            CapitalTransaction.invoice_id == inv.id, CapitalTransaction.deleted_at.is_(None))
-    ).scalar() or Decimal(0)
+    # 检查是否全部匹配：读单一真源 Invoice.matched_amount（#2：旧 1:1 链接 + 新核销行两路合计）。
+    # 此前只聚合旧链接，发票先走新路径核销、再用旧路径收尾时会漏判满核销（真源 1000 却停在「已开」）。
+    # inv 在本函数开头已加载（matched_amount 已随行载入 stale 值），flush 后必须显式 expire
+    # 强制重跑 column_property 聚合子查询（生产 autoflush=False，不 expire 读到的一定是旧值）。
+    db.expire(inv, ["matched_amount"])
+    matched = inv.matched_amount or Decimal(0)
 
     if matched >= inv.amount:
         inv.status = "已核销"

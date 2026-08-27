@@ -16,7 +16,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
@@ -215,21 +215,14 @@ def settle(db: Session, *, txn_id, allocations: list[dict], actor_id=None) -> li
     return rows
 
 
-def _invoice_matched(db: Session, invoice_id) -> Decimal:
-    """已核销合计 = 旧 1:1 链接流水 + 新多对多核销行（与 matched_amount column_property 同口径）。"""
-    legacy = db.execute(select(func.coalesce(func.sum(CapitalTransaction.amount), 0)).where(
-        CapitalTransaction.invoice_id == invoice_id,
-        CapitalTransaction.deleted_at.is_(None))).scalar() or Decimal(0)
-    new = db.execute(select(func.coalesce(func.sum(PaymentSettlement.amount), 0)).where(
-        PaymentSettlement.invoice_id == invoice_id,
-        PaymentSettlement.deleted_at.is_(None))).scalar() or Decimal(0)
-    return Decimal(legacy) + Decimal(new)
-
-
 def _maybe_close_invoice(db: Session, inv: Invoice, txn: CapitalTransaction) -> None:
     if inv.status in ("已核销", "已红冲"):
         return
-    if _invoice_matched(db, inv.id) >= inv.amount:
+    # #2 单一真源：满核销判定读 Invoice.matched_amount column_property（旧 1:1 链接 +
+    # payment_settlements 两路合计）。settle() 里 inv 在 db.flush() 前已被加载，identity map
+    # 中的 matched_amount 是 stale 值——显式 expire 强制下次访问重跑聚合子查询（与 DB 口径一致）。
+    db.expire(inv, ["matched_amount"])
+    if (inv.matched_amount or Decimal(0)) >= inv.amount:
         inv.status = "已核销"
         if inv.paid_date is None:
             inv.paid_date = txn.transaction_date
