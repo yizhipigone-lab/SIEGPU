@@ -53,3 +53,5 @@ _audit/
 e2e/manual-screenshots.js
 e2e/manual-to-pdf.js
 e2e/verify-palette.js
+
+.workbuddy/
