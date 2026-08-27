@@ -1,10 +1,11 @@
 """向导式工作流引擎 — 流程模板、步骤推进、自动检测、旧项目推断。"""
 import copy
 import logging
+import threading
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -165,9 +166,18 @@ def get_my_tasks(db: Session, user_id: uuid.UUID) -> list[dict]:
 # —— 推进 ——
 
 def after_action(db: Session, project_id: uuid.UUID):
-    """业务操作成功后调用（同步，同一事务内）。SELECT FOR UPDATE 锁行。
+    """业务操作成功后的手动推进入口（公开 API，手动兜底通道保留）。
+    常规推进由 flush 事件监听器（见文件末尾 _auto_refresh_workflow）驱动，
+    service 层无需感知工作流。SELECT FOR UPDATE 锁行。
     循环推进：当前步骤完成后继续检测后续 required 步骤，直到某步 check 不通过。
     内部 try/except：推进失败记日志，不向调用方抛。"""
+    _advance_steps(db, project_id, flush=True)
+
+
+def _advance_steps(db: Session, project_id: uuid.UUID, *, flush: bool = True):
+    """循环推进当前项目的 pending 步骤。flush=False 供 flush 事件监听器内使用
+    （_flushing 窗口内禁止再 flush——见 SQLAlchemy Session.flush 源码 guard；
+    变更留在 session，随同事务的下一次 flush / endpoint commit 落库，回滚一起回退）。"""
     try:
         wf = get_workflow_for_update(db, project_id)
         if not wf or wf.status != "进行中":
@@ -178,7 +188,7 @@ def after_action(db: Session, project_id: uuid.UUID):
                 return
             if not check_completion(db, project_id, current):
                 return
-            _mark_done(db, wf, current)
+            _mark_done(db, wf, current, flush=flush)
             if wf.status != "进行中":
                 return
     except Exception:
@@ -521,7 +531,8 @@ def _find_next_required(steps: list[dict], from_seq: int) -> int:
     return candidates[0]["seq"] if candidates else len(steps)
 
 
-def _mark_done(db: Session, wf: ProjectWorkflow, step: dict, operator_id: uuid.UUID | None = None):
+def _mark_done(db: Session, wf: ProjectWorkflow, step: dict,
+               operator_id: uuid.UUID | None = None, flush: bool = True):
     step["status"] = "done"
     step["completed_at"] = datetime.utcnow().isoformat()
     step["completed_by"] = str(operator_id) if operator_id else None
@@ -533,7 +544,8 @@ def _mark_done(db: Session, wf: ProjectWorkflow, step: dict, operator_id: uuid.U
         step_name=step.get("name", ""), action="complete",
         operator_id=operator_id, operated_at=datetime.utcnow(),
     ))
-    db.flush()
+    if flush:
+        db.flush()
 
 
 def _advance_current(wf: ProjectWorkflow):
@@ -684,3 +696,66 @@ def _device_flow_steps() -> list[dict]:
               required=False, prefill=pid,
               check=_check("profit_scenarios", project_id="{{project_id}}", is_actual=True, deleted_at=None)),
     ]
+
+
+# —— #1 架构深化：flush 事件驱动的工作流自动推进 ——
+
+# 递归保护：监听器内部（check_completion 查询等）不得再次进入推进逻辑
+_wf_refreshing = threading.local()
+
+
+def _tracked_project_ids(session: Session) -> set:
+    """从本次 flush 的 new/dirty/deleted 实体解析受影响项目集合。
+
+    事件时序（SQLAlchemy 2.0 源码实证）：
+    - after_flush 触发时 finalize_flush_changes() 未执行 → new/dirty/deleted 仍可用；
+    - after_flush_postexec 触发时 _commit_all_states 已把「flush 期间对干净实例的
+      属性修改」重置（identity_map._modified 清空）——所以必须在 after_flush 捕获，
+      在 postexec 行动；
+    - 两事件都在 Session._flushing 窗口内 → 行动阶段禁止再 flush，只改内存 + add，
+      变更随同事务的下一次 flush / endpoint commit 落库（回滚时一起回退，语义自洽）。
+    """
+    pids: set = set()
+    for obj in list(session.new) + list(session.dirty) + list(session.deleted):
+        table = getattr(type(obj), "__tablename__", None)
+        if table not in _TABLE_CLASSES:
+            continue
+        pid = getattr(obj, "project_id", None)
+        if pid is None and table in _FK_TO_PROJECT:
+            fk_col, parent_cls = _FK_TO_PROJECT[table]
+            fk_val = getattr(obj, fk_col, None)
+            if fk_val is not None:
+                parent = session.get(parent_cls, fk_val)
+                pid = getattr(parent, "project_id", None) if parent is not None else None
+        if pid is not None:
+            pids.add(pid)
+    return pids
+
+
+@event.listens_for(Session, "after_flush")
+def _capture_workflow_targets(session, flush_context):
+    """捕获本次 flush 涉及的 tracked 实体 → 待刷新项目集（存 session.info）。"""
+    if getattr(_wf_refreshing, "active", False):
+        return
+    pids = _tracked_project_ids(session)
+    if pids:
+        session.info.setdefault("_wf_pending_projects", set()).update(pids)
+
+
+@event.listens_for(Session, "after_flush_postexec")
+def _auto_refresh_workflow(session, flush_context):
+    """flush 落库后自动推进受影响项目的工作流步骤。
+
+    与原手动 after_action 调用语义一致：只前进、异常吞掉不炸业务、audit 留痕、
+    无 workflow 静默跳过。flush=False：不落库，随下一次 flush/commit 提交。"""
+    pending = session.info.pop("_wf_pending_projects", None)
+    if not pending or getattr(_wf_refreshing, "active", False):
+        return
+    _wf_refreshing.active = True
+    try:
+        for pid in pending:
+            _advance_steps(session, pid, flush=False)
+    except Exception:
+        logger.exception("auto workflow refresh failed for projects %s", pending)
+    finally:
+        _wf_refreshing.active = False

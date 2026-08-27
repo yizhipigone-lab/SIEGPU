@@ -55,8 +55,6 @@ def create_process(db: Session, *, project_id, supplier_id, total_amount, annual
     for i, name in enumerate(STANDARD_NODES, 1):
         db.add(LeasingNode(process_id=proc.id, node_name=name, seq=i, status="未开始"))
     db.flush()
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, project_id)
     return proc
 
 
@@ -155,8 +153,6 @@ def disburse(db: Session, *, process_id, actual_disbursement_amount: Decimal,
     db.flush()
     _audit.log(db, user_id=disbursed_by, action="DISBURSE", target_type="leasing_process",
                target_id=proc.id, after_json={"amount": str(actual_disbursement_amount), "periods": len(rows)})
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, proc.project_id)
     return proc, txn, len(rows)
 
 
@@ -213,8 +209,6 @@ def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal,
     from app.services import audit_service as _audit
     _audit.log(db, user_id=created_by, action="DISBURSE", target_type="leasing_disbursement",
                target_id=d.id, after_json={"amount": str(amount), "periods": len(rows)})
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, proc.project_id)
     return d, txn, len(rows)
 
 

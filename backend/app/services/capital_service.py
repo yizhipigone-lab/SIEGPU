@@ -235,9 +235,6 @@ def record_transaction(db: Session, *, created_by, **kw) -> CapitalTransaction:
     _audit.log(db, user_id=created_by, action="CAPITAL_TXN", target_type="capital_transaction",
                target_id=txn.id, after_json={"source_type": kw.get("source_type", ""),
                "direction": kw.get("direction", ""), "amount": str(txn.amount)})
-    from app.services import workflow_service as _wf
-    if kw.get("project_id"):
-        _wf.after_action(db, kw["project_id"])
     return txn
 
 

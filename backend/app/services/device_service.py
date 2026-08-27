@@ -495,8 +495,6 @@ def advance_device_stage(db: Session, *, device_id, stage, status,
                target_id=d.id,
                before_json={"stage": stage, "status": before},
                after_json={"stage": stage, "status": status, "device_status": d.status})
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, d.project_id)
     return d, row
 
 
@@ -535,7 +533,7 @@ def advance_batch_stages(db: Session, *, batch_id, stage, status,
             # W5-6 HIGH 修复：每台用 SAVEPOINT 隔离。_sync_device_asset 可能在 row.status 已 flush
             # 之后抛错（如表内自有设备缺 purchase_value），不隔离会让失败台的“已完成”节点随端点
             # commit 落库却无资产卡（“完成无卡”悬挂态，无法重推）。begin_nested 失败回滚到 savepoint
-            # （只回滚这台的 flush，含 audit/after_action），成功则释放——批内其余设备不受影响。
+            # （只回滚这台的 flush，含 audit 与工作流自动推进），成功则释放——批内其余设备不受影响。
             with db.begin_nested():
                 advance_device_stage(db, device_id=did, stage=stage, status=status,
                                      actual_date=actual_date, attachment_path=attachment_path,

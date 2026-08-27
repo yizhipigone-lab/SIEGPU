@@ -228,8 +228,6 @@ def save_scenario(db: Session, *, project_id, name, params_json, result_json,
     )
     db.add(scenario)
     db.flush()
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, project_id)
     return scenario
 
 

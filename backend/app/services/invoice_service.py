@@ -279,8 +279,4 @@ def reconcile_invoice(db: Session, *, invoice_id, txn_id,
     from app.services import audit_service as _audit
     _audit.log(db, user_id=reconciled_by, action="RECONCILE", target_type="invoice",
                target_id=inv.id, after_json={"amount": str(inv.amount), "matched": str(matched)})
-    from app.services import workflow_service as _wf
-    c = db.get(Contract, inv.contract_id)
-    if c:
-        _wf.after_action(db, c.project_id)
     return inv

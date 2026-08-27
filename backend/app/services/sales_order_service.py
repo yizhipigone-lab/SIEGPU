@@ -25,8 +25,6 @@ def create_sales_order(db: Session, *, project_id: uuid.UUID, contract_id: uuid.
     )
     db.add(so)
     db.flush()
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, project_id)
     return so
 
 

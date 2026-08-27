@@ -166,8 +166,6 @@ def approve_acceptance(db: Session, ar: AcceptanceRecord, *,
                target_id=ar.id, after_json={"status": "已通过", "type": ar.acceptance_type,
                "accepted": ar.quantity_accepted, "rejected": ar.quantity_rejected,
                "shelve": ar.shelve})
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, ar.project_id)
     # W4：销售验收勾选「上架」→ 同步标记上架完成
     _sync_shelve_for_sales_acceptance(db, ar, operator_id=approved_by)
     return ar

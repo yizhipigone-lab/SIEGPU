@@ -72,11 +72,6 @@ def confirm(db: Session, sc: ServiceConfirmation, *,
     from app.services import audit_service as _audit
     _audit.log(db, user_id=operator_id, action="CONFIRM_UPLOAD", target_type="service_confirmation",
                target_id=sc.id, after_json={"customer": confirmed_by_customer})
-    from app.services import workflow_service as _wf
-    from app.models.sales_order import SalesOrder
-    _so = db.get(SalesOrder, sc.sales_order_id)
-    if _so:
-        _wf.after_action(db, _so.project_id)
     return sc
 
 

@@ -42,8 +42,6 @@ def create_order(db: Session, *, project_id, equipment_model_id=None, quantity=N
         )
         db.add(o)
         db.flush()
-        from app.services import workflow_service as _wf
-        _wf.after_action(db, project_id)
         return o
     if not db.get(EquipmentModel, equipment_model_id):
         raise BusinessError("NOT_FOUND", "设备型号不存在", 404)
@@ -60,8 +58,6 @@ def create_order(db: Session, *, project_id, equipment_model_id=None, quantity=N
     for i, st in enumerate(STAGES, 1):
         db.add(DeliveryStage(order_id=o.id, stage=st, seq=i, status="未开始"))
     db.flush()
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, project_id)
     return o
 
 
@@ -96,8 +92,6 @@ def update_order(db: Session, order_id, *, actor_id=None, **fields) -> Order:
     if not o.is_batch and o.quantity is not None and o.unit_price is not None:
         o.total_amount = o.quantity * o.unit_price
     db.flush()
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, o.project_id)
     return o
 
 
@@ -162,6 +156,4 @@ def light_on(db: Session, *, order_id, actual_date: date, operator_id=None):
     from app.services import audit_service as _audit
     _audit.log(db, user_id=operator_id, action="LIGHT_ON", target_type="order",
                target_id=o.id, after_json={"quantity": o.quantity, "date": str(actual_date)})
-    from app.services import workflow_service as _wf
-    _wf.after_action(db, o.project_id)
     return o, asset
