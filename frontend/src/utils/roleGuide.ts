@@ -9,7 +9,9 @@
  *
  * quickActions.route 必须落在 roleMenu.ts 该角色白名单内，否则路由守卫会拦回首页。
  */
+import { computed, type ComputedRef } from 'vue'
 import { roleName } from './role'
+import { useMetaStore } from '../stores/meta'
 
 /**
  * 流程步骤元数据 —— 流程图节点 + 路由 + 一句话说明的单一事实源。
@@ -40,8 +42,9 @@ export interface FlowStep {
   aliases?: string[]
 }
 
-/** 11 步流程（与后端 _device_flow_steps 同源，名称逐字对齐） */
-export const FLOW_STEPS: readonly FlowStep[] = [
+/** 11 步流程静态骨架（与后端 _device_flow_steps 同源，名称逐字对齐）。
+ * desc 是本地兜底；运行时以 meta store 的 STEP_HINTS（后端真源）覆盖。 */
+const FLOW_STEPS_BASE: readonly FlowStep[] = [
   { seq: 1, name: '项目建立', route: '/master/projects', kind: 'doc', role: 'PROCUREMENT', desc: '录入项目并选择流程模板，系统自动生成向导' },
   { seq: 2, name: '销售合同', route: '/master/contracts', kind: 'doc', role: 'PROCUREMENT', desc: '录入与客户的销售合同（收入侧）' },
   { seq: 3, name: '采购合同', route: '/master/contracts', kind: 'doc', role: 'PROCUREMENT', desc: '录入与设备厂商的采购合同（支出侧）' },
@@ -55,6 +58,17 @@ export const FLOW_STEPS: readonly FlowStep[] = [
   { seq: 11, name: '盈利测算', route: '/profit', kind: 'action', role: 'FINANCE_STAFF', desc: '基于真实参数测算项目盈利并留存场景', aliases: ['客户确认', '开票+回款+核销'] },
 ]
 
+/** 11 步流程（computed）：desc 以 meta store 的 STEP_HINTS（后端真源）为准，失败回退本地骨架。 */
+export const FLOW_STEPS: ComputedRef<readonly FlowStep[]> = computed(() => {
+  let hints: Record<string, string> = {}
+  try {
+    hints = useMetaStore().stepHints
+  } catch {
+    /* pinia 未激活（如纯函数单测场景）：用本地兜底 */
+  }
+  return FLOW_STEPS_BASE.map((s) => ({ ...s, desc: hints[s.name] ?? s.desc }))
+})
+
 /** 泳道：把 11 步按角色分成三段接力，直观回答「谁做什么、在哪交接、我负责哪段」。 */
 export interface FlowLane {
   role: 'PROCUREMENT' | 'DELIVERY' | 'FINANCE_STAFF'
@@ -63,15 +77,15 @@ export interface FlowLane {
   steps: FlowStep[]
 }
 
-export const FLOW_LANES: readonly FlowLane[] = [
-  { role: 'PROCUREMENT', subtitle: '建单据 · 第 1–4 步', steps: FLOW_STEPS.filter((s) => s.role === 'PROCUREMENT') },
-  { role: 'DELIVERY', subtitle: '推落地 · 第 5–8 步', steps: FLOW_STEPS.filter((s) => s.role === 'DELIVERY') },
-  { role: 'FINANCE_STAFF', subtitle: '收尾 · 第 9–11 步', steps: FLOW_STEPS.filter((s) => s.role === 'FINANCE_STAFF') },
-]
+export const FLOW_LANES: ComputedRef<readonly FlowLane[]> = computed(() => [
+  { role: 'PROCUREMENT', subtitle: '建单据 · 第 1–4 步', steps: FLOW_STEPS.value.filter((s) => s.role === 'PROCUREMENT') },
+  { role: 'DELIVERY', subtitle: '推落地 · 第 5–8 步', steps: FLOW_STEPS.value.filter((s) => s.role === 'DELIVERY') },
+  { role: 'FINANCE_STAFF', subtitle: '收尾 · 第 9–11 步', steps: FLOW_STEPS.value.filter((s) => s.role === 'FINANCE_STAFF') },
+])
 
 /** 按步骤名（或标准模板别名）反查流程步骤 —— 供首页待办锚点用。 */
 export function flowStepByTaskName(name: string): FlowStep | undefined {
-  return FLOW_STEPS.find((s) => s.name === name || (s.aliases?.includes(name) ?? false))
+  return FLOW_STEPS.value.find((s) => s.name === name || (s.aliases?.includes(name) ?? false))
 }
 
 /**

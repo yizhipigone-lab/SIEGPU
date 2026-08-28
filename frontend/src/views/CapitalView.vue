@@ -11,6 +11,9 @@ import { money, tsToYmd, ymdToTs } from '../utils/format'
 import { errMsg } from '../utils/errMsg'
 import EChart from '../components/EChart.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { useMetaStore } from '../stores/meta'
+
+const meta = useMetaStore()
 
 const msg = useMessage()
 const route = useRoute()
@@ -18,6 +21,8 @@ const summary = ref<any>({ pool_balance: 0, total_in: 0, total_out: 0, by_source
 const txns = ref<any[]>([])
 const projects = ref<any[]>([])
 const poolProjects = ref<any[]>([])
+const suppliers = ref<any[]>([])
+const contracts = ref<any[]>([])
 const activeTab = ref<'transactions' | 'projects'>('transactions')
 
 const form = reactive({
@@ -26,24 +31,33 @@ const form = reactive({
 })
 const SOURCE_OPTS = ['自有资金', '银行流贷', '金租融资', '租金收入', '还款'].map((v) => ({ label: v, value: v }))
 const DIR_OPTS = [{ label: '入金 IN', value: 'IN' }, { label: '出金 OUT', value: 'OUT' }]
-// 四期 W4：资金池
-const POOL_OPTS = [{ label: '自有资金池', value: 'OWN' }, { label: '金租池', value: 'LEASING' }, { label: '银行池', value: 'BANK' }, { label: '预付款池(挂账)', value: 'PREPAY' }]
-const CASH_POOL_OPTS = [{ label: '银行池', value: 'BANK' }, { label: '金租池', value: 'LEASING' }, { label: '自有池', value: 'OWN' }]
+// 四期 W4：资金池。标签以 /api/meta/constants 的 POOL_LABELS 为单一真源（meta store 带本地兜底）；
+// 选项顺序是 UI 语义，留在前端。
+const POOL_OPTS = computed(() => meta.poolOptions(['OWN', 'LEASING', 'BANK', 'PREPAY']))
+const CASH_POOL_OPTS = computed(() => meta.poolOptions(['BANK', 'LEASING', 'OWN']))
 
 async function refresh() {
   try {
-    const [s, t, p, pp, al] = await Promise.all([
+    const [s, t, p, pp, al, sup, con] = await Promise.all([
       api.get('/capital/summary'), api.get('/capital/transactions'), api.get('/projects'),
       api.get('/capital/pool-by-project'), api.get('/capital/allocations'),
+      api.get('/suppliers'), api.get('/contracts'),
     ])
     summary.value = s.data; txns.value = t.data.items; projects.value = p.data.items
     poolProjects.value = pp.data.items; allocRecs.value = (al.data.items || []).map((a: any) => ({...a, id: a.id}))
+    suppliers.value = sup.data.items || []
+    contracts.value = (con.data.items || []).filter((c: any) => c.type === 'PURCHASE')
   } catch { msg.error('加载失败') }
 }
 onMounted(refresh)
 
 const projectOpts = () => projects.value.map((p: any) => ({ label: p.name, value: p.id }))
 const projectName = (id: string) => projects.value.find((p: any) => p.id === id)?.name || id.slice(0, 8) + '…'
+// S3（缺陷#9）：预付必选供应商与采购合同
+const supplierOpts = () => suppliers.value.map((s: any) => ({ label: s.name, value: s.id }))
+const purchaseContractOpts = () => contracts.value.map((c: any) => ({
+  label: `${c.contract_no || c.id.slice(0, 8)} · ${money(c.amount)}`, value: c.id,
+}))
 
 async function submit() {
   if (!form.project_id || !form.amount || !form.transaction_date) { msg.warning('请填齐 项目/金额/日期'); return }
@@ -72,7 +86,7 @@ const poolCards = computed(() => {
 
 // 池操作：记银行借款 / 还银行 / 预付 / 预付退回 / 预付核销
 const showPoolAct = ref(false)
-const poolAct = reactive({ type: '' as string, project_id: '' as string, amount: null as number | null, transaction_date: tsToYmd(Date.now()), pool: 'BANK', note: '' })
+const poolAct = reactive({ type: '' as string, project_id: '' as string, amount: null as number | null, transaction_date: tsToYmd(Date.now()), pool: 'BANK', note: '', supplier_id: '' as string, contract_id: '' as string })
 const POOL_ACT_TITLE: Record<string, string> = {
   'bank-loan': '记银行借款（银行池 +）', 'repay-bank': '还银行（银行池 −）',
   'prepay': '预付（现金池 → 预付款池挂账）', 'prepay-refund': '预付退回（预付款池 → 现金池）',
@@ -82,6 +96,7 @@ const needPool = computed(() => poolAct.type === 'prepay' || poolAct.type === 'p
 const poolFieldLabel = computed(() => (poolAct.type === 'prepay' ? '从哪个池预付' : '退回到哪个池'))
 function openPoolAct(t: string) {
   poolAct.type = t; poolAct.amount = null; poolAct.note = ''
+  poolAct.supplier_id = ''; poolAct.contract_id = ''
   poolAct.project_id = form.project_id || (projects.value[0]?.id ?? '')
   showPoolAct.value = true
 }
@@ -91,11 +106,23 @@ async function submitPoolAct() {
   try {
     if (poolAct.type === 'bank-loan') await api.post('/capital/bank-loan', base)
     else if (poolAct.type === 'repay-bank') await api.post('/capital/repay-bank', base)
-    else if (poolAct.type === 'prepay') await api.post('/capital/prepayment', { ...base, from_pool: poolAct.pool })
+    else if (poolAct.type === 'prepay') {
+      // S3（缺陷#9）：预付必带供应商与采购合同
+      if (!poolAct.supplier_id || !poolAct.contract_id) { msg.warning('预付请选择 供应商 + 采购合同（缺陷#9）'); return }
+      await api.post('/capital/prepayment', { ...base, from_pool: poolAct.pool, supplier_id: poolAct.supplier_id, contract_id: poolAct.contract_id })
+    }
     else if (poolAct.type === 'prepay-refund') await api.post('/capital/prepayment/refund', { ...base, to_pool: poolAct.pool })
     else if (poolAct.type === 'prepay-offset') await api.post('/capital/prepayment/offset', base)
     msg.success('已记账'); showPoolAct.value = false; await refresh()
   } catch (e: any) { msg.error(errMsg(e)) }
+}
+
+// S3（缺陷#8）：期初建账快捷入口——自有资金期初入金（OWN 池余额为 0 时预付会被拦，先建期初）
+function openInitOwn() {
+  form.project_id = form.project_id || (projects.value[0]?.id ?? '')
+  form.source_type = '自有资金'; form.direction = 'IN'; form.pool = 'OWN'
+  form.amount = null; form.transaction_date = tsToYmd(Date.now()); form.note = '期初建账'
+  msg.info('已预填自有资金期初入金，填金额后点「记一笔」')
 }
 
 // —— 调配 / 归还 ——
@@ -192,6 +219,7 @@ const txnCols = [
         <n-button size="small" @click="openPoolAct('prepay')">预付</n-button>
         <n-button size="small" @click="openPoolAct('prepay-refund')">预付退回</n-button>
         <n-button size="small" @click="openPoolAct('prepay-offset')">预付核销</n-button>
+        <n-button size="small" type="info" @click="openInitOwn">期初建账（自有入金）</n-button>
       </n-space>
     </n-card>
 
@@ -319,6 +347,15 @@ const txnCols = [
         <n-form-item v-if="needPool" :label="poolFieldLabel">
           <n-select v-model:value="poolAct.pool" :options="CASH_POOL_OPTS" />
         </n-form-item>
+        <!-- S3（缺陷#9）：预付必选供应商 + 采购合同 -->
+        <template v-if="poolAct.type === 'prepay'">
+          <n-form-item label="付给供应商">
+            <n-select v-model:value="poolAct.supplier_id" :options="supplierOpts()" placeholder="选供应商" filterable />
+          </n-form-item>
+          <n-form-item label="采购合同">
+            <n-select v-model:value="poolAct.contract_id" :options="purchaseContractOpts()" placeholder="选采购合同" filterable />
+          </n-form-item>
+        </template>
         <n-space>
           <n-form-item label="金额(元)"><n-input-number v-model:value="poolAct.amount" :show-button="false" style="width:170px" /></n-form-item>
           <n-form-item label="日期">
@@ -330,7 +367,7 @@ const txnCols = [
         <div class="muted tiny">
           <template v-if="poolAct.type==='bank-loan'">银行借款入「银行池」（持有借款余额增加）。</template>
           <template v-else-if="poolAct.type==='repay-bank'">从「银行池」出钱还银行，余额不足会被拦截。</template>
-          <template v-else-if="poolAct.type==='prepay'">从所选现金池出钱预付给供应商，同时「预付款池」挂账增加。</template>
+          <template v-else-if="poolAct.type==='prepay'">从所选现金池出钱预付给供应商（必填供应商与采购合同），同时「预付款池」挂账增加、台账落一行（含日期/供应商/合同）。</template>
           <template v-else-if="poolAct.type==='prepay-refund'">供应商退回预付：「预付款池」挂账减少，现金回到所选池。</template>
           <template v-else-if="poolAct.type==='prepay-offset'">拿到采购发票后核销：「预付款池」挂账减少，抵减应付（不动现金）。</template>
         </div>

@@ -10,6 +10,7 @@ import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
 import { roleName } from '../utils/role'
 import { useAuthStore } from '../stores/auth'
+import { useMetaStore } from '../stores/meta'
 import StepDrawer from '../components/StepDrawer.vue'
 import ProjectRelationTree from '../components/ProjectRelationTree.vue'
 
@@ -17,6 +18,7 @@ const route = useRoute()
 const router = useRouter()
 const msg = useMessage()
 const auth = useAuthStore()
+const meta = useMetaStore()
 const wf = ref<any>(null)
 const loading = ref(false)
 
@@ -113,39 +115,11 @@ function stepTag(s: any): { text: string; type: 'success' | 'warning' | 'info' |
 }
 
 /**
- * 步骤一句话说明（按步骤名映射，18 步标准模板与 11 步设备模板同名步骤共享）。
- * 新手友好：时间线上每步告诉用户「这一步到底做什么」。前端静态文案，无后端改动。
+ * 步骤一句话说明：后端 /api/meta/constants 的 STEP_HINTS 为单一真源（meta store 带本地兜底）。
  * 注意：文案刻意不含任何步骤名的连续子串（如「设备到货」「点亮」），
  * 否则 e2e 的 getByText('设备到货') 等子串定位会撞 strict mode。
  */
-const STEP_HINTS: Record<string, string> = {
-  项目建立: '录入项目并选定流程模板，系统据此自动生成整个工作流',
-  销售合同: '录入与客户的收入侧合同',
-  采购合同: '录入与设备厂商的支出侧合同',
-  销售订单: '面向客户的租出单据',
-  采购订单: '面向设备厂商的购买单据',
-  批次订单: '按采购批次下达的购买单据',
-  银行流贷入金: '登记银行流动资金贷款到账',
-  自有资金入金: '登记自有资金注入资金池',
-  预付采购款: '向设备厂商支付预付款',
-  金租申请: '向金租公司发起融资租赁申请',
-  '金租放款+置换': '融资款到账，自动置换前期垫资并生成还款计划',
-  金租放款: '融资款到账，自动生成还款计划',
-  采购验收: '到货后做采购侧检验并审批通过',
-  交付6阶段: '推进交付各阶段直至服务器上线',
-  销售验收: '客户侧检验并审批通过',
-  点亮: 'GPU 服务器上电联网，自动转资产并开始折旧',
-  设备导入: '批量导入设备清单并逐台建档',
-  设备到货: '确认设备送达现场并登记',
-  设备上架: '设备装入机柜就位',
-  点亮验收: '设备上电联网并通过检验，自动转资产',
-  计费: '按上电周期生成账单（价税分离）',
-  按台计费: '按设备台数与上电周期生成账单',
-  客户确认: '客户对账单做确认或提出争议',
-  '开票+回款+核销': '开具发票、登记回款并完成核销',
-  盈利测算: '基于真实参数测算项目盈利并留存实际场景',
-}
-function stepHint(name: string): string { return STEP_HINTS[name] ?? '' }
+function stepHint(name: string): string { return meta.stepHint(name) }
 
 const showDrawer = ref(false)
 const drawerStep = ref<any | null>(null)

@@ -4,6 +4,14 @@ import {
   NConfigProvider, NDialogProvider, NLoadingBarProvider, NMessageProvider,
   dateZhCN, zhCN,
 } from 'naive-ui'
+import { onMounted } from 'vue'
+import { useMetaStore } from './stores/meta'
+
+// 共享常量单一真源（架构 #5 薄版）：登录态下启动拉一次，失败回退本地兜底
+const meta = useMetaStore()
+onMounted(() => {
+  if (localStorage.getItem('token')) meta.load()
+})
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {

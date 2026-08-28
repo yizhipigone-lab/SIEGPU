@@ -16,6 +16,11 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('token', data.access_token)
     localStorage.setItem('role', data.role)
     if (data.display_name) localStorage.setItem('displayName', data.display_name)
+    // 登录成功即拉共享常量（不 await 结果；chunk 加载/接口失败都走本地兜底，不影响登录）
+    try {
+      const { useMetaStore } = await import('./meta')
+      useMetaStore().load()
+    } catch { /* 常量拉取失败无害：meta store 自带本地兜底 */ }
   }
 
   function logout() {

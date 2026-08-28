@@ -30,12 +30,14 @@ const props = withDefaults(defineProps<{
 
 const router = useRouter()
 const auth = useAuthStore()
+// FLOW_LANES 自 2026-08-27 起为 computed（desc 以后端 STEP_HINTS 为真源），模板经本地 lanes 解包
+const lanes = computed(() => FLOW_LANES.value)
 const highlight = computed(() => new Set(props.highlightSeqs))
 const activeNames = computed(() => new Set(props.activeStepNames))
 
 /** 本角色泳道（任一高亮步骤所在泳道整条高亮） */
 const mineLane = computed(() => {
-  const roles = FLOW_LANES.filter((l) => l.steps.some((s) => highlight.value.has(s.seq)))
+  const roles = FLOW_LANES.value.filter((l) => l.steps.some((s) => highlight.value.has(s.seq)))
   return new Set(roles.map((l) => l.role))
 })
 
@@ -71,7 +73,7 @@ function tooltip(s: FlowStep): string {
 <template>
   <div class="flow-map">
     <div
-      v-for="(lane, li) in FLOW_LANES" :key="lane.role"
+      v-for="(lane, li) in lanes" :key="lane.role"
       class="lane" :class="{ mine: mineLane.has(lane.role) }"
     >
       <div class="lane-head">
@@ -100,7 +102,7 @@ function tooltip(s: FlowStep): string {
           <ChevronRight v-if="i < lane.steps.length - 1" :size="14" class="arrow" />
         </template>
       </div>
-      <div v-if="li < FLOW_LANES.length - 1" class="handoff">
+      <div v-if="li < lanes.length - 1" class="handoff">
         <ChevronDown :size="16" />
         <span class="handoff-text">交给下一位</span>
       </div>

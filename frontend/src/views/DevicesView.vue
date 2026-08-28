@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NButton, NCard, NDataTable, NDatePicker, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag,
@@ -8,6 +8,9 @@ import {
 import { http } from '../api/client'
 import { errMsg } from '../utils/errMsg'
 import EmptyState from '../components/EmptyState.vue'
+import { useMetaStore } from '../stores/meta'
+
+const meta = useMetaStore()
 
 interface Device {
   id: string; sn: string; project_id: string; order_id: string | null
@@ -17,11 +20,12 @@ interface Device {
   leasing_mode: string | null; purchase_value: string | null
   prepayment_amount: string; status: string; ownership: string | null
   prepayment_settled: boolean
+  prepayment_date: string | null
 }
 
-const STATUS_OPTIONS = ['订货', '在途', '到货', '己方压测', '上架', '客户压测', '点亮验收']
-  .map((s) => ({ label: s, value: s }))
-const STAGE_STATUS_OPTIONS = ['未开始', '进行中', '已完成', '不合格'].map((s) => ({ label: s, value: s }))
+// 设备 7 节点：后端 /api/meta/constants 为单一真源（meta store 带本地兜底）
+const STATUS_OPTIONS = computed(() => meta.deviceStages.map((s) => ({ label: s, value: s })))
+const STAGE_STATUS_VALUES = ['未开始', '进行中', '已完成', '不合格']
 const LEASING_OPTIONS = ['自有', '直租', '售后回租'].map((s) => ({ label: s, value: s }))
 const OWNERSHIP_OPTIONS = ['表内自有', '金租表外', '转售表外'].map((s) => ({ label: s, value: s }))
 
@@ -114,7 +118,7 @@ const form = ref({
   sn: '', project_id: '' as string, equipment_model_id: '' as string,
   order_id: null as string | null, supplier_id: null as string | null,
   monthly_price: null as number | null, purchase_value: null as number | null,
-  prepayment_amount: null as number | null,
+  prepayment_amount: null as number | null, prepayment_date: null as string | null,
   leasing_mode: null as string | null, ownership: null as string | null,
 })
 
@@ -123,6 +127,7 @@ function openCreate() {
   form.value = {
     sn: '', project_id: '', equipment_model_id: '', order_id: null, supplier_id: null,
     monthly_price: null, purchase_value: null, prepayment_amount: null,
+    prepayment_date: null,
     leasing_mode: null, ownership: null,
   }
   showEdit.value = true
@@ -136,6 +141,7 @@ function openEdit(r: Device) {
     monthly_price: r.monthly_price == null ? null : Number(r.monthly_price),
     purchase_value: r.purchase_value == null ? null : Number(r.purchase_value),
     prepayment_amount: r.prepayment_amount == null ? null : Number(r.prepayment_amount),
+    prepayment_date: r.prepayment_date || null,  // S3（缺陷#5/#6）：预付款登记时间
     leasing_mode: r.leasing_mode, ownership: r.ownership,
   }
   showEdit.value = true
@@ -149,7 +155,8 @@ async function submitEdit() {
       await http.patch(`/devices/${editingId.value}`, {
         sn: f.sn || undefined, order_id: f.order_id, supplier_id: f.supplier_id,
         monthly_price: f.monthly_price, purchase_value: f.purchase_value,
-        prepayment_amount: f.prepayment_amount, leasing_mode: f.leasing_mode, ownership: f.ownership,
+        prepayment_amount: f.prepayment_amount, prepayment_date: f.prepayment_date,
+        leasing_mode: f.leasing_mode, ownership: f.ownership,
       })
       msg.success('设备已更新')
     } else {
@@ -159,7 +166,7 @@ async function submitEdit() {
         sn: f.sn || null, project_id: f.project_id, equipment_model_id: f.equipment_model_id,
         order_id: f.order_id, supplier_id: f.supplier_id,
         monthly_price: f.monthly_price, purchase_value: f.purchase_value,
-        prepayment_amount: f.prepayment_amount ?? 0,
+        prepayment_amount: f.prepayment_amount ?? 0, prepayment_date: f.prepayment_date,
         leasing_mode: f.leasing_mode, ownership: f.ownership,
       })
       msg.success('设备已创建')
@@ -246,6 +253,37 @@ const advanceTargetLabel = ref('')
 const advStage = ref<string | null>(null)
 const advStatus = ref<string | null>(null)
 const advDate = ref<number | null>(null)
+// S1-01（T1.1/T1.2）：错误透传 + 弹窗预筛。单台推进时拉取该设备各节点当前状态，
+// 按状态机规则（与后端 device_service.DEVICE_STAGE_TRANSITIONS 一致）预筛合法目标状态，
+// 并给出当前状态提示，避免用户盲选非法组合再收到笼统报错。
+const stageStatusMap = ref<Record<string, string>>({})
+const STAGE_TRANSITIONS: Record<string, string[]> = {
+  未开始: ['进行中'],
+  进行中: ['已完成', '不合格'],
+  不合格: ['进行中'],
+  已完成: ['不合格'],
+}
+const allowedStatusOptions = computed(() => {
+  const st = advStage.value ? stageStatusMap.value[advStage.value] : undefined
+  // 两个分支都必须是 string[]（对象数组混进来会把 label 渲染成 [object Object]）
+  const allowed: string[] = st ? (STAGE_TRANSITIONS[st] ?? []) : STAGE_STATUS_VALUES
+  return allowed.map((s) => ({ label: s, value: s }))
+})
+const advanceHint = computed(() => {
+  if (!advStage.value) {
+    return '状态机：未开始→进行中；进行中→已完成/不合格；不合格→进行中（返工）。设备状态列随推进自动更新。'
+  }
+  const st = stageStatusMap.value[advStage.value]
+  const allowed = st ? (STAGE_TRANSITIONS[st] ?? []) : []
+  return `当前「${advStage.value}」状态：${st ?? '—'}${allowed.length ? `，可转换到：${allowed.join(' / ')}` : ''}；提交失败会显示具体原因。`
+})
+// 唯一合法目标状态时自动选中（未开始→进行中 等），减少盲选非法组合
+watch(advStage, () => {
+  if (!advStage.value) { advStatus.value = null; return }
+  const allowed = allowedStatusOptions.value
+  if (allowed.length === 1) advStatus.value = allowed[0].value
+  else if (!allowed.some((o) => o.value === advStatus.value)) advStatus.value = null
+})
 
 function fmtDate(ts: number | null): string | undefined {
   if (ts == null) return undefined
@@ -259,29 +297,48 @@ function openAdvanceBatch() {
   advanceTargetIds.value = [...checkedRowKeys.value]
   advanceTargetLabel.value = `选中的 ${checkedRowKeys.value.length} 台设备`
   advStage.value = null; advStatus.value = null; advDate.value = null
+  stageStatusMap.value = {} // 批量多台状态不一，不做预筛（错误透传仍生效）
   showAdvance.value = true
 }
 
-function openAdvanceOne(r: Device) {
+async function openAdvanceOne(r: Device) {
   advanceTargetIds.value = [r.id]
   advanceTargetLabel.value = `设备 ${r.sn}`
   advStage.value = null; advStatus.value = null; advDate.value = null
+  stageStatusMap.value = {}
+  try {
+    const { data } = await http.get(`/devices/${r.id}/stages`)
+    const items = data?.items || []
+    const map: Record<string, string> = {}
+    if (items.length === 0) {
+      // 未推进过的设备无 stage 行（懒初始化）→ 按「全部未开始」预筛
+      for (const s of meta.deviceStages || []) map[s] = '未开始'
+    } else {
+      for (const s of items) map[s.stage] = s.status
+    }
+    stageStatusMap.value = map
+  } catch { /* 拉取失败不阻断推进 */ }
   showAdvance.value = true
 }
 
 async function submitAdvance() {
   if (!advStage.value || !advStatus.value) { msg.warning('请选择节点和状态'); return }
-  let ok = 0; let fail = 0
+  const errors: string[] = []
   for (const id of advanceTargetIds.value) {
     try {
       await http.post(`/devices/${id}/stage`, {
         stage: advStage.value, status: advStatus.value, actual_date: fmtDate(advDate.value),
       })
-      ok += 1
-    } catch { fail += 1 }
+    } catch (e: any) { errors.push(errMsg(e)) }
   }
-  if (fail) msg.warning(`节点推进完成：成功 ${ok} 台，失败 ${fail} 台（可能状态机不允许该转换）`)
-  else msg.success(`节点推进完成：${ok} 台`)
+  const ok = advanceTargetIds.value.length - errors.length
+  if (errors.length === 0) {
+    msg.success(`节点推进完成：${ok} 台`)
+  } else if (advanceTargetIds.value.length === 1) {
+    msg.error(`推进失败：${errors[0]}`) // S1-01：单台失败直接展示后端具体原因
+  } else {
+    msg.warning(`节点推进完成：成功 ${ok} 台，失败 ${errors.length} 台。失败原因示例：${errors[0]}`)
+  }
   showAdvance.value = false
   checkedRowKeys.value = []
   await load()
@@ -363,6 +420,17 @@ async function submitImport() {
     showImport.value = false
     importFile.value = null
     await load()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
+// S12（缺陷#2）：下载导入模版（列说明 + 示例数据）
+async function downloadTemplate() {
+  try {
+    const resp = await http.get('/excel/devices-template', { responseType: 'blob' })
+    const url = URL.createObjectURL(resp.data as unknown as Blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'devices-template.xlsx'; a.click()
+    URL.revokeObjectURL(url)
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
@@ -469,6 +537,7 @@ onMounted(load)
 
     <n-dataTable
       class="device-list-table"
+      size="small"
       v-model:checked-row-keys="checkedRowKeys"
       :columns="columns" :data="filteredItems" :loading="loading"
       :row-key="(r: Device) => r.id" :bordered="false"
@@ -507,6 +576,10 @@ onMounted(load)
           <n-form-item label="采购原值(元)"><n-input-number v-model:value="form.purchase_value" :min="0" :show-button="false" style="width:150px" /></n-form-item>
           <n-form-item label="月计费额(元/月)"><n-input-number v-model:value="form.monthly_price" :min="0" :show-button="false" style="width:150px" /></n-form-item>
           <n-form-item label="预付款(元)"><n-input-number v-model:value="form.prepayment_amount" :min="0" :show-button="false" style="width:150px" /></n-form-item>
+          <n-form-item label="预付款日期">
+            <n-date-picker :value="form.prepayment_date ? new Date(form.prepayment_date).getTime() : null" type="date" clearable style="width:150px"
+              @update:value="(ts: number | null) => form.prepayment_date = ts ? new Date(ts).toISOString().slice(0, 10) : null" />
+          </n-form-item>
         </n-space>
         <n-space>
           <n-form-item label="关联订单" style="width:240px">
@@ -566,6 +639,10 @@ onMounted(load)
     <!-- Excel 导入 -->
     <n-modal v-model:show="showImport" preset="card" title="Excel 批量导入" style="width:480px;max-width:94vw">
       <n-space vertical :size="12">
+        <div style="font-size:12px;color:var(--c-text-2,#666)">
+          支持列：SN（留空自动生成）· 金租模式(自有/直租/售后回租) · 月计费额 · 采购原值 · 预付款 · 权属。
+          <n-button size="tiny" quaternary type="info" style="margin-left:4px" @click="downloadTemplate">⬇ 下载导入模版</n-button>
+        </div>
         <n-form-item label="项目">
           <n-select v-model:value="importForm.project_id" :options="projectOpts()" placeholder="选项目" filterable />
         </n-form-item>
@@ -592,13 +669,13 @@ onMounted(load)
           <n-select v-model:value="advStage" :options="STATUS_OPTIONS" placeholder="选择节点" />
         </n-form-item>
         <n-form-item label="状态">
-          <n-select v-model:value="advStatus" :options="STAGE_STATUS_OPTIONS" placeholder="选择状态" />
+          <n-select v-model:value="advStatus" :options="allowedStatusOptions" placeholder="选择状态" />
         </n-form-item>
         <n-form-item label="实际日期（可选）">
           <n-date-picker v-model:value="advDate" type="date" clearable style="width:100%" />
         </n-form-item>
         <div style="font-size:12px;color:var(--c-text-3,#999)">
-          状态机：未开始→进行中；进行中→已完成/不合格；不合格→进行中（返工）。设备状态列随推进自动更新。
+          {{ advanceHint }}
         </div>
       </n-space>
       <template #footer>
