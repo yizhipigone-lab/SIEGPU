@@ -32,7 +32,12 @@ def _assert_statement_confirmed(db: Session, contract_id) -> None:
                ServiceConfirmation.deleted_at.is_(None))
     ).first()
     if not ok:
-        raise BusinessError("PRECONDITION", "该销售合同尚未有已确认的客户对账单，不能开票", 409)
+        raise BusinessError(
+            "PRECONDITION",
+            "该销售合同尚未有已确认的客户对账单，不能开票；请先在「客户确认单」页生成并确认该期对账单"
+            "（若计费单尚未生成，请先到「计费管理」按销售订单或按台出单）",
+            409,
+        )
 
 
 def create_invoice(db: Session, *, contract_id, amount: Decimal, invoice_no=None,

@@ -234,9 +234,9 @@ function onEnter(e: KeyboardEvent) {
 </script>
 
 <template>
-  <n-drawer v-model:show="visible" :width="540" placement="right" :mask="false" to="body"
+  <n-drawer v-model:show="visible" :width="720" placement="right" :mask="false" to="body"
             class="assistant-drawer" data-testid="assistant-drawer">
-    <n-drawer-content closable body-content-style="padding:0;display:flex;flex-direction:column">
+    <n-drawer-content closable body-content-style="padding:0;display:flex;flex-direction:column" footer-style="padding:12px 16px 16px">
       <template #header>
         <div style="display:flex;align-items:center;gap:8px">
           <n-icon size="18" color="#2563eb"><Bot /></n-icon>
@@ -247,10 +247,10 @@ function onEnter(e: KeyboardEvent) {
         </div>
       </template>
       <template #footer>
-        <div style="display:flex;gap:8px;align-items:flex-end">
+        <div class="composer">
           <n-input
-            v-model:value="input" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }"
-            placeholder="问数据、问流程、问操作…（Enter 发送）"
+            v-model:value="input" type="textarea" :autosize="{ minRows: 1, maxRows: 12 }"
+            placeholder="问数据、问流程、问操作…（Enter 发送，Shift+Enter 换行）"
             :disabled="sending" @keydown.enter="onEnter"
           />
           <n-button type="primary" :disabled="sending || !input.trim()" @click="send()">
@@ -333,7 +333,12 @@ function onEnter(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.msg-list { flex: 1; overflow-y: auto; padding: 16px; max-height: calc(100vh - 200px); }
+/* 输入区（composer）：占满抽屉宽度——输入框吃满整行，发送/清空按钮只在最右侧一小排 */
+.composer {
+  display: flex; gap: 8px; align-items: center; width: 100%;
+}
+.composer .n-input { flex: 1; min-width: 0; }
+.msg-list { flex: 1; overflow-y: auto; padding: 16px; max-height: calc(100vh - 220px); }
 .ctx-chip {
   font-size: 12px; color: #475569; background: #F1F5F9; border: 1px solid #E2E8F0;
   border-radius: 999px; padding: 3px 10px; display: inline-block; margin-bottom: 10px;

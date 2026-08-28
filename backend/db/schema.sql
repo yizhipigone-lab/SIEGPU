@@ -60,6 +60,10 @@ CREATE TABLE suppliers (
     contact_phone VARCHAR(50),
     bank_account TEXT,
     notes TEXT,
+    tax_no VARCHAR(50),
+    invoice_title VARCHAR(200),
+    bank_name VARCHAR(100),
+    address VARCHAR(200),
     is_leasing_org BOOLEAN NOT NULL DEFAULT FALSE,
     leasing_coop_modes JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -76,6 +80,10 @@ CREATE TABLE customers (
     contact_phone VARCHAR(50),
     credit_rating VARCHAR(20),
     notes TEXT,
+    tax_no VARCHAR(50),
+    invoice_title VARCHAR(200),
+    bank_name VARCHAR(100),
+    bank_account TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
@@ -174,12 +182,34 @@ CREATE TABLE contracts (
     biz_type VARCHAR(20) CHECK (biz_type IS NULL OR biz_type IN ('算力租赁','转售','服务')),  -- 合同类型
     amount_incl_tax DECIMAL(18,2) CHECK (amount_incl_tax IS NULL OR amount_incl_tax >= 0),    -- 合同金额（含税）
     lease_months INTEGER CHECK (lease_months IS NULL OR lease_months >= 1),                   -- 租期(月)，仅算力租赁
+    -- 缺陷#7（迁移 0032）：采购侧业务类型，与销售侧 biz_type 分开
+    purchase_biz_type VARCHAR(20) CHECK (purchase_biz_type IS NULL OR purchase_biz_type IN ('设备采购','服务采购','金租融资')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
     CHECK ((type='SALES' AND direction='RECEIVABLE') OR (type='PURCHASE' AND direction='PAYABLE'))
 );
 CREATE TRIGGER trg_contracts_updated BEFORE UPDATE ON contracts FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- 缺陷#8（迁移 0032）：合同明细行（行级税率，多税率录入）
+CREATE TABLE contract_line_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ,
+    contract_id UUID NOT NULL REFERENCES contracts(id),
+    seq INTEGER NOT NULL,                  -- 行号 1..N
+    name VARCHAR(200) NOT NULL,            -- 内容名称（如：算力服务费/设备买断款）
+    qty DECIMAL(18,4) NOT NULL DEFAULT 1,
+    unit_price DECIMAL(18,2) NOT NULL,     -- 单价（不含税）
+    tax_rate DECIMAL(10,8) NOT NULL DEFAULT 0.13,
+    line_amount DECIMAL(18,2) NOT NULL,    -- 不含税金额 = qty*unit_price
+    line_tax DECIMAL(18,2) NOT NULL,       -- 税额 = line_amount*tax_rate
+    line_amount_incl DECIMAL(18,2) NOT NULL, -- 价税合计
+    notes TEXT
+);
+CREATE INDEX ix_contract_line_items_contract_id ON contract_line_items(contract_id);
+CREATE TRIGGER trg_contract_line_items_updated BEFORE UPDATE ON contract_line_items FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX idx_contracts_project ON contracts(project_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_contracts_type ON contracts(type) WHERE deleted_at IS NULL;
 
@@ -221,7 +251,7 @@ CREATE TABLE leasing_processes (
     term_periods SMALLINT CHECK (term_periods IS NULL OR term_periods > 0),
     payment_freq VARCHAR(12) CHECK (payment_freq IS NULL OR payment_freq IN ('月','季','半年')),
     repayment_method VARCHAR(12) CHECK (repayment_method IS NULL OR repayment_method IN ('等额本息','等额本金')),
-    status VARCHAR(20) NOT NULL DEFAULT '进行中' CHECK (status IN ('进行中','已批','已放款','已拒绝')),
+    status VARCHAR(20) NOT NULL DEFAULT '进行中' CHECK (status IN ('进行中','已批','已放款','已拒绝','已作废')),
     start_date DATE,
     approval_date DATE,
     disbursement_date DATE,
@@ -263,6 +293,8 @@ CREATE TABLE leasing_disbursements (
     acceptance_id UUID,  -- FK 见下方 ALTER TABLE（acceptance_records 定义在后）
     amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
     disbursement_date DATE NOT NULL,
+    mode VARCHAR(20) NOT NULL DEFAULT '入池' CHECK (mode IN ('入池','直付')),
+    replacement_date DATE,
     note TEXT,
     created_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -453,6 +485,7 @@ CREATE TABLE devices (
     leasing_mode VARCHAR(20) CHECK (leasing_mode IS NULL OR leasing_mode IN ('自有','直租','售后回租')),
     purchase_value DECIMAL(18,2) CHECK (purchase_value IS NULL OR purchase_value >= 0),
     prepayment_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (prepayment_amount >= 0),
+    prepayment_date DATE,  -- S3：预付款登记时间（缺陷#5/#6：可空=待补）
     status VARCHAR(20) NOT NULL DEFAULT '订货' CHECK (status IN ('订货','在途','到货','己方压测','上架','客户压测','点亮验收','已退货')),
     ownership VARCHAR(20) CHECK (ownership IS NULL OR ownership IN ('表内自有','金租表外','转售表外')),
     prepayment_settled BOOLEAN NOT NULL DEFAULT FALSE,  -- 一期 W7-8：售后回租预付款结转标记
@@ -1252,7 +1285,27 @@ CREATE TABLE assistant_confirm_tokens (
 );
 CREATE INDEX idx_asst_ct_user_used ON assistant_confirm_tokens(user_id, used_at) WHERE deleted_at IS NULL;
 CREATE TRIGGER trg_asst_ct_updated BEFORE UPDATE ON assistant_confirm_tokens FOR EACH ROW EXECUTE FUNCTION set_updated_at();
--- ============================ 完成：52 张表 ============================
+
+-- ============================ S3：预付款台账表（缺陷#5/#6 收敛，D2 裁定翻盘） ============================
+CREATE TABLE prepayments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    supplier_id UUID REFERENCES suppliers(id),
+    contract_id UUID REFERENCES contracts(id),
+    device_id UUID REFERENCES devices(id),
+    payment_date DATE,
+    amount DECIMAL(18,2) NOT NULL CHECK (amount > 0),
+    settled_amount DECIMAL(18,2) NOT NULL DEFAULT 0 CHECK (settled_amount >= 0),
+    idempotency_key VARCHAR(128),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_prepay_idem ON prepayments(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX idx_prepay_project ON prepayments(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_prepay_device ON prepayments(device_id) WHERE deleted_at IS NULL AND device_id IS NOT NULL;
+CREATE TRIGGER trg_prepayments_updated BEFORE UPDATE ON prepayments FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+-- ============================ 完成：53 张表 ============================
 -- [v2.0 19表] users, suppliers, customers, equipment_models, banks,
 -- projects, contracts, leasing_processes, leasing_nodes,
 -- capital_transactions, invoices, capital_allocations,

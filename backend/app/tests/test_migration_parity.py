@@ -633,3 +633,105 @@ def test_alembic_0027_creates_drops_and_guards():
     upgrade = code.split("def downgrade")[0]
     for act in ("'ALLOCATE'", "'REVENUE_OVERRIDE'", "'LEASEBACK_SALE'"):
         assert act in code
+
+
+# ---- 0028 S3：预付款台账表 + devices.prepayment_date（缺陷#5/#6，D2 裁定翻盘） ----
+
+ALEMBIC_0028 = ROOT / "alembic" / "versions" / "0028_prepayments.py"
+
+
+def test_schema_sql_prepayments_table():
+    sql = _read(SCHEMA_SQL)
+    assert "CREATE TABLE prepayments" in sql
+    assert "payment_date DATE" in sql
+    assert "settled_amount DECIMAL(18,2) NOT NULL DEFAULT 0" in sql
+    assert "uq_prepay_idem" in sql
+    assert "idx_prepay_project" in sql
+    assert "idx_prepay_device" in sql
+    assert "trg_prepayments_updated" in sql
+    assert "prepayment_date DATE" in sql  # devices 新列
+
+
+def test_alembic_0028_creates_and_drops():
+    code = _read(ALEMBIC_0028)
+    assert 'revision = "0028_prepayments"' in code
+    assert 'down_revision = "0027_assistant_writes"' in code
+    assert "CREATE TABLE prepayments" in code
+    assert "uq_prepay_idem" in code
+    assert "ADD COLUMN IF NOT EXISTS prepayment_date" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP TABLE IF EXISTS prepayments" in down
+    assert "DROP COLUMN IF EXISTS prepayment_date" in down
+    assert "DELETE FROM" not in down  # 纯加表无损可逆
+
+
+# ---- 0029 S11：供应商/客户开票信息与银行账号（缺陷#22，纯加法 nullable） ----
+
+ALEMBIC_0029 = ROOT / "alembic" / "versions" / "0029_master_invoice_fields.py"
+
+MASTER_INVOICE_COLS = ("tax_no", "invoice_title", "bank_name", "address", "bank_account")
+
+
+def test_schema_sql_master_invoice_fields():
+    sql = _read(SCHEMA_SQL)
+    sup_block = sql[sql.index("CREATE TABLE suppliers"):sql.index("CREATE TRIGGER trg_suppliers_updated")]
+    cust_block = sql[sql.index("CREATE TABLE customers"):sql.index("CREATE TRIGGER trg_customers_updated")]
+    for col in ("tax_no", "invoice_title", "bank_name", "address"):
+        assert col in sup_block
+    for col in ("tax_no", "invoice_title", "bank_name", "bank_account"):
+        assert col in cust_block
+
+
+def test_alembic_0029_creates_and_drops():
+    code = _read(ALEMBIC_0029)
+    assert 'revision = "0029_master_invoice_fields"' in code
+    assert 'down_revision = "0028_prepayments"' in code
+    assert "ADD COLUMN IF NOT EXISTS" in code  # f-string 逐列
+    assert "ALTER TABLE suppliers" in code and "ALTER TABLE customers" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP COLUMN IF EXISTS" in down
+    assert "DELETE FROM" not in down
+
+
+# ---- 0030 S8：放款模式 + 置换归还日（缺陷#12/#13） ----
+
+ALEMBIC_0030 = ROOT / "alembic" / "versions" / "0030_disbursement_mode.py"
+
+
+def test_schema_sql_disbursement_mode():
+    sql = _read(SCHEMA_SQL)
+    assert "mode VARCHAR(20) NOT NULL DEFAULT '入池' CHECK (mode IN ('入池','直付'))" in sql
+    assert "replacement_date DATE" in sql
+
+
+def test_alembic_0030_creates_and_drops():
+    code = _read(ALEMBIC_0030)
+    assert 'revision = "0030_disbursement_mode"' in code
+    assert 'down_revision = "0029_master_invoice_fields"' in code
+    assert "ADD COLUMN IF NOT EXISTS mode" in code
+    assert "ADD COLUMN IF NOT EXISTS replacement_date" in code
+    down = code.split("def downgrade")[1]
+    assert "DROP COLUMN IF EXISTS mode" in down
+    assert "DROP COLUMN IF EXISTS replacement_date" in down
+    assert "DELETE FROM" not in down
+
+
+# ---- 0031 S12：金租申请「已作废」（缺陷#10，CHECK 只扩不收窄） ----
+
+ALEMBIC_0031 = ROOT / "alembic" / "versions" / "0031_lease_void.py"
+
+
+def test_schema_sql_lease_void():
+    sql = _read(SCHEMA_SQL)
+    assert "status IN ('进行中','已批','已放款','已拒绝','已作废')" in sql
+
+
+def test_alembic_0031_widens_then_guards():
+    code = _read(ALEMBIC_0031)
+    assert 'revision = "0031_lease_void"' in code
+    assert 'down_revision = "0030_disbursement_mode"' in code
+    upgrade = code.split("def downgrade")[0]
+    assert "'已作废'" in upgrade and "'已拒绝'" in upgrade  # 只扩不收窄
+    down = code.split("def downgrade")[1]
+    assert "DELETE FROM leasing_processes WHERE status = '已作废'" in down  # guard
+    assert "'已作废'" not in down.split("ADD CONSTRAINT")[1]  # 旧 CHECK 不含已作废

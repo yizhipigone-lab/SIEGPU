@@ -16,6 +16,11 @@ class Supplier(UUIDPK, TimestampMixin, Base):
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     bank_account: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 缺陷#22：开票信息 + 银行账号结构化（与现有系统对应）
+    tax_no: Mapped[str | None] = mapped_column(String(50), nullable=True)       # 税号
+    invoice_title: Mapped[str | None] = mapped_column(String(200), nullable=True)  # 开票抬头
+    bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)   # 开户行
+    address: Mapped[str | None] = mapped_column(String(200), nullable=True)     # 地址
     # 一期 W1-2：金租机构标记 + 合作模式
     is_leasing_org: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     leasing_coop_modes: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # 直租/回租
@@ -30,6 +35,11 @@ class Customer(UUIDPK, TimestampMixin, Base):
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     credit_rating: Mapped[str | None] = mapped_column(String(20), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 缺陷#22：客户开票信息 + 银行账号
+    tax_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    invoice_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    bank_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    bank_account: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class EquipmentModel(UUIDPK, TimestampMixin, Base):

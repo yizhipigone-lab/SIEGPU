@@ -65,6 +65,49 @@ def list_processes(db: Session, project_id=None):
     return db.execute(stmt).scalars().all()
 
 
+# S12（缺陷#10）：金租申请编辑 / 作废
+
+_EDITABLE_FIELDS = ("total_amount", "annual_rate", "term_periods", "payment_freq",
+                    "repayment_method", "start_date", "notes", "leasing_mode", "financing_type")
+
+
+def update_process(db: Session, *, process_id, operator_id=None, **fields) -> LeasingProcess:
+    """缺陷#10：编辑金租申请（仅「进行中」且未放款可改；金额/利率/期数/频率/方式等）。"""
+    proc = db.get(LeasingProcess, process_id)
+    if not proc or proc.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "金租申请不存在", 404)
+    if proc.status != "进行中":
+        raise BusinessError("STATE_ERROR", f"当前状态 {proc.status} 不允许修改（仅进行中且未放款可改）", 409)
+    if proc.plan_generated:
+        raise BusinessError("STATE_ERROR", "已放款并生成还款计划，不允许修改", 409)
+    for k, v in fields.items():
+        if k not in _EDITABLE_FIELDS:
+            raise BusinessError("VALIDATION_ERROR", f"字段 {k} 不可编辑", 422)
+        setattr(proc, k, v)
+    db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=operator_id, action="UPDATE", target_type="leasing_process",
+               target_id=proc.id, after_json={k: str(getattr(proc, k, None)) for k in fields})
+    return proc
+
+
+def void_process(db: Session, *, process_id, operator_id=None) -> LeasingProcess:
+    """缺陷#10：作废金租申请（仅未放款可作废，状态置「已作废」，节点冻结）。"""
+    proc = db.get(LeasingProcess, process_id)
+    if not proc or proc.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "金租申请不存在", 404)
+    if proc.plan_generated or proc.status == "已放款":
+        raise BusinessError("STATE_ERROR", "已放款的申请不可作废", 409)
+    if proc.status == "已作废":
+        raise BusinessError("DUPLICATE", "该申请已作废", 409)
+    proc.status = "已作废"
+    db.flush()
+    from app.services import audit_service as _audit
+    _audit.log(db, user_id=operator_id, action="UPDATE", target_type="leasing_process",
+               target_id=proc.id, after_json={"status": "已作废"})
+    return proc
+
+
 def get_process(db: Session, process_id):
     proc = db.get(LeasingProcess, process_id)
     if not proc or proc.deleted_at is not None:
@@ -157,10 +200,16 @@ def disburse(db: Session, *, process_id, actual_disbursement_amount: Decimal,
 
 
 def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal, disbursement_date: date,
+                     mode: str = "入池", replacement_date: date | None = None,
                      note: str | None = None, created_by=None) -> tuple:
-    """新增一笔放款：校验所选采购验收（已通过、属本项目）→ 写放款记录 → 生成该笔还款计划 → 记入金 → 置换。
+    """新增一笔放款：校验所选采购验收（已通过、属本项目）→ 写放款记录 → 生成该笔还款计划 → 记账 → 置换。
 
     一次金租批准可多笔放款，每笔关联具体一批采购验收（验收→订单→合同→项目血缘），每笔独立生成还款计划。
+    S8（缺陷#12/#13）：
+    - mode=入池（默认）：金租融资 IN 入金租池（现状）
+    - mode=直付：负债入账 IN + 供应商付款 OUT 两笔（金租代付，无现金进池，LEASING 池恒 0）；
+      contract_id 取数（K5）：验收类型=采购验收时取验收订单的采购合同，销售验收 → NULL
+    - replacement_date：置换归还日（缺省=放款日，金租置换流贷/自有垫资的真实归还日期）
     """
     proc = db.get(LeasingProcess, process_id)
     if not proc or proc.deleted_at is not None:
@@ -177,9 +226,13 @@ def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal,
         raise BusinessError("PRECONDITION", "放款依据必须是已通过的采购验收或销售验收", 409)
     if acc.project_id != proc.project_id:
         raise BusinessError("PRECONDITION", "该验收不属于本项目", 409)
+    if mode not in ("入池", "直付"):
+        raise BusinessError("BAD_REQUEST", f"非法放款模式: {mode}", 422)
+    replace_date = replacement_date or disbursement_date
 
     d = LeasingDisbursement(process_id=process_id, acceptance_id=acceptance_id, amount=amount,
-                            disbursement_date=disbursement_date, note=note, created_by=created_by)
+                            disbursement_date=disbursement_date, mode=mode,
+                            replacement_date=replace_date, note=note, created_by=created_by)
     db.add(d)
     db.flush()
 
@@ -191,25 +244,49 @@ def add_disbursement(db: Session, *, process_id, acceptance_id, amount: Decimal,
                          due_date=r.due_date, planned_principal=r.planned_principal,
                          planned_interest=r.planned_interest, status="待还"))
 
-    txn = CapitalTransaction(project_id=proc.project_id, source_type="金租融资", direction="IN",
-                             amount=amount, transaction_date=disbursement_date,
-                             leasing_process_id=proc.id, category="放款",
-                             idempotency_key=f"disburse:{d.id}", note=note, created_by=created_by,
-                             pool="LEASING")
-    db.add(txn)
+    # 放款记账（S8）：入池=金租融资 IN；直付=负债入账 IN + 供应商付款 OUT（K5 取数）
+    primary_in = None
+    if mode == "直付":
+        # K5：验收→订单→合同（采购验收才有采购合同；销售验收无）
+        purchase_contract_id = None
+        if acc.acceptance_type == "采购验收" and acc.order_id:
+            from app.models.delivery import Order
+            o = db.get(Order, acc.order_id)
+            purchase_contract_id = o.contract_id if o else None
+        primary_in = CapitalTransaction(
+            project_id=proc.project_id, source_type="金租融资", direction="IN",
+            amount=amount, transaction_date=disbursement_date,
+            leasing_process_id=proc.id, category="直付融资入账", contract_id=purchase_contract_id,
+            idempotency_key=f"disburse:{d.id}:liab", note=note or "金租直付：负债入账",
+            created_by=created_by, pool="LEASING")
+        db.add(primary_in)
+        db.add(CapitalTransaction(
+            project_id=proc.project_id, source_type="金租融资", direction="OUT",
+            amount=amount, transaction_date=disbursement_date,
+            leasing_process_id=proc.id, category="金租直付货款", contract_id=purchase_contract_id,
+            idempotency_key=f"disburse:{d.id}:pay", note=note or "金租直付：代付供应商货款",
+            created_by=created_by, pool="LEASING"))
+    else:
+        primary_in = CapitalTransaction(
+            project_id=proc.project_id, source_type="金租融资", direction="IN",
+            amount=amount, transaction_date=disbursement_date,
+            leasing_process_id=proc.id, category="放款",
+            idempotency_key=f"disburse:{d.id}", note=note, created_by=created_by,
+            pool="LEASING")
+        db.add(primary_in)
 
     from app.services import funding_service as fs
     fs.execute_replacement(db, project_id=proc.project_id, leasing_process_id=proc.id,
                            disbursement_amount=amount, disbursement_date=disbursement_date,
-                           created_by=created_by)
+                           replacement_date=replace_date, created_by=created_by)
 
     if proc.status != "已放款":
         proc.status = "已放款"
 
     from app.services import audit_service as _audit
     _audit.log(db, user_id=created_by, action="DISBURSE", target_type="leasing_disbursement",
-               target_id=d.id, after_json={"amount": str(amount), "periods": len(rows)})
-    return d, txn, len(rows)
+               target_id=d.id, after_json={"amount": str(amount), "periods": len(rows), "mode": mode})
+    return d, primary_in, len(rows)
 
 
 def list_disbursements(db: Session, process_id):

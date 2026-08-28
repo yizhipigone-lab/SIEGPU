@@ -35,6 +35,7 @@ const projects = ref<any[]>([])
 const orders = ref<any[]>([])
 const contracts = ref<any[]>([])
 const devices = ref<any[]>([])
+const salesOrders = ref<any[]>([])
 
 // 生成计费表单（订单维度，legacy 双轨保留）
 const showCreate = ref(false)
@@ -52,6 +53,14 @@ const formDevice = ref({
   period_index: null as number | null, billing_date: '',
 })
 
+// S5（缺陷#14/#15）：按销售订单出汇总计费单
+const showCreateSalesOrder = ref(false)
+const formSalesOrder = ref({
+  project_id: null as string | null,
+  sales_order_id: '' as string,
+  period_index: null as number | null, billing_date: '',
+})
+
 const projectOpts = () => projects.value.map((p: any) => ({ label: p.name, value: p.id }))
 const orderOpts = () => orders.value
   .filter((o: any) => !form.value.project_id || o.project_id === form.value.project_id)
@@ -62,6 +71,12 @@ const contractOpts = () => contracts.value
 const deviceOpts = () => devices.value
   .filter((d: any) => d.monthly_price != null && (!formDevice.value.project_id || d.project_id === formDevice.value.project_id))
   .map((d: any) => ({ label: `${d.sn} · ${money(d.monthly_price)}/月 · ${d.status}`, value: d.id }))
+const salesOrderOpts = () => salesOrders.value
+  .filter((s: any) => !formSalesOrder.value.project_id || s.project_id === formSalesOrder.value.project_id)
+  .map((s: any) => ({ label: `${s.is_batch ? `销售批次 ${s.batch_name || ''}` : '销售单'} · ${s.quantity ?? '?'}台 · ${money(s.total_monthly_rent)}/月`, value: s.id }))
+const salesOrderNo = (id: string | null) => id
+  ? (salesOrders.value.find((s: any) => s.id === id)?.batch_name || `销售单 ${id.slice(0, 8)}`)
+  : null
 
 const contractNo = (id: string) => contracts.value.find((c: any) => c.id === id)?.contract_no || id.slice(0, 8) + '…'
 const deviceSn = (id: string | null) => id ? (devices.value.find((d: any) => d.id === id)?.sn || id.slice(0, 8) + '…') : '-'
@@ -69,7 +84,8 @@ const deviceSn = (id: string | null) => id ? (devices.value.find((d: any) => d.i
 const columns = [
   { title: '计费期', key: 'period_label', width: 110 },
   { title: '设备', key: 'device_id', width: 150, render: (r: Billing) => deviceSn(r.device_id) },
-  { title: '订单', key: 'order_id', width: 110, render: (r: Billing) => r.order_id ? `${r.order_id.slice(0, 8)}…` : '-' },
+  { title: '订单', key: 'order_id', width: 140, render: (r: Billing) =>
+      r.sales_order_id ? (salesOrderNo(r.sales_order_id) || '销售单') : (r.order_id ? `${r.order_id.slice(0, 8)}…` : '-') },
   { title: '合同', key: 'contract_id', width: 130, render: (r: Billing) => contractNo(r.contract_id) },
   { title: '计费日', key: 'billing_date', width: 110 },
   { title: '天数', key: 'days_in_period', width: 60 },
@@ -83,14 +99,16 @@ const columns = [
 async function load() {
   loading.value = true
   try {
-    const [b, p, o, c, d] = await Promise.all([
-      api.get('/billings'), api.get('/projects'), api.get('/orders'), api.get('/contracts'), api.get('/devices'),
+    const [b, p, o, c, d, so] = await Promise.all([
+      api.get('/billings'), api.get('/projects'), api.get('/orders'), api.get('/contracts'),
+      api.get('/devices'), api.get('/sales-orders'),
     ])
     items.value = b.data.items
     projects.value = p.data.items
     orders.value = o.data.items
     contracts.value = c.data.items
     devices.value = d.data.items
+    salesOrders.value = so.data.items || so.data || []
   } catch (e: any) { msg.error(errMsg(e)) }
   finally { loading.value = false }
 }
@@ -143,6 +161,31 @@ async function submitCreateDevice() {
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
+// S5（缺陷#14/#15）：按销售订单出汇总计费单
+function openCreateSalesOrder() {
+  formSalesOrder.value = {
+    project_id: (route.query.project_id as string) || null, sales_order_id: '',
+    period_index: null, billing_date: new Date().toISOString().slice(0, 10),
+  }
+  showCreateSalesOrder.value = true
+}
+
+async function submitCreateSalesOrder() {
+  const f = formSalesOrder.value
+  if (!f.sales_order_id) { msg.warning('请选择销售订单'); return }
+  if (!f.period_index || !f.billing_date) { msg.warning('请填期数和计费日期'); return }
+  try {
+    await api.post('/billings/sales-order', {
+      sales_order_id: f.sales_order_id,
+      period_index: f.period_index, billing_date: f.billing_date,
+      idempotency_key: `${f.sales_order_id}-${f.period_index}`,
+    })
+    msg.success('按销售订单计费单已生成')
+    showCreateSalesOrder.value = false
+    await load()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
 onMounted(load)
 </script>
 
@@ -152,7 +195,8 @@ onMounted(load)
       <h2 style="margin:0">计费管理</h2>
       <n-space>
         <n-button @click="openCreateDevice">按台计费</n-button>
-        <n-button type="primary" @click="openCreate">生成计费</n-button>
+        <n-button type="primary" @click="openCreateSalesOrder">按销售订单计费</n-button>
+        <n-button quaternary size="small" @click="openCreate">订单维(旧)</n-button>
       </n-space>
     </div>
     <n-data-table :columns="columns" :data="items" :loading="loading" :bordered="false" size="small" striped>
@@ -207,6 +251,29 @@ onMounted(load)
         <n-space justify="end">
           <n-button @click="showCreateDevice = false">取消</n-button>
           <n-button type="primary" @click="submitCreateDevice">生成</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- S5（缺陷#14/#15）：按销售订单出汇总计费单 -->
+    <n-modal v-model:show="showCreateSalesOrder" preset="card" title="按销售订单计费（汇总出单）" style="width:500px;max-width:94vw">
+      <n-space vertical :size="12">
+        <n-form-item label="项目（用于筛选销售订单）">
+          <n-select v-model:value="formSalesOrder.project_id" :options="projectOpts()" placeholder="全部项目" filterable clearable />
+        </n-form-item>
+        <n-form-item label="销售订单/批次">
+          <n-select v-model:value="formSalesOrder.sales_order_id" :options="salesOrderOpts()" placeholder="选销售订单" filterable />
+        </n-form-item>
+        <n-space>
+          <n-form-item label="计费期数(期)"><n-input-number v-model:value="formSalesOrder.period_index" :min="1" style="width:110px" /></n-form-item>
+          <n-form-item label="计费日期"><n-input v-model:value="formSalesOrder.billing_date" placeholder="YYYY-MM-DD" style="width:150px" /></n-form-item>
+        </n-space>
+        <div class="muted tiny">批内设备逐台校验点亮后汇总成一张计费单（金额=Σ设备月租）；该期已按台计费的设备自动跳过；全部已按台计费会提示无需汇总。</div>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showCreateSalesOrder = false">取消</n-button>
+          <n-button type="primary" @click="submitCreateSalesOrder">生成</n-button>
         </n-space>
       </template>
     </n-modal>

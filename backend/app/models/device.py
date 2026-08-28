@@ -29,6 +29,7 @@ class Device(UUIDPK, TimestampMixin, Base):
     leasing_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 自有/直租/售后回租（快照自项目）
     purchase_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)  # 采购原值（单台）
     prepayment_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"), nullable=False)  # 预付款分摊
+    prepayment_date: Mapped[date | None] = mapped_column(Date, nullable=True)  # S3：预付款登记时间（缺陷#5/#6：可空=待补）
     status: Mapped[str] = mapped_column(String(20), default="订货", nullable=False)
     ownership: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 表内自有/金租表外/转售表外
     prepayment_settled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 一期 W7-8：售后回租预付款结转标记（回租出售时置 True）

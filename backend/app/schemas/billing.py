@@ -22,6 +22,14 @@ class BillingGenerateDevice(BaseModel):
     idempotency_key: str | None = None
 
 
+class BillingGenerateSalesOrder(BaseModel):
+    """S5（缺陷#14/#15）：按销售订单出汇总计费单（批内设备逐台点亮校验，跳过已按台计费的）。"""
+    sales_order_id: UUID
+    period_index: int = Field(gt=0)
+    billing_date: date
+    idempotency_key: str | None = None
+
+
 class BillingOut(BaseModel):
     id: UUID
     contract_id: UUID

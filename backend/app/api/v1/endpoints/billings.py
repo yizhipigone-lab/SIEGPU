@@ -8,7 +8,8 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.exceptions import BusinessError
 from app.models.user import User
-from app.schemas.billing import BillingGenerate, BillingGenerateDevice, BillingOut
+from app.schemas.billing import (BillingGenerate, BillingGenerateDevice, BillingGenerateSalesOrder,
+                                 BillingOut)
 from app.services import billing_service as svc
 
 router = APIRouter()
@@ -51,4 +52,21 @@ def generate_device(payload: BillingGenerateDevice, db: Session = Depends(get_db
     except IntegrityError:
         db.rollback()
         raise BusinessError("DUPLICATE", "该设备该期计费已存在", 409)
+    return BillingOut.model_validate(b)
+
+
+@router.post("/sales-order", response_model=BillingOut, status_code=201)
+def generate_sales_order(payload: BillingGenerateSalesOrder, db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """S5（缺陷#14/#15）：按销售订单出一张汇总计费单（基于销售订单而非采购订单）。"""
+    try:
+        b = svc.generate_billing_sales_order(
+            db, sales_order_id=payload.sales_order_id,
+            period_index=payload.period_index, billing_date=payload.billing_date,
+            created_by=user.id, idempotency_key=payload.idempotency_key,
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BusinessError("DUPLICATE", "该销售订单该期计费已存在", 409)
     return BillingOut.model_validate(b)

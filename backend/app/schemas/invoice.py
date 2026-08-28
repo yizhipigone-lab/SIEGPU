@@ -2,7 +2,14 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _empty_to_none(v):
+    """缺陷#19b：前端空串 '' 容忍 → None（日期字段）。"""
+    if isinstance(v, str) and v.strip() == "":
+        return None
+    return v
 
 
 class InvoiceCreate(BaseModel):
@@ -15,6 +22,8 @@ class InvoiceCreate(BaseModel):
     # 二期 W5-6：外币开票（amount=开票币种金额；invoice_rate=开票日汇率）
     currency_code: str | None = None
     invoice_rate: Decimal | None = Field(None, gt=0)
+
+    _normalize = field_validator("issue_date", "due_date", mode="before")(_empty_to_none)
 
 
 class InvoiceOut(BaseModel):

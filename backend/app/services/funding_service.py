@@ -14,6 +14,7 @@ def execute_replacement(db: Session, *, project_id: uuid.UUID,
                         leasing_process_id: uuid.UUID,
                         disbursement_amount: Decimal,
                         disbursement_date: date,
+                        replacement_date: date | None = None,  # S8（缺陷#13）：归还日可指定，缺省=放款日
                         created_by: uuid.UUID) -> list[FundingReplacement]:
     """扫描项目下未置换的流贷/自有付款，按时间顺序匹配置换。
 
@@ -23,6 +24,7 @@ def execute_replacement(db: Session, *, project_id: uuid.UUID,
     remaining = disbursement_amount
     if remaining <= 0:
         return []
+    repay_on = replacement_date or disbursement_date
 
     # 扫描待置换付款：is_replaced=FALSE + replaced_amount < amount
     stmt = (
@@ -53,11 +55,12 @@ def execute_replacement(db: Session, *, project_id: uuid.UUID,
             source_type=source_label,
             direction="IN",
             amount=replace_amt,
-            transaction_date=disbursement_date,
+            transaction_date=repay_on,  # S8（缺陷#13）：归还日可指定，不再写死放款日
             category="置换归还",
             note=f"金租放款置换：原付款 {txn.id}",
             created_by=created_by,
             contract_id=txn.contract_id,
+            bank_id=txn.bank_id,  # K6（缺陷#23）：回填原付款银行，授信已用才能正确抵减
             leasing_process_id=leasing_process_id,
         )
         db.add(repay_txn)

@@ -72,6 +72,32 @@ def test_approve_acceptance(db, order_id):
     assert ar.acceptance_date == date(2026, 6, 1)
 
 
+def test_create_acceptance_with_custom_date(db, order_id):
+    """缺陷#5：新建验收应可录入验收日期（当前 create 不接受日期、写死 date.today()）。"""
+    oid, pid = order_id
+    ar = svc.create_acceptance(db, project_id=pid, acceptance_type="采购验收",
+        order_id=oid, inspector="测试员", acceptance_date=date(2026, 5, 20))
+    db.flush()
+    assert ar.acceptance_date == date(2026, 5, 20)
+
+
+def test_update_acceptance_patch(db, order_id):
+    """缺陷#5：验收单可编辑日期/验收人；已通过后禁改（防破坏放款依据）。"""
+    oid, pid = order_id
+    ar = svc.create_acceptance(db, project_id=pid, acceptance_type="采购验收",
+        order_id=oid, acceptance_date=date(2026, 5, 20), inspector="测试员")
+    db.flush()
+    ar = svc.update_acceptance(db, ar, acceptance_date=date(2026, 5, 21), inspector="李四")
+    db.flush()
+    assert ar.acceptance_date == date(2026, 5, 21)
+    assert ar.inspector == "李四"
+    # 已通过后禁改
+    ar = svc.approve_acceptance(db, ar)
+    db.flush()
+    with pytest.raises(BusinessError):
+        svc.update_acceptance(db, ar, inspector="王五")
+
+
 def test_reject_acceptance(db, order_id):
     """验收驳回流程。"""
     oid, pid = order_id

@@ -11,6 +11,13 @@ class RepaymentConfirm(BaseModel):
     paid_date: date
 
 
+class RepaymentPlanUpdate(BaseModel):
+    """缺陷#11：还款计划调整（planned_* 均可选，只改传入项）。"""
+    planned_principal: Decimal | None = Field(None, ge=0)
+    planned_interest: Decimal | None = Field(None, ge=0)
+    due_date: date | None = None
+
+
 class RepaymentOut(BaseModel):
     id: UUID
     leasing_process_id: UUID

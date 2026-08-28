@@ -46,6 +46,20 @@ test('T1 资金池 API 全链：借款/预付/退回/核销/拆分付款/还银�
   const proj = await (await post(request, '/projects', { name: `E2E-资金池-${RUN}` }, '立项')).json()
   projId = proj.id
 
+  // S3（缺陷#9）：预付必带供应商与采购合同 → 先建主数据与合同
+  const sup = await (await post(request, '/suppliers', { name: `E2E供应商-${RUN}`, type: '设备供应商' }, '供应商')).json()
+  const cust = await (await post(request, '/customers', { name: `E2E客户-${RUN}`, industry: '互联网' }, '客户')).json()
+  const sc = await (await post(request, '/contracts', {
+    project_id: projId, type: 'SALES', biz_type: '算力租赁', party_id: cust.id,
+    amount: 1_000_000, amount_incl_tax: 1_130_000, tax_rate: 0.13, lease_months: 12,
+    contract_no: `E2EXS-${RUN}`,
+  }, '销售合同')).json()
+  const pc = await (await post(request, '/contracts', {
+    project_id: projId, type: 'PURCHASE', biz_type: '算力租赁', party_id: sup.id,
+    amount: 500_000, amount_incl_tax: 565_000, tax_rate: 0.13, parent_contract_id: sc.id,
+    contract_no: `E2ECG-${RUN}`,
+  }, '采购合同')).json()
+
   // 记银行借款 500 万 → 银行池 5M
   await post(request, '/capital/bank-loan',
     { project_id: projId, amount: 5_000_000, transaction_date: '2026-02-01' }, '记银行借款')
@@ -59,7 +73,8 @@ test('T1 资金池 API 全链：借款/预付/退回/核销/拆分付款/还银�
 
   // 预付 100 万（银行池出）→ 银行 4M / 预付挂账 1M
   await post(request, '/capital/prepayment',
-    { project_id: projId, amount: 1_000_000, transaction_date: '2026-02-02', from_pool: 'BANK' }, '预付挂账')
+    { project_id: projId, amount: 1_000_000, transaction_date: '2026-02-02', from_pool: 'BANK',
+      supplier_id: sup.id, contract_id: pc.id }, '预付挂账')
   p = await pools(request)
   expect(Number(p.BANK)).toBe(4_000_000)
   expect(Number(p.PREPAY)).toBe(1_000_000)

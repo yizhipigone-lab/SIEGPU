@@ -2,7 +2,7 @@
 import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  NButton, NCard, NDataTable, NDatePicker, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag,
+  NButton, NCard, NDataTable, NDatePicker, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch, NTag,
   useDialog, useMessage,
 } from 'naive-ui'
 import { http } from '../api/client'
@@ -47,13 +47,20 @@ const salesOrders = ref<any[]>([])
 const equipModels = ref<any[]>([])
 const suppliers = ref<any[]>([])
 
-// F2 可租库存看板（按型号聚合表内自营设备）
+// F2 可租库存看板（缺陷#13：自营 + 金租租入双口径）
 const inventory = ref<any[]>([])
-const invTotals = computed(() => inventory.value.reduce((acc: any, r: any) => ({
-  available: acc.available + (r.available || 0),
-  rented: acc.rented + (r.rented || 0),
-  pending: acc.pending + (r.pending || 0),
-}), { available: 0, rented: 0, pending: 0 }))
+const invTotals = computed(() => inventory.value.reduce((acc: any, r: any) => {
+  if (r.ownership === '表内自有') {
+    acc.available += r.available || 0
+    acc.rented += r.rented || 0
+    acc.pending += r.pending || 0
+  } else if (r.ownership === '金租表外') {
+    acc.lAvailable += r.available || 0
+    acc.lRented += r.rented || 0
+    acc.lPending += r.pending || 0
+  }
+  return acc
+}, { available: 0, rented: 0, pending: 0, lAvailable: 0, lRented: 0, lPending: 0 }))
 
 // 筛选（型号/金租模式后端暂不支持，前端过滤）
 // 步骤导航实体级跳转：?project_id=<pid> 时初始化项目筛选（fProject 走服务端过滤，见 load()）。
@@ -253,6 +260,8 @@ const advanceTargetLabel = ref('')
 const advStage = ref<string | null>(null)
 const advStatus = ref<string | null>(null)
 const advDate = ref<number | null>(null)
+// 缺陷#15：补录模式——目标节点及全部前序节点一键补齐为已完成（历史设备跳过顺序校验）
+const advCatchup = ref(false)
 // S1-01（T1.1/T1.2）：错误透传 + 弹窗预筛。单台推进时拉取该设备各节点当前状态，
 // 按状态机规则（与后端 device_service.DEVICE_STAGE_TRANSITIONS 一致）预筛合法目标状态，
 // 并给出当前状态提示，避免用户盲选非法组合再收到笼统报错。
@@ -322,6 +331,24 @@ async function openAdvanceOne(r: Device) {
 }
 
 async function submitAdvance() {
+  // 缺陷#15：补录模式走 stage-catchup（无状态字段，目标节点即补齐终点）
+  if (advCatchup.value) {
+    if (!advStage.value) { msg.warning('请选择要补齐到的节点'); return }
+    const errors: string[] = []
+    for (const id of advanceTargetIds.value) {
+      try {
+        await http.post(`/devices/${id}/stage-catchup`, {
+          target_stage: advStage.value, actual_date: fmtDate(advDate.value),
+        })
+      } catch (e: any) { errors.push(errMsg(e)) }
+    }
+    const ok = advanceTargetIds.value.length - errors.length
+    if (!errors.length) msg.success(`已补齐到「${advStage.value}」：${ok} 台`)
+    else msg.error(`补录失败（成功 ${ok} 台）：${errors[0]}`)
+    showAdvance.value = false
+    await load()
+    return
+  }
   if (!advStage.value || !advStatus.value) { msg.warning('请选择节点和状态'); return }
   const errors: string[] = []
   for (const id of advanceTargetIds.value) {
@@ -467,15 +494,17 @@ const columns = [
   },
 ]
 
-// F2 可租库存看板列：可租数高亮（业务最关心「还能租出几台」）
+// F2 可租库存看板列：可租数高亮（业务最关心「还能租出几台」）；缺陷#13 加权属列
 const invCols = [
   { title: '型号', key: 'model_name' },
   { title: '类别', key: 'category', width: 90, render: (r: any) => r.category || '—' },
+  { title: '权属', key: 'ownership', width: 100, render: (r: any) =>
+      h(NTag, { size: 'small', type: r.ownership === '表内自有' ? 'success' : 'info', bordered: false }, () => r.ownership) },
   { title: '可租', key: 'available', align: 'right' as const, width: 80, render: (r: any) =>
       r.available > 0 ? h('span', { style: 'color:#16A34A;font-weight:600' }, r.available) : '—' },
   { title: '在租', key: 'rented', align: 'right' as const, width: 80 },
   { title: '待交付', key: 'pending', align: 'right' as const, width: 80 },
-  { title: '自营合计', key: 'total', align: 'right' as const, width: 90 },
+  { title: '合计', key: 'total', align: 'right' as const, width: 90 },
 ]
 
 onMounted(load)
@@ -500,22 +529,22 @@ onMounted(load)
       </n-space>
     </div>
 
-    <n-card title="可租库存（表内自营设备）" size="small" style="margin-bottom:16px">
+    <n-card title="可租库存（自营 + 金租租入）" size="small" style="margin-bottom:16px">
       <template #header-extra>
-        <span class="muted tiny">按型号聚合 · 表外金租/转售不计入自营</span>
+        <span class="muted tiny">按型号聚合 · 自营（表内自有）与金租租入（表外）分列展示</span>
       </template>
       <div class="inv-totals">
         <div class="inv-total">
-          <div class="inv-num green">{{ invTotals.available }}</div>
-          <div class="inv-lbl">可租（随时下发）</div>
+          <div class="inv-num green">{{ invTotals.available + invTotals.lAvailable }}</div>
+          <div class="inv-lbl">可租（自营 {{ invTotals.available }} + 金租 {{ invTotals.lAvailable }}）</div>
         </div>
         <div class="inv-total">
-          <div class="inv-num blue">{{ invTotals.rented }}</div>
-          <div class="inv-lbl">在租（计费中）</div>
+          <div class="inv-num blue">{{ invTotals.rented + invTotals.lRented }}</div>
+          <div class="inv-lbl">在租（自营 {{ invTotals.rented }} + 金租 {{ invTotals.lRented }}）</div>
         </div>
         <div class="inv-total">
-          <div class="inv-num gray">{{ invTotals.pending }}</div>
-          <div class="inv-lbl">待交付（未点亮）</div>
+          <div class="inv-num gray">{{ invTotals.pending + invTotals.lPending }}</div>
+          <div class="inv-lbl">待交付（自营 {{ invTotals.pending }} + 金租 {{ invTotals.lPending }}）</div>
         </div>
       </div>
       <n-data-table v-if="inventory.length" :columns="invCols" :data="inventory"
@@ -650,7 +679,7 @@ onMounted(load)
           <n-select v-model:value="importForm.equipment_model_id" :options="equipOpts()" placeholder="选设备型号" filterable />
         </n-form-item>
         <n-form-item label="Excel 文件（.xlsx）">
-          <input type="file" accept=".xlsx,.xls" @change="onFileChange" />
+          <input type="file" accept=".xlsx" @change="onFileChange" />
         </n-form-item>
       </n-space>
       <template #footer>
@@ -665,23 +694,29 @@ onMounted(load)
     <n-modal v-model:show="showAdvance" preset="card" title="节点推进" style="width:460px;max-width:94vw">
       <n-space vertical :size="12">
         <div style="font-size:13px">目标：{{ advanceTargetLabel }}</div>
+        <n-form-item label="补录模式">
+          <n-switch v-model:value="advCatchup" size="small" />
+          <span class="tiny" style="margin-left:8px;color:var(--c-text-3,#999)">
+            历史设备一键补齐：目标节点及之前的所有节点直接置为已完成
+          </span>
+        </n-form-item>
         <n-form-item label="节点">
           <n-select v-model:value="advStage" :options="STATUS_OPTIONS" placeholder="选择节点" />
         </n-form-item>
-        <n-form-item label="状态">
+        <n-form-item v-if="!advCatchup" label="状态">
           <n-select v-model:value="advStatus" :options="allowedStatusOptions" placeholder="选择状态" />
         </n-form-item>
         <n-form-item label="实际日期（可选）">
           <n-date-picker v-model:value="advDate" type="date" clearable style="width:100%" />
         </n-form-item>
         <div style="font-size:12px;color:var(--c-text-3,#999)">
-          {{ advanceHint }}
+          {{ advCatchup ? '补录：把「目标节点及之前」全部标记为已完成（跳过顺序校验，适合补录线下已完成的在途/到货等节点）' : advanceHint }}
         </div>
       </n-space>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showAdvance = false">取消</n-button>
-          <n-button type="primary" @click="submitAdvance">确认推进</n-button>
+          <n-button type="primary" @click="submitAdvance">{{ advCatchup ? '一键补齐' : '确认推进' }}</n-button>
         </n-space>
       </template>
     </n-modal>

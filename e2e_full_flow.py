@@ -133,9 +133,10 @@ step("记银行借款 60 万 → 银行池")
 post("/capital/bank-loan", {"project_id": proj, "amount": BANK_LOAN, "transaction_date": TODAY, "note": "工行流贷"})
 show_pools(proj, "(借款后)")
 
-step("预付 20 万（从银行池 → 预付款挂账池）")
+step("预付 20 万（从银行池 → 预付款挂账池；S3 起必填供应商+采购合同）")
 post("/capital/prepayment", {"project_id": proj, "amount": PREPAY, "transaction_date": TODAY,
-                             "contract_id": pc["id"], "from_pool": "BANK", "note": "预付设备款"})
+                             "contract_id": pc["id"], "from_pool": "BANK",
+                             "supplier_id": sup_dev["id"], "note": "预付设备款"})
 show_pools(proj, "(预付后)")
 
 # ================= 金租放款（基于采购验收） =================

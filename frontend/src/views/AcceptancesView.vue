@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NButton, NCheckbox, NDataTable, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace,
@@ -33,11 +33,23 @@ const filteredItems = computed(() => items.value.filter((a) => a.acceptance_type
 
 // 新建表单
 const showCreate = ref(false)
+const todayStr = () => new Date().toISOString().slice(0, 10)
 const form = ref({
   project_id: '' as string, acceptance_type: '采购验收' as string,
   order_id: null as string | null, sales_order_id: null as string | null,
+  acceptance_date: todayStr(),  // 缺陷#5：验收日期可录入（默认今天）
   inspector: '', quantity_accepted: 0, quantity_rejected: 0, notes: '',
   shelve: false,
+})
+// 缺陷#5：验收与设备清单勾稽——采购验收选中批次后展示批内设备（SN/状态，只读）
+const batchDevices = ref<any[]>([])
+watch(() => [form.value.order_id, form.value.acceptance_type], async ([oid, type]) => {
+  batchDevices.value = []
+  if (type !== '采购验收' || !oid) return
+  try {
+    const { data } = await http.get('/devices', { params: { batch_id: oid } })
+    batchDevices.value = data.items || []
+  } catch { batchDevices.value = [] }
 })
 
 // 驳回弹窗
@@ -128,8 +140,10 @@ function openCreate() {
   form.value = {
     project_id: (route.query.project_id as string) || '', acceptance_type: activeType.value,
     order_id: null, sales_order_id: null,
+    acceptance_date: todayStr(),
     inspector: '', quantity_accepted: 0, quantity_rejected: 0, notes: '', shelve: false,
   }
+  batchDevices.value = []
   showCreate.value = true
 }
 
@@ -143,6 +157,7 @@ async function submitCreate() {
       project_id: f.project_id, acceptance_type: f.acceptance_type,
       order_id: f.acceptance_type === '采购验收' ? f.order_id : null,
       sales_order_id: f.acceptance_type === '销售验收' ? f.sales_order_id : null,
+      acceptance_date: f.acceptance_date || todayStr(),
       inspector: f.inspector || null,
       quantity_accepted: f.quantity_accepted, quantity_rejected: f.quantity_rejected,
       notes: f.notes || null,
@@ -190,7 +205,19 @@ onMounted(load)
         <n-form-item v-else label="关联销售批次">
           <n-select v-model:value="form.sales_order_id" :options="salesOrderOpts()" placeholder="选销售批次" filterable />
         </n-form-item>
+        <!-- 缺陷#5：验收与设备清单勾稽（采购验收批次设备，只读） -->
+        <div v-if="batchDevices.length" style="font-size:12px;color:var(--c-text-2,#666);background:#F8FAFC;border-radius:6px;padding:8px 10px">
+          <div style="margin-bottom:4px">本批次 {{ batchDevices.length }} 台设备：</div>
+          <n-space :size="2" wrap>
+            <n-tag v-for="d in batchDevices" :key="d.id" size="tiny" :bordered="false"
+              :type="d.status === '点亮验收' ? 'success' : 'default'">{{ d.sn }} · {{ d.status }}</n-tag>
+          </n-space>
+        </div>
         <n-space>
+          <n-form-item label="验收日期">
+            <n-date-picker :value="form.acceptance_date ? new Date(form.acceptance_date).getTime() : null" type="date" style="width:150px"
+              @update:value="(ts: any) => { if (ts) form.acceptance_date = new Date(ts).toISOString().slice(0, 10) }" />
+          </n-form-item>
           <n-form-item label="验收人"><n-input v-model:value="form.inspector" style="width:130px" /></n-form-item>
           <n-form-item label="合格数(台)"><n-input-number v-model:value="form.quantity_accepted" :min="0" style="width:100px" /></n-form-item>
           <n-form-item label="不合格数(台)"><n-input-number v-model:value="form.quantity_rejected" :min="0" style="width:100px" /></n-form-item>

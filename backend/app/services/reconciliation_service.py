@@ -259,14 +259,15 @@ def dim7_flow_diffs(db: Session, customer_id=None, supplier_id=None) -> list[dic
                      "paid": r["paid"], "invoiced": r["invoiced"]})
     return rows
 
-# ------------------------------ 维度 8：预付款双轨勾稽（四期 W4 期1 R1 既定后续） --------------
+# ------------------------------ 维度 8：预付款勾稽（S3 收敛后：台账表 vs PREPAY 池） --------------
 
 def dim8_prepay_parity(db: Session) -> list[dict]:
-    """PREPAY 池余额（资金台账轨）vs Σ设备预付剩余（运营轨），按项目勾稽。
+    """预付款勾稽（S3）：PREPAY 池流水 vs 台账表余额（amount−settled），按项目。
 
-    计划书 R1：两套口径是同一笔钱——池只管资金进出（预付挂账/退回/核销），
-    devices 逐台字段管运营/计费结转。本维度把两轨余额摆在一起，差异即漏记/错轨。
-    只列任一轨非零的项目；|diff| > 0.01 → 「双轨差异」。
+    手工预付（/capital/prepayment）同事务落账 → 恒等。差异含义（缺陷#6 收敛后的残留检查）：
+    - diff < 0（台账 > 池）：设备登记预付未走资金池 → 「台账缺资金流水」（提示补记资金流水）
+    - diff > 0（池 > 台账）：池有挂账但台账无行 → 「资金流水缺台账」（同事务下不应发生）
+    只列任一轨非零的项目；|diff| > 0.01 → 标 flag。
     """
     # 资金台账轨：PREPAY 池按项目 ΣIN−ΣOUT
     pool_rows = db.execute(
@@ -280,26 +281,32 @@ def dim8_prepay_parity(db: Session) -> list[dict]:
         cur = pool_by_proj.get(pid, Decimal(0))
         pool_by_proj[pid] = cur + (Decimal(s) if d == "IN" else -Decimal(s))
 
-    # 运营轨：设备预付剩余（未结清；一期回租置位 settled=True 剩余按 0）
-    dev_by_proj: dict = {}
-    for d in db.execute(select(Device).where(Device.prepayment_amount > 0)).scalars().all():
-        if d.prepayment_settled:
+    # 台账轨：prepayments 表余额（未结清）
+    from app.models.prepayment import Prepayment
+    led_by_proj: dict = {}
+    for p in db.execute(select(Prepayment).where(Prepayment.deleted_at.is_(None))).scalars().all():
+        if p.amount is None or p.amount <= 0:
             continue
-        remaining = d.prepayment_amount - (d.prepayment_settled_amount or Decimal(0))
-        if remaining > 0:
-            dev_by_proj[d.project_id] = dev_by_proj.get(d.project_id, Decimal(0)) + remaining
+        rem = p.amount - (p.settled_amount or Decimal(0))
+        if rem > 0:
+            led_by_proj[p.project_id] = led_by_proj.get(p.project_id, Decimal(0)) + rem
 
     rows = []
-    for pid in set(pool_by_proj) | set(dev_by_proj):
+    for pid in set(pool_by_proj) | set(led_by_proj):
         pool_bal = pool_by_proj.get(pid, Decimal(0))
-        dev_rem = dev_by_proj.get(pid, Decimal(0))
-        if pool_bal == 0 and dev_rem == 0:
+        led_rem = led_by_proj.get(pid, Decimal(0))
+        if pool_bal == 0 and led_rem == 0:
             continue
-        diff = pool_bal - dev_rem
+        diff = pool_bal - led_rem
         proj = db.get(Project, pid)
+        flags = []
+        if diff < -Decimal("0.01"):
+            flags.append("台账缺资金流水")
+        elif diff > Decimal("0.01"):
+            flags.append("资金流水缺台账")
         rows.append({
             "project_id": str(pid), "project_name": proj.name if proj else "—",
-            "pool_balance": q2(pool_bal), "device_remaining": q2(dev_rem), "diff": q2(diff),
-            "flags": ["双轨差异"] if abs(diff) > Decimal("0.01") else [],
+            "pool_balance": q2(pool_bal), "device_remaining": q2(led_rem), "diff": q2(diff),
+            "flags": flags,
         })
     return rows

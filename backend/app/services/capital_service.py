@@ -72,6 +72,53 @@ POOLS = ("OWN", "LEASING", "BANK", "PREPAY")
 POOL_LABELS = {"OWN": "自有资金池", "LEASING": "金租池", "BANK": "银行池", "PREPAY": "预付款池(挂账)"}
 
 
+def bank_credit_usage(db: Session) -> dict:
+    """缺陷#23：银行已用授信 = Σ借款(银行流贷 IN) − Σ偿还(归还银行 OUT + 归还流贷 IN)，按 bank_id。
+
+    置换归还（funding_service）已回填原付款 bank_id（K6），故金租置换还掉的流贷会正确抵减已用。
+    """
+    rows = db.execute(
+        select(CapitalTransaction.bank_id, CapitalTransaction.source_type,
+               CapitalTransaction.direction,
+               func.coalesce(func.sum(CapitalTransaction.amount), 0))
+        .where(CapitalTransaction.bank_id.is_not(None),
+               CapitalTransaction.source_type.in_(["银行流贷", "归还银行", "归还流贷"]),
+               CapitalTransaction.deleted_at.is_(None))
+        .group_by(CapitalTransaction.bank_id, CapitalTransaction.source_type,
+                  CapitalTransaction.direction)
+    ).all()
+    used: dict = {}
+    for bid, st, d, s in rows:
+        amt = Decimal(s)
+        if st == "银行流贷" and d == "IN":
+            # 借款入账 → 已用增加；银行流贷 OUT 是垫资付款（不改已用，只在还款时减少）
+            used[bid] = used.get(bid, Decimal(0)) + amt
+        elif st in ("归还银行", "归还流贷"):
+            # 归还银行(OUT) / 置换归还流贷(IN) 均减少已用
+            used[bid] = used.get(bid, Decimal(0)) - amt
+    return {str(bid): v for bid, v in used.items()}
+
+
+def assert_bank_credit_available(db: Session, bank_id, amount: Decimal) -> None:
+    """缺陷#23：银行借款前校验剩余授信（超额 400）。bank_id=None 时不校验（存量兼容）。"""
+    if bank_id is None:
+        return
+    from app.models.master import Bank
+    bank = db.get(Bank, bank_id)
+    if bank is None or bank.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "银行不存在", 404)
+    if bank.credit_line is None:
+        return  # 未设授信额度 → 不拦截
+    used = bank_credit_usage(db).get(str(bank_id), Decimal(0))
+    remaining = Decimal(bank.credit_line) - used
+    if Decimal(amount) > remaining:
+        raise BusinessError(
+            "INSUFFICIENT_CREDIT",
+            f"银行授信不足：{bank.name} 授信 {bank.credit_line:,.2f}，已用 {used:,.2f}，剩余 {remaining:,.2f}，本次借款 {amount:,.2f}",
+            400,
+        )
+
+
 def pool_balance(db: Session, project_id, pool: str) -> Decimal:
     """某项目某池余额 = ΣIN − ΣOUT（软删除过滤由 do_orm_execute 事件保证）。PREPAY 池=当前挂账预付额。"""
     inn, out = Decimal(0), Decimal(0)
@@ -97,9 +144,10 @@ def _assert_pool_sufficient(db: Session, project_id, pool: str, amount: Decimal)
     """OUT 前置校验：该池余额须 ≥ 金额（防超额支出/超挂账核销）。"""
     bal = pool_balance(db, project_id, pool)
     if amount > bal:
+        hint = "；自有池余额为 0 时请先在资金页记一笔「期初建账（自有入金）」或银行借款" if pool == "OWN" else ""
         raise BusinessError(
             "INSUFFICIENT_POOL",
-            f"{POOL_LABELS.get(pool, pool)}余额不足：现有 {bal}，需 {amount}",
+            f"{POOL_LABELS.get(pool, pool)}余额不足：现有 {bal}，需 {amount}{hint}",
             400,
         )
 
@@ -286,14 +334,20 @@ def repay_bank(db: Session, *, project_id, amount, transaction_date, created_by,
 
 
 def record_prepayment(db: Session, *, project_id, amount, transaction_date, created_by,
-                      contract_id=None, from_pool="BANK", note=None, idempotency_key=None):
-    """预付：现金池(from_pool) OUT + 预付款池(挂账) IN。返回 (现金流水, 挂账流水)。"""
+                      supplier_id=None, contract_id=None, from_pool="BANK", note=None, idempotency_key=None):
+    """预付：现金池(from_pool) OUT + 预付款池(挂账) IN + 台账行（S3 缺陷#6/#9，同事务）。
+
+    台账行与双流水共享幂等键前缀，payment_date=交易日期。供应商/采购合同必填（endpoint schema
+    已必填；service 兜底校验，且校验顺序放在池校验之后，防呆检查优先）。
+    """
     amount = Decimal(str(amount))
     if from_pool == "PREPAY":
         raise BusinessError("BAD_REQUEST", "预付款不能从预付款池支出", 400)
     if from_pool not in POOLS:
         raise BusinessError("BAD_REQUEST", f"非法资金池 {from_pool}", 400)
     _assert_pool_sufficient(db, project_id, from_pool, amount)
+    if supplier_id is None or contract_id is None:
+        raise BusinessError("VALIDATION_ERROR", "预付必须登记供应商与采购合同（缺陷#9）", 422)
     base = idempotency_key or f"prepay:{uuid.uuid4()}"
     cash_out = CapitalTransaction(project_id=project_id, source_type="预付", direction="OUT",
                                   amount=amount, transaction_date=transaction_date, contract_id=contract_id,
@@ -304,6 +358,13 @@ def record_prepayment(db: Session, *, project_id, amount, transaction_date, crea
                                  category="预付挂账", note=note, created_by=created_by, pool="PREPAY",
                                  idempotency_key=f"{base}:hang")
     db.add_all([cash_out, hang_in])
+    # S3：台账行（单一真源，与流水同事务；幂等键共享前缀，D2 裁定翻盘）
+    from app.models.prepayment import Prepayment
+    db.add(Prepayment(
+        project_id=project_id, supplier_id=supplier_id, contract_id=contract_id,
+        payment_date=transaction_date, amount=amount, settled_amount=Decimal(0),
+        idempotency_key=f"{base}:ledger",
+    ))
     db.flush()
     _log_pool(db, created_by, "CAPITAL_TXN", cash_out, {"side": "cash"})
     _log_pool(db, created_by, "CAPITAL_TXN", hang_in, {"side": "hang"})

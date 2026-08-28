@@ -117,13 +117,13 @@ def test_list_devices_filters(db):
     p = _project(db); e = _equipment(db)
     svc.create_device(db, project_id=p.id, equipment_model_id=e.id)  # 订货
     d2 = svc.create_device(db, project_id=p.id, equipment_model_id=e.id)  # 订货
-    # M-2：status 由状态机单点维护，create_device 不再接受 status；推进 d2 到在途
-    svc.advance_device_stage(db, device_id=d2.id, stage="订货", status="进行中")
-    svc.advance_device_stage(db, device_id=d2.id, stage="订货", status="已完成")
+    # 缺陷#16：建档即订货已完成（无需显式推进订货）→ 直接推在途
+    svc.advance_device_stage(db, device_id=d2.id, stage="在途", status="进行中")
+    svc.advance_device_stage(db, device_id=d2.id, stage="在途", status="已完成")
     db.refresh(d2)
-    assert d2.status == "在途"
+    assert d2.status == "到货"
     assert len(svc.list_devices(db, project_id=p.id)) == 2
-    assert len(svc.list_devices(db, project_id=p.id, status="在途")) == 1
+    assert len(svc.list_devices(db, project_id=p.id, status="到货")) == 1
     assert len(svc.list_devices(db, project_id=p.id, status="订货")) == 1
 
 
@@ -298,7 +298,9 @@ def test_ensure_device_stages_creates_7_rows(db):
     assert len(rows) == 7
     assert [r.stage for r in rows] == svc.DEVICE_STAGES
     assert [r.seq for r in rows] == list(range(1, 8))
-    assert all(r.status == "未开始" for r in rows)
+    # 缺陷#16：建档即订货已完成，其余 6 节点未开始
+    assert rows[0].status == "已完成"
+    assert all(r.status == "未开始" for r in rows[1:])
 
 
 def test_ensure_device_stages_idempotent(db):
@@ -312,8 +314,13 @@ def test_ensure_device_stages_idempotent(db):
 
 def test_advance_illegal_transition_blocked(db):
     d = _device(db)
+    # 缺陷#16：建档即订货已完成 → 订货行不再适用"未开始→已完成"非法用例，改用未开始的在途节点
     with pytest.raises(BusinessError):  # 未开始 → 已完成 非法
-        svc.advance_device_stage(db, device_id=d.id, stage="订货", status="已完成")
+        svc.advance_device_stage(db, device_id=d.id, stage="在途", status="已完成")
+    # 缺陷#15：严格顺序——前序节点未完成不可推后续
+    d2 = _device(db)
+    with pytest.raises(BusinessError):
+        svc.advance_device_stage(db, device_id=d2.id, stage="到货", status="进行中")
 
 
 def test_advance_unknown_stage_blocked(db):
@@ -324,17 +331,18 @@ def test_advance_unknown_stage_blocked(db):
 
 def test_advance_updates_materialized_status(db):
     d = _device(db)
-    svc.advance_device_stage(db, device_id=d.id, stage="订货", status="进行中")
-    svc.advance_device_stage(db, device_id=d.id, stage="订货", status="已完成",
+    # 缺陷#16：建档即订货已完成（无需显式推进），actual_date 由首次推进补记
+    svc.advance_device_stage(db, device_id=d.id, stage="在途", status="进行中")
+    db.refresh(d)
+    assert d.status == "在途"
+    svc.advance_device_stage(db, device_id=d.id, stage="在途", status="已完成",
                              actual_date=date(2026, 8, 1))
     db.refresh(d)
-    assert d.status == "在途"  # 首未完成
-    svc.advance_device_stage(db, device_id=d.id, stage="在途", status="进行中")
-    svc.advance_device_stage(db, device_id=d.id, stage="在途", status="已完成")
-    db.refresh(d)
     assert d.status == "到货"
-    row = next(r for r in svc.list_device_stages(db, d.id) if r.stage == "订货")
-    assert row.status == "已完成" and row.actual_date == date(2026, 8, 1)
+    svc.advance_device_stage(db, device_id=d.id, stage="到货", status="进行中")
+    svc.advance_device_stage(db, device_id=d.id, stage="到货", status="已完成")
+    db.refresh(d)
+    assert d.status == "己方压测"
 
 
 def test_advance_buhelige_rework_path(db):
@@ -442,6 +450,7 @@ def test_advance_batch_stages_basic(db):
     d1 = _device(db); d2 = _device(db); b = _batch(db)
     svc.add_to_batch(db, device_id=d1.id, batch_id=b.id)
     svc.add_to_batch(db, device_id=d2.id, batch_id=b.id)
+    # 缺陷#16：建档即订货已完成 → 批量推订货"进行中"幂等跳过（ok 计数），状态不变
     res = svc.advance_batch_stages(db, batch_id=b.id, stage="订货", status="进行中")
     assert res == {"ok": 2, "fail": 0}
     db.refresh(d1); db.refresh(d2); db.refresh(b)
@@ -450,16 +459,15 @@ def test_advance_batch_stages_basic(db):
 
 
 def test_advance_batch_stages_fail_path(db):
-    """M-3：批内设备该节点已「已完成」→ 批量推进同节点「进行中」被状态机拒 → {ok:0, fail:1}。
+    """M-3：非法转换 → {ok:0, fail:1}。
 
     （HTTP /devices/batch-advance 是 4 行透传：调本函数 + commit + return；端到端在 Phase E e2e 覆盖。）
+    缺陷#16 后订货建档即完成，幂等路径不再报错 → 用"未开始的在途直接推已完成"构造非法转换。
     """
     d1 = _device(db); b = _batch(db)
     svc.add_to_batch(db, device_id=d1.id, batch_id=b.id)
-    svc.advance_device_stage(db, device_id=d1.id, stage="订货", status="进行中")
-    svc.advance_device_stage(db, device_id=d1.id, stage="订货", status="已完成")
-    res = svc.advance_batch_stages(db, batch_id=b.id, stage="订货", status="进行中")
-    assert res == {"ok": 0, "fail": 1}  # 已完成→进行中 非法，整批计 fail
+    res = svc.advance_batch_stages(db, batch_id=b.id, stage="在途", status="已完成")
+    assert res == {"ok": 0, "fail": 1}  # 未开始→已完成 非法，整批计 fail
 
 
 def test_advance_batch_isolates_asset_build_failure(db):

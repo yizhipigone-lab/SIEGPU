@@ -184,12 +184,12 @@ const flagCol = { title: '差异标记', key: 'flags', render: (r: any) => flagC
     </n-card>
 
     <n-card size="small" style="margin-top:14px">
-      <template #header>8. 预付款双轨勾稽（期1 R1：预付款池挂账 vs 设备预付剩余，同一笔钱两套口径）</template>
+      <template #header>8. 预付款勾稽（S3：预付款池挂账 vs 台账表余额；「台账缺资金流水」=设备登记预付未走资金池）</template>
       <n-data-table size="small" :bordered="false" striped :pagination="{ pageSize: 8 }" :row-class-name="rowClass"
         :columns="[
           { title: '项目', key: 'project_name' },
           { title: '预付款池(挂账)', key: 'pool_balance', align: 'right' as const, render: (r: any) => money(r.pool_balance) },
-          { title: '设备预付剩余', key: 'device_remaining', align: 'right' as const, render: (r: any) => money(r.device_remaining) },
+          { title: '台账余额', key: 'device_remaining', align: 'right' as const, render: (r: any) => money(r.device_remaining) },
           { title: '差异', key: 'diff', align: 'right' as const, render: (r: any) => money(r.diff) },
           flagCol,
         ]" :data="d8">

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.schemas.repayment import RepaymentConfirm, RepaymentOut
+from app.schemas.repayment import RepaymentConfirm, RepaymentOut, RepaymentPlanUpdate
 from app.services import repayment_service as svc
 
 router = APIRouter()
@@ -26,5 +26,17 @@ def confirm(repayment_id: UUID, payload: RepaymentConfirm, db: Session = Depends
         db, repayment_id=repayment_id, actual_principal=payload.actual_principal,
         actual_interest=payload.actual_interest, paid_date=payload.paid_date,
     )
+    db.commit()
+    return RepaymentOut.model_validate(r)
+
+
+@router.patch("/{repayment_id}/plan", response_model=RepaymentOut)
+def adjust_plan(repayment_id: UUID, payload: RepaymentPlanUpdate, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)):
+    """缺陷#11：还款计划按资金支付计划调整（放款后仍可改 planned_*）。"""
+    r = svc.adjust_plan(db, repayment_id=repayment_id,
+                        planned_principal=payload.planned_principal,
+                        planned_interest=payload.planned_interest,
+                        due_date=payload.due_date)
     db.commit()
     return RepaymentOut.model_validate(r)

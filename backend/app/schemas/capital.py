@@ -87,11 +87,12 @@ class BankRepayCreate(BaseModel):
 
 
 class PrepaymentCreate(BaseModel):
-    """预付：现金池(from_pool) OUT + 预付款池(挂账) IN。"""
+    """预付：现金池(from_pool) OUT + 预付款池(挂账) IN + 台账行（S3 缺陷#6/#9：供应商/合同必填）。"""
     project_id: UUID
     amount: Decimal = Field(gt=0)
     transaction_date: date
-    contract_id: UUID | None = None
+    supplier_id: UUID  # 缺陷#9：付给哪个供应商
+    contract_id: UUID  # 缺陷#9：哪个采购合同
     from_pool: Literal["OWN", "LEASING", "BANK"] = "BANK"  # 从哪个现金池预付
     note: str | None = None
     idempotency_key: str | None = None

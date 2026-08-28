@@ -66,3 +66,5 @@ class Contract(UUIDPK, TimestampMixin, Base):
     biz_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 合同类型：算力租赁/转售/服务
     amount_incl_tax: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)  # 合同金额（含税）
     lease_months: Mapped[int | None] = mapped_column(nullable=True)  # 租期(月)，仅算力租赁填写
+    # 缺陷#7：采购侧业务类型（设备采购/服务采购/金租融资），与销售侧 biz_type 分开
+    purchase_biz_type: Mapped[str | None] = mapped_column(String(20), nullable=True)

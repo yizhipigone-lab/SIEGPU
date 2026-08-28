@@ -47,3 +47,40 @@ def test_double_confirm_blocked(db):
     with pytest.raises(BusinessError):
         rsvc.confirm_repayment(db, repayment_id=reps[0].id, actual_principal=Decimal("1"),
                                actual_interest=Decimal("0"), paid_date=date(2026, 5, 1))
+
+
+# ---- S10（缺陷#11）：还款计划可调（planned_* 编辑 + 上限校验 + 已确认禁改） ----
+
+def test_adjust_plan_changes_planned_values(db):
+    """还款计划可按资金支付计划调整：改本金/利息/到期日。"""
+    proc = _process_with_plan(db)
+    reps = rsvc.list_repayments(db, proc.id)
+    r = rsvc.adjust_plan(db, repayment_id=reps[0].id, planned_principal=Decimal("999000.00"),
+                         planned_interest=Decimal("49999.99"), due_date=date(2026, 5, 15))
+    assert r.planned_principal == Decimal("999000.00")
+    assert r.planned_interest == Decimal("49999.99")
+    assert r.due_date == date(2026, 5, 15)
+    assert r.status == "待还"
+
+
+def test_adjust_plan_total_cannot_exceed_disbursed(db):
+    """缺陷#11 校验：Σ计划本金不得超放款总额（含多笔放款），超则拦。"""
+    proc = _process_with_plan(db)  # 放款 400 万，4 期等额本金（每期 100 万）
+    reps = rsvc.list_repayments(db, proc.id)
+    # 第1期调到 999 万 → Σ 远超 400 万
+    with pytest.raises(BusinessError) as exc:
+        rsvc.adjust_plan(db, repayment_id=reps[0].id, planned_principal=Decimal("9990000"))
+    assert "超" in str(exc.value.detail) or "放款" in str(exc.value.detail)
+    # 未超时可调（400 万内挪移：1期压到 50 万，其余 3 期共 300 万）
+    r = rsvc.adjust_plan(db, repayment_id=reps[0].id, planned_principal=Decimal("500000"))
+    assert r.planned_principal == Decimal("500000")
+
+
+def test_adjust_plan_blocked_after_confirmed(db):
+    """已确认还款的期次不可改计划（防改历史）。"""
+    proc = _process_with_plan(db)
+    reps = rsvc.list_repayments(db, proc.id)
+    rsvc.confirm_repayment(db, repayment_id=reps[0].id, actual_principal=Decimal("100"),
+                           actual_interest=Decimal("0"), paid_date=date(2026, 5, 1))
+    with pytest.raises(BusinessError):
+        rsvc.adjust_plan(db, repayment_id=reps[0].id, planned_principal=Decimal("200"))

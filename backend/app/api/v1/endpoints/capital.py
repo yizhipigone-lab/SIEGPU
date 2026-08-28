@@ -59,8 +59,9 @@ def pools(project_id: UUID = Query(...), db: Session = Depends(get_db), user: Us
 
 @router.post("/bank-loan", response_model=TransactionOut, status_code=201)
 def bank_loan(payload: BankLoanCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """记一笔银行借款 → 银行池 IN。"""
+    """记一笔银行借款 → 银行池 IN（缺陷#23：有 bank_id 时校验剩余授信）。"""
     try:
+        svc.assert_bank_credit_available(db, payload.bank_id, payload.amount)
         txn = svc.record_bank_loan(db, created_by=user.id, **payload.model_dump())
         db.commit()
     except IntegrityError:

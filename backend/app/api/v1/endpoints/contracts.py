@@ -26,14 +26,31 @@ def list_contracts(project_id: UUID | None = None, type: str | None = None,
                    parent_contract_id: UUID | None = None,
                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rows = svc.list_contracts(db, project_id=project_id, type=type, parent_contract_id=parent_contract_id)
-    return {"items": [ContractOut.model_validate(c).model_dump(mode="json") for c in rows], "total": len(rows)}
+    # 缺陷#8：批量附加明细行（避免 N+1）
+    from app.services.contract_line_service import load_line_items
+    from app.schemas.contract import ContractLineItemOut
+    lines = load_line_items(db, [r.id for r in rows])
+    out = []
+    for c in rows:
+        d = ContractOut.model_validate(c).model_dump(mode="json")
+        d["line_items"] = [ContractLineItemOut.model_validate(li).model_dump(mode="json")
+                           for li in lines.get(c.id, [])]
+        out.append(d)
+    return {"items": out, "total": len(out)}
 
 
 @router.post("", response_model=ContractOut, status_code=201)
 def create_contract(payload: ContractCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     c = svc.create_contract(db, actor_id=user.id, **payload.model_dump())
     db.commit()
-    return ContractOut.model_validate(c)
+    db.refresh(c)
+    # 缺陷#8：创建响应带明细行
+    from app.services.contract_line_service import load_line_items
+    from app.schemas.contract import ContractLineItemOut
+    d = ContractOut.model_validate(c).model_dump(mode="json")
+    d["line_items"] = [ContractLineItemOut.model_validate(li).model_dump(mode="json")
+                       for li in load_line_items(db, [c.id]).get(c.id, [])]
+    return d
 
 
 # 二期 W3-4：判定预览（纯函数不落库，前端表单实时预览）—— 须在 /{cid} 之前声明，防被 cid 捕获
@@ -67,7 +84,13 @@ def list_terminations(contract_id: UUID, db: Session = Depends(get_db), user: Us
 
 @router.get("/{cid}", response_model=ContractOut)
 def get_contract(cid: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return ContractOut.model_validate(svc.get_contract_or_404(db, cid))
+    c = svc.get_contract_or_404(db, cid)
+    from app.services.contract_line_service import load_line_items
+    from app.schemas.contract import ContractLineItemOut
+    lines = load_line_items(db, [c.id]).get(c.id, [])
+    d = ContractOut.model_validate(c).model_dump(mode="json")
+    d["line_items"] = [ContractLineItemOut.model_validate(li).model_dump(mode="json") for li in lines]
+    return d
 
 
 @router.patch("/{cid}", response_model=ContractOut)

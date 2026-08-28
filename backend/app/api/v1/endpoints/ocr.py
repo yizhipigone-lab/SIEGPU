@@ -11,10 +11,13 @@ router = APIRouter()
 @router.post('/invoice')
 def ocr_invoice(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """上传发票图片 → 返回 OCR 解析的 invoice_no / amount / date 等字段（用户需校验）。"""
-    allowed = {'.jpg', '.jpeg', '.png', '.pdf', '.bmp', '.tiff'}
+    allowed = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
     ext = '.' + (file.filename or '').rsplit('.', 1)[-1].lower() if '.' in (file.filename or '') else ''
+    if ext == '.pdf':
+        # S4（缺陷#19a）：PDF 分支代码级必败（PIL 不支持 PDF），显式拒绝并给指引
+        raise HTTPException(400, '暂不支持 PDF 识别，请上传发票图片（JPG/PNG）')
     if ext not in allowed:
-        raise HTTPException(400, f'OCR 仅支持图片/PDF，收到: {ext or "未知"}')
+        raise HTTPException(400, f'OCR 仅支持图片，收到: {ext or "未知"}')
     try:
         img_bytes = file.file.read()
         text = extract_text(img_bytes)

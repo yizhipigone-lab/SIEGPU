@@ -83,6 +83,9 @@ class DisbursementCreate(BaseModel):
     amount: Decimal = Field(gt=0)
     disbursement_date: date
     acceptance_id: UUID
+    # S8（缺陷#12/#13）：放款模式 + 置换归还日
+    mode: Literal["入池", "直付"] = "入池"
+    replacement_date: date | None = None  # 缺省=放款日
     note: str | None = None
 
 
@@ -92,6 +95,8 @@ class DisbursementOut(BaseModel):
     acceptance_id: UUID | None = None
     amount: Decimal
     disbursement_date: date
+    mode: str = "入池"
+    replacement_date: date | None = None
     note: str | None = None
     created_at: datetime
 

@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
 from app.models.acceptance import AcceptanceRecord
+from app.services.device_stage_machine import DEVICE_STAGES
 
 logger = logging.getLogger(__name__)
 
-# 设备阶段顺序（与 device_service.DEVICE_STAGES 一致），「在途」起的下标
-_SHIPPED_STAGES = ("在途", "到货", "己方压测", "上架", "客户压测", "点亮验收")
+# 设备阶段顺序由 device_stage_machine.DEVICE_STAGES 派生（单一真源），取「在途」起
+_SHIPPED_STAGES = tuple(DEVICE_STAGES[1:])
 
 
 def _assert_devices_shipped(db, sales_order_id) -> None:
@@ -46,7 +47,8 @@ def _assert_devices_shipped(db, sales_order_id) -> None:
 
 def create_acceptance(db: Session, *, project_id: uuid.UUID, acceptance_type: str,
                       order_id: uuid.UUID | None = None, sales_order_id: uuid.UUID | None = None,
-                      inspector: str | None = None, quantity_accepted: int = 0,
+                      inspector: str | None = None, acceptance_date: date | None = None,
+                      quantity_accepted: int = 0,
                       quantity_rejected: int = 0, notes: str | None = None,
                       shelve: bool = False) -> AcceptanceRecord:
     # 条件约束校验 [M9]
@@ -62,7 +64,7 @@ def create_acceptance(db: Session, *, project_id: uuid.UUID, acceptance_type: st
     ar = AcceptanceRecord(
         project_id=project_id, acceptance_type=acceptance_type,
         order_id=order_id, sales_order_id=sales_order_id,
-        inspector=inspector, acceptance_date=date.today(),
+        inspector=inspector, acceptance_date=acceptance_date or date.today(),  # 缺陷#5：可录入实际验收日期
         quantity_accepted=quantity_accepted, quantity_rejected=quantity_rejected,
         notes=notes, shelve=shelve,
     )
@@ -73,6 +75,28 @@ def create_acceptance(db: Session, *, project_id: uuid.UUID, acceptance_type: st
 
 def get_acceptance(db: Session, ar_id: uuid.UUID) -> AcceptanceRecord | None:
     return db.get(AcceptanceRecord, ar_id)
+
+
+def update_acceptance(db: Session, ar: AcceptanceRecord, *, inspector=None, acceptance_date=None,
+                      quantity_accepted=None, quantity_rejected=None, rejection_reason=None,
+                      notes=None) -> AcceptanceRecord:
+    """缺陷#5：编辑验收单（仅「待验收/验收中」可改，已通过/已驳回禁改——防破坏放款依据）。"""
+    if ar.status not in ("待验收", "验收中"):
+        raise BusinessError("STATE_ERROR", f"当前状态 {ar.status} 不允许修改验收单", 409)
+    if inspector is not None:
+        ar.inspector = inspector
+    if acceptance_date is not None:
+        ar.acceptance_date = acceptance_date
+    if quantity_accepted is not None:
+        ar.quantity_accepted = quantity_accepted
+    if quantity_rejected is not None:
+        ar.quantity_rejected = quantity_rejected
+    if rejection_reason is not None:
+        ar.rejection_reason = rejection_reason
+    if notes is not None:
+        ar.notes = notes
+    db.flush()
+    return ar
 
 
 def list_acceptances(db: Session, *, project_id: uuid.UUID | None = None,
@@ -113,13 +137,15 @@ def _sync_shelve_for_sales_acceptance(db: Session, ar: AcceptanceRecord, operato
     ).scalars().all()
 
     if device_ids:
-        # 设备粒度路径：逐台推进「上架」到已完成（SAVEPOINT 隔离，单台失败不影响其余）
+        # 设备粒度路径：逐台把「上架及前序节点」补齐到已完成（缺陷#15 后改走 catchup 语义——
+        # 销售验收通过=客户已确认收货上架，前序在途/到货即使没登记也视为已发生，补齐而非报错）
         ok = fail = 0
         for did in device_ids:
             try:
                 with db.begin_nested():
-                    dsvc.complete_device_stage(db, device_id=did, stage="上架",
-                                               actual_date=actual_date, operator_id=operator_id)
+                    dsvc.catchup_device_stages(db, device_id=did, target_stage="上架",
+                                               actual_date=actual_date, operator_id=operator_id,
+                                               notes="销售验收勾选上架·联动补齐")
                 ok += 1
             except BusinessError:
                 fail += 1

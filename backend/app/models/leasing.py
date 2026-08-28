@@ -55,5 +55,9 @@ class LeasingDisbursement(UUIDPK, TimestampMixin, Base):
     acceptance_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("acceptance_records.id"), nullable=True)  # 关联哪一批采购验收（验收→订单→合同→项目血缘）
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     disbursement_date: Mapped[date] = mapped_column(Date, nullable=False)  # 实际放款日（还款期从这天起算）
+    # S8（缺陷#12）：放款模式——入池=资金先进赛意金租池再付款；直付=金租代付供应商（负债入账+付款OUT，无现金进池）
+    mode: Mapped[str] = mapped_column(String(20), default="入池", nullable=False)
+    # S8（缺陷#13）：置换归还日（金租放款置换流贷/自有垫资的归还日期，默认=放款日可改）
+    replacement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)

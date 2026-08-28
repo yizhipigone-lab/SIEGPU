@@ -78,6 +78,8 @@ def customer_statement_summary(db: Session = Depends(get_db), user: User = Depen
 
 
 @router.get("/customer-statement")
-def customer_statement(customer_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def customer_statement(customer_id: str, period: str | None = None,
+                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """客户对账单（缺陷#18）：period='YYYY-MM' 当期口径，缺省=累计。"""
     import uuid
-    return svc.customer_statement(db, uuid.UUID(customer_id))
+    return svc.customer_statement(db, uuid.UUID(customer_id), period=period)

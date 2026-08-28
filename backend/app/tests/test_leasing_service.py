@@ -127,3 +127,37 @@ def test_node_illegal_transition_blocked(db):
     # 未开始 → 进行中 合法；进行中 → 已完成 合法
     svc.advance_node(db, node_id=nodes[0].id, status="进行中")
     svc.advance_node(db, node_id=nodes[0].id, status="已完成", actual_date=date(2026, 7, 5))
+
+
+# ---- S12（缺陷#10）：金租申请编辑 / 作废 ----
+
+def test_update_process_editable_before_disbursement(db):
+    u, p, proc = _full_process(db)
+    proc2 = svc.update_process(db, process_id=proc.id, total_amount=Decimal("50000000"),
+                               annual_rate=Decimal("0.05"), notes="调整融资额")
+    assert proc2.total_amount == Decimal("50000000")
+    assert proc2.annual_rate == Decimal("0.05")
+    # 非法字段被拒
+    with pytest.raises(BusinessError):
+        svc.update_process(db, process_id=proc.id, status="已批")
+
+
+def test_void_process_and_guards(db):
+    u, p, proc = _full_process(db)
+    v = svc.void_process(db, process_id=proc.id)
+    assert v.status == "已作废"
+    # 已作废不可再作废 / 不可编辑
+    with pytest.raises(BusinessError):
+        svc.void_process(db, process_id=proc.id)
+    with pytest.raises(BusinessError):
+        svc.update_process(db, process_id=proc.id, total_amount=Decimal("1"))
+
+
+def test_void_blocked_after_disbursement(db):
+    u, p, proc = _full_process(db)
+    proc.status = "已批"
+    db.flush()
+    svc.disburse(db, process_id=proc.id, actual_disbursement_amount=Decimal("40000000"),
+                 disbursement_date=date(2026, 8, 1), disbursed_by=u.id)
+    with pytest.raises(BusinessError):
+        svc.void_process(db, process_id=proc.id)

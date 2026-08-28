@@ -3,7 +3,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NButton, NCard, NDataTable, NDatePicker, NDrawer, NDrawerContent, NFormItem, NInput, NInputNumber,
-  NModal, NSelect, NSpace, NTag, useMessage,
+  NModal, NPopconfirm, NSelect, NSpace, NTag, useMessage,
 } from 'naive-ui'
 import { api } from '../api/client'
 import { money, tsToYmd, ymdToTs } from '../utils/format'
@@ -22,7 +22,7 @@ const showDrawer = ref(false)
 const disbursements = ref<any[]>([])
 const acceptances = ref<any[]>([])
 const showAddDisb = ref(false)
-const addDisbForm = ref({ amount: null as number | null, disbursement_date: '', note: '', acceptance_id: '' as string })
+const addDisbForm = ref({ amount: null as number | null, disbursement_date: '', note: '', acceptance_id: '' as string, mode: '入池' as string, replacement_date: '' as string })
 // 还款确认表单
 const confirmTarget = ref<any | null>(null)
 const confirmForm = ref({ actual_principal: 0, actual_interest: 0, paid_date: '' })
@@ -159,7 +159,7 @@ function accLabel(id: string | null): string {
 }
 
 function openAddDisb() {
-  addDisbForm.value = { amount: null, disbursement_date: '', note: '', acceptance_id: '' }
+  addDisbForm.value = { amount: null, disbursement_date: '', note: '', acceptance_id: '', mode: '入池', replacement_date: '' }
   showAddDisb.value = true
 }
 
@@ -172,8 +172,9 @@ async function doAddDisb() {
     await api.post(`/leasing/processes/${detail.value.id}/disbursements`, {
       amount: f.amount, disbursement_date: f.disbursement_date,
       acceptance_id: f.acceptance_id, note: f.note || null,
+      mode: f.mode, replacement_date: f.replacement_date || null,
     })
-    msg.success('放款已登记，已生成该笔还款计划')
+    msg.success(f.mode === '直付' ? '直付放款已登记（负债入账+代付货款两笔流水，还款计划已生成）' : '放款已登记，已生成该笔还款计划')
     showAddDisb.value = false
     if (detail.value) await openDetail(detail.value)
   } catch (e: any) { msg.error(errMsg(e)) }
@@ -193,6 +194,77 @@ async function doConfirm() {
     msg.success('还款已确认')
     confirmTarget.value = null
     if (detail.value) await openDetail(processes.value.find((p) => p.id === detail.value!.id)!)
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
+// S10（缺陷#11）：还款计划调整（放款后仍可改 planned_*，按资金支付计划表）
+const planTarget = ref<any | null>(null)
+const planForm = ref({ planned_principal: 0, planned_interest: 0, due_date: '' })
+const showPlanModal = computed({
+  get: () => !!planTarget.value,
+  set: (v: boolean) => { if (!v) planTarget.value = null },
+})
+function openAdjustPlan(r: any) {
+  planTarget.value = r
+  planForm.value = {
+    planned_principal: Number(r.planned_principal), planned_interest: Number(r.planned_interest),
+    due_date: r.due_date || '',
+  }
+}
+async function doAdjustPlan() {
+  if (!planTarget.value) return
+  try {
+    await api.patch(`/repayments/${planTarget.value.id}/plan`, {
+      planned_principal: planForm.value.planned_principal,
+      planned_interest: planForm.value.planned_interest,
+      due_date: planForm.value.due_date || null,
+    })
+    msg.success('还款计划已调整')
+    planTarget.value = null
+    if (detail.value) await openDetail(processes.value.find((p) => p.id === detail.value!.id)!)
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
+// S12（缺陷#10）：金租申请编辑 / 作废（仅进行中未放款）
+const showEditProc = ref(false)
+const editProcForm = ref({
+  total_amount: null as number | null, annual_rate: null as number | null,
+  term_periods: null as number | null, payment_freq: '月' as string,
+  repayment_method: '等额本息' as string, start_date: '', notes: '',
+})
+function openEditProc() {
+  const d = detail.value
+  if (!d) return
+  editProcForm.value = {
+    total_amount: Number(d.total_amount), annual_rate: d.annual_rate == null ? null : Number(d.annual_rate),
+    term_periods: d.term_periods == null ? null : Number(d.term_periods),
+    payment_freq: d.payment_freq || '月', repayment_method: d.repayment_method || '等额本息',
+    start_date: d.start_date || '', notes: '',
+  }
+  showEditProc.value = true
+}
+async function doEditProc() {
+  const f = editProcForm.value
+  try {
+    await api.patch(`/leasing/processes/${detail.value!.id}`, {
+      total_amount: f.total_amount, annual_rate: f.annual_rate,
+      term_periods: f.term_periods, payment_freq: f.payment_freq,
+      repayment_method: f.repayment_method, start_date: f.start_date || null,
+      notes: f.notes || null,
+    })
+    msg.success('金租申请已更新')
+    showEditProc.value = false
+    if (detail.value) await openDetail(processes.value.find((p) => p.id === detail.value!.id)!)
+    await refresh()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+async function doVoidProc() {
+  if (!detail.value) return
+  try {
+    await api.post(`/leasing/processes/${detail.value.id}/void`)
+    msg.success('金租申请已作废')
+    showDrawer.value = false
+    await refresh()
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
@@ -223,10 +295,13 @@ const repayCols = [
   { title: '计划本金', key: 'planned_principal', align: 'right' as const, render: (r: any) => money(r.planned_principal) },
   { title: '计划利息', key: 'planned_interest', align: 'right' as const, render: (r: any) => money(r.planned_interest) },
   { title: '状态', key: 'status', width: 80, render: (r: any) => statusTag(r.status) },
-  { title: '操作', key: '__op', width: 90, render: (r: any) =>
-    r.status === '待还'
-      ? h(NButton, { size: 'tiny', type: 'primary', onClick: () => openConfirm(r) }, () => '确认还款')
-      : h('span', { style: 'color:#94A3B8' }, r.paid_date || '')
+  { title: '操作', key: '__op', width: 170, render: (r: any) =>
+      r.status === '待还'
+        ? h(NSpace, { size: 2 }, () => [
+            h(NButton, { size: 'tiny', type: 'primary', onClick: () => openConfirm(r) }, () => '确认还款'),
+            h(NButton, { size: 'tiny', quaternary: true, onClick: () => openAdjustPlan(r) }, () => '调整计划'), // S10
+          ])
+        : h('span', { style: 'color:#94A3B8' }, r.paid_date || '')
   },
 ]
 </script>
@@ -272,6 +347,14 @@ const repayCols = [
             <n-tag v-if="detail.plan_generated" type="info" size="small" :bordered="false">{{ detail.term_periods }}期还款计划</n-tag>
             <n-tag v-if="detail.leasing_mode" size="small" :bordered="false">模式：{{ detail.leasing_mode }}</n-tag>
             <n-tag v-if="detail.financing_type" size="small" :bordered="false" type="info">融资：{{ detail.financing_type }}</n-tag>
+            <!-- S12（缺陷#10）：编辑/作废（仅进行中未放款） -->
+            <template v-if="detail.status === '进行中' && !detail.plan_generated">
+              <n-button size="tiny" type="primary" quaternary @click="openEditProc">编辑申请</n-button>
+              <n-popconfirm @positive-click="doVoidProc">
+                <template #trigger><n-button size="tiny" type="error" quaternary>作废申请</n-button></template>
+                作废后不可恢复（仅未放款的申请可作废）。确认作废？
+              </n-popconfirm>
+            </template>
           </n-space>
           <div v-if="detail.materials" class="muted tiny" style="margin-top:6px">
             材料：{{ detail.materials.note || JSON.stringify(detail.materials) }}
@@ -336,7 +419,7 @@ const repayCols = [
     </n-modal>
 
     <!-- 新增放款 -->
-    <n-modal v-model:show="showAddDisb" preset="card" title="新增放款" style="width:400px">
+    <n-modal v-model:show="showAddDisb" preset="card" title="新增放款" style="width:420px">
       <n-space vertical :size="12">
         <n-form-item label="对应采购验收">
           <n-select v-model:value="addDisbForm.acceptance_id" filterable placeholder="选择本次放款对应的验收批次"
@@ -344,9 +427,52 @@ const repayCols = [
         </n-form-item>
         <n-form-item label="放款额(元)"><n-input-number v-model:value="addDisbForm.amount" :show-button="false" style="width:100%" /></n-form-item>
         <n-form-item label="实际放款日"><n-date-picker type="date" style="width:100%" :value="ymdToTs(addDisbForm.disbursement_date)" @update:value="(ts: number | null) => addDisbForm.disbursement_date = tsToYmd(ts)" /></n-form-item>
+        <!-- S8（缺陷#12）：放款模式 -->
+        <n-form-item label="放款模式">
+          <n-select v-model:value="addDisbForm.mode" :options="[{ label: '入池（资金先进赛意金租池再付款）', value: '入池' }, { label: '直付（金租代付供应商，负债入账+付款，无现金进池）', value: '直付' }]" />
+        </n-form-item>
+        <!-- S8（缺陷#13）：置换归还日 -->
+        <n-form-item label="置换归还日（可选）">
+          <n-date-picker type="date" clearable style="width:100%" :value="ymdToTs(addDisbForm.replacement_date)" @update:value="(ts: number | null) => addDisbForm.replacement_date = tsToYmd(ts)" />
+        </n-form-item>
         <n-form-item label="备注"><n-input v-model:value="addDisbForm.note" /></n-form-item>
       </n-space>
       <template #footer><n-space justify="end"><n-button @click="showAddDisb = false">取消</n-button><n-button type="primary" @click="doAddDisb">确认放款</n-button></n-space></template>
+    </n-modal>
+
+    <!-- S10（缺陷#11）：还款计划调整 -->
+    <n-modal v-model:show="showPlanModal" preset="card" title="调整还款计划" style="width:420px">
+      <n-space vertical>
+        <n-form-item label="计划本金(元)"><n-input-number v-model:value="planForm.planned_principal" :show-button="false" style="width:100%" /></n-form-item>
+        <n-form-item label="计划利息(元)"><n-input-number v-model:value="planForm.planned_interest" :show-button="false" style="width:100%" /></n-form-item>
+        <n-form-item label="到期日">
+          <n-date-picker type="date" style="width:100%" :value="ymdToTs(planForm.due_date)" @update:value="(ts: number | null) => planForm.due_date = tsToYmd(ts)" />
+        </n-form-item>
+        <div class="muted tiny">按资金支付计划表调整；Σ计划本金不得超过放款总额。已确认还款的期次不可改。</div>
+      </n-space>
+      <template #footer><n-space justify="end"><n-button @click="planTarget = null">取消</n-button><n-button type="primary" @click="doAdjustPlan">保存计划</n-button></n-space></template>
+    </n-modal>
+
+    <!-- S12（缺陷#10）：编辑金租申请 -->
+    <n-modal v-model:show="showEditProc" preset="card" title="编辑金租申请" style="width:460px">
+      <n-space vertical :size="10">
+        <n-space>
+          <n-form-item label="申请金额(元)"><n-input-number v-model:value="editProcForm.total_amount" :show-button="false" style="width:170px" /></n-form-item>
+          <n-form-item label="年利率(小数)"><n-input-number v-model:value="editProcForm.annual_rate" :step="0.005" :show-button="false" style="width:110px" /></n-form-item>
+        </n-space>
+        <n-space>
+          <n-form-item label="期数(期)"><n-input-number v-model:value="editProcForm.term_periods" :min="1" style="width:90px" /></n-form-item>
+          <n-form-item label="还款频率">
+            <n-select v-model:value="editProcForm.payment_freq" :options="[{ label: '月', value: '月' }, { label: '季', value: '季' }, { label: '半年', value: '半年' }]" style="width:100px" />
+          </n-form-item>
+          <n-form-item label="还款方式">
+            <n-select v-model:value="editProcForm.repayment_method" :options="[{ label: '等额本息', value: '等额本息' }, { label: '等额本金', value: '等额本金' }]" style="width:120px" />
+          </n-form-item>
+        </n-space>
+        <n-form-item label="备注"><n-input v-model:value="editProcForm.notes" /></n-form-item>
+        <div class="muted tiny">仅「进行中」且未放款的申请可编辑（登错可在此调整，无需重开）。</div>
+      </n-space>
+      <template #footer><n-space justify="end"><n-button @click="showEditProc = false">取消</n-button><n-button type="primary" @click="doEditProc">保存</n-button></n-space></template>
     </n-modal>
 
     <!-- 新建金租申请 -->

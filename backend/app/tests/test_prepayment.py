@@ -33,10 +33,10 @@ def _mk(db, *, prepayment=None, months: int | None = 12):
     d = dsvc.create_device(db, project_id=p.id, equipment_model_id=e.id,
                            monthly_price=Decimal("10000"), purchase_value=Decimal("960000"),
                            prepayment_amount=prepayment or Decimal("0"), ownership="表内自有")
-    # 直接点亮（插 stage 行，不走状态机推进——计费只读点亮日）
+    # 直接点亮（create_device 已自动建 7 行 → 置点亮行完成，不重复插行）
     d.status = "点亮验收"
-    db.add(DeviceStage(device_id=d.id, stage="点亮验收", seq=7, status="已完成",
-                       actual_date=date(2026, 1, 1)))
+    _st = db.query(DeviceStage).filter_by(device_id=d.id, stage="点亮验收").one()
+    _st.status = "已完成"; _st.actual_date = date(2026, 1, 1)
     db.flush()
     return p, c, d
 
@@ -121,3 +121,38 @@ def test_summary_aggregation(db):
     assert mine[d1.sn]["remaining"] == Decimal("11000.00")
     assert mine[d2.sn]["settled_amount"] == Decimal(0)
     assert mine[d2.sn]["settled"] is False
+
+
+def test_device_prepayment_auto_ledger_with_date_and_supplier(db):
+    """S3 缺陷#6：设备登记预付款自动落台账行，payment_date 取设备预付款日期，供应商取设备供应商。"""
+    from app.models.master import Supplier
+    p = Project(name=f"P-{uuid.uuid4().hex[:6]}", code=f"c{uuid.uuid4().hex[:6]}")
+    db.add(p); db.flush()
+    sup = Supplier(name="设备供应商B", type="设备供应商")
+    db.add(sup); db.flush()
+    e = EquipmentModel(name=f"M-{uuid.uuid4().hex[:6]}", category="大卡")
+    db.add(e); db.flush()
+    d = dsvc.create_device(db, project_id=p.id, equipment_model_id=e.id, supplier_id=sup.id,
+                           prepayment_amount=Decimal("12000"), prepayment_date=date(2026, 2, 1))
+    rows = svc.prepayment_summary(db, project_id=p.id)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["sn"] == d.sn
+    assert r["payment_date"] == "2026-02-01"
+    assert r["supplier_name"] == "设备供应商B"
+    assert r["prepayment_amount"] == Decimal("12000")
+    assert r["settled"] is False
+    assert r["remaining"] == Decimal("12000")
+
+
+def test_settle_syncs_ledger_row(db):
+    """S3：计费结转同时扣设备镜像字段与台账行 settled_amount（单源一致）。"""
+    p, c, d = _mk(db, prepayment=Decimal("12000"), months=12)
+    _bill(db, d, c, 1, date(2026, 1, 31))
+    d = db.get(Device, d.id)
+    assert d.prepayment_settled_amount == Decimal("1000.00")
+    rows = svc.prepayment_summary(db, project_id=p.id)
+    assert len(rows) == 1
+    assert rows[0]["settled_amount"] == Decimal("1000.00")
+    assert rows[0]["remaining"] == Decimal("11000.00")
+    assert rows[0]["settled"] is False

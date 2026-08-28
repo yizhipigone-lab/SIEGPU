@@ -105,8 +105,8 @@ def test_dim3_asset_delivery_counts(db):
     d = dsvc.create_device(db, project_id=p.id, equipment_model_id=e.id,
                            purchase_value=Decimal("960000"), ownership="表内自有")
     d.status = "点亮验收"  # 只 1 台入库且点亮
-    db.add(DeviceStage(device_id=d.id, stage="点亮验收", seq=7, status="已完成",
-                       actual_date=date(2026, 9, 1)))
+    _st = db.query(DeviceStage).filter_by(device_id=d.id, stage="点亮验收").one()
+    _st.status = "已完成"; _st.actual_date = date(2026, 9, 1)
     from app.models.asset import Asset
     db.add(Asset(project_id=p.id, equipment_model_id=e.id, device_id=d.id, quantity=1,
                  unit_original_value=Decimal("960000"), total_original_value=Decimal("960000"),
@@ -174,29 +174,38 @@ def test_dim7_only_flagged_and_customer_filter(db):
     assert all(r["contract_no"] != (c.contract_no or "—") for r in rows2)
 
 
-# ------------------------------ 维度 8：预付款双轨勾稽（期1 R1 既定后续） ------------------------------
+# ------------------------------ 维度 8：预付款勾稽（S3 收敛后：台账表 vs PREPAY 池） ------------------------------
 
 def test_dim8_prepay_parity(db):
-    """PREPAY 池余额（资金台账轨）vs Σ设备预付剩余（运营轨）按项目勾稽：
-    一致 → 无 flag；双轨有差 → 标「双轨差异」。只列任一轨非零的项目。"""
+    """预付款勾稽（S3）：手工预付同事务落账 → 恒等无 flag；
+    设备登记预付未走资金池 → 「台账缺资金流水」；池有挂账无台账行 → 「资金流水缺台账」。"""
+    from app.models.project import Contract
+    # 项目1 恒等：手工预付 1000（银行池出钱 → PREPAY 池 + 台账行 同事务）
     p1 = _project(db)
-    # 项目1 双轨一致：池挂账 1000 + 设备预付 1000 未结清
-    capital_service.record_transaction(db, created_by=None, project_id=p1.id, source_type="预付",
-                                       direction="IN", amount=Decimal("1000"),
-                                       transaction_date=date(2026, 8, 1), pool="PREPAY",
-                                       idempotency_key=f"pp1-{uuid.uuid4().hex[:6]}")
-    em = EquipmentModel(name=f"em{uuid.uuid4().hex[:6]}", category="大卡")
-    db.add(em); db.flush()
-    db.add(Device(sn=f"GPU-{uuid.uuid4().hex[:8]}", project_id=p1.id, equipment_model_id=em.id,
-                  prepayment_amount=Decimal("1000")))
-    db.flush()
+    sup1 = Supplier(name=f"S-{uuid.uuid4().hex[:6]}", type="设备供应商")
+    db.add(sup1); db.flush()
+    con1 = Contract(project_id=p1.id, type="PURCHASE", party_type="supplier", party_id=sup1.id,
+                    direction="PAYABLE", amount=Decimal("5000"), contract_no="CG-1")
+    db.add(con1); db.flush()
+    capital_service.record_bank_loan(db, project_id=p1.id, amount=Decimal("5000"),
+                                     transaction_date=date(2026, 8, 1), created_by=None)
+    capital_service.record_prepayment(db, project_id=p1.id, amount=Decimal("1000"),
+                                      transaction_date=date(2026, 8, 1), created_by=None,
+                                      from_pool="BANK", supplier_id=sup1.id, contract_id=con1.id)
 
+    # 项目2 台账缺资金流水：设备登记预付 1000（自动落台账，未走资金池）
     p2 = _project(db)
-    # 项目2 双轨差异：池挂账 500、无设备预付
-    capital_service.record_transaction(db, created_by=None, project_id=p2.id, source_type="预付",
+    em2 = EquipmentModel(name=f"em{uuid.uuid4().hex[:6]}", category="大卡")
+    db.add(em2); db.flush()
+    dsvc.create_device(db, project_id=p2.id, equipment_model_id=em2.id,
+                       prepayment_amount=Decimal("1000"))
+
+    # 项目3 资金流水缺台账：池挂账 500、无台账行
+    p3 = _project(db)
+    capital_service.record_transaction(db, created_by=None, project_id=p3.id, source_type="预付",
                                        direction="IN", amount=Decimal("500"),
                                        transaction_date=date(2026, 8, 1), pool="PREPAY",
-                                       idempotency_key=f"pp2-{uuid.uuid4().hex[:6]}")
+                                       idempotency_key=f"pp3-{uuid.uuid4().hex[:6]}")
 
     rows = svc.dim8_prepay_parity(db)
     by_pid = {r["project_id"]: r for r in rows}
@@ -204,11 +213,13 @@ def test_dim8_prepay_parity(db):
     assert r1["pool_balance"] == Decimal("1000") and r1["device_remaining"] == Decimal("1000")
     assert r1["diff"] == Decimal("0") and r1["flags"] == []
     r2 = by_pid[str(p2.id)]
-    assert r2["diff"] == Decimal("500") and "双轨差异" in r2["flags"]
+    assert r2["diff"] == Decimal("-1000") and "台账缺资金流水" in r2["flags"]
+    r3 = by_pid[str(p3.id)]
+    assert r3["diff"] == Decimal("500") and "资金流水缺台账" in r3["flags"]
 
 
 def test_dim8_settled_device_counts_zero(db):
-    """已回核销设备（prepayment_settled=True）剩余按 0 计，不再占运营轨余额。"""
+    """已回核销设备（prepayment_settled=True）剩余按 0 计，不再占台账轨余额。"""
     p = _project(db)
     em = EquipmentModel(name=f"em{uuid.uuid4().hex[:6]}", category="大卡")
     db.add(em); db.flush()
@@ -218,5 +229,5 @@ def test_dim8_settled_device_counts_zero(db):
     db.flush()
     rows = svc.dim8_prepay_parity(db)
     mine = [r for r in rows if r["project_id"] == str(p.id)]
-    # 设备已核销（运营轨 0）且无池流水 → 该项目不出现
+    # 设备已核销（台账轨 0）且无池流水 → 该项目不出现
     assert mine == []

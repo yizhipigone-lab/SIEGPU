@@ -26,6 +26,18 @@ const loading = ref(false)
 const showModal = ref(false)
 const editing = ref<any | null>(null)
 const form = reactive<Record<string, any>>({})
+// 缺陷#8：合同多行明细（行级税率）。config.lineItems 开启时启用
+const lineItems = ref<{ name: string; qty: number; unit_price: number; tax_rate: number; notes?: string }[]>([])
+const addLine = () => lineItems.value.push({ name: '', qty: 1, unit_price: 0, tax_rate: 13, notes: '' })
+const removeLine = (i: number) => lineItems.value.splice(i, 1)
+const lineSummary = computed(() => {
+  let amt = 0, incl = 0
+  for (const l of lineItems.value) {
+    const a = Math.round((Number(l.qty || 0) * Number(l.unit_price || 0)) * 100) / 100
+    amt += a; incl += Math.round(a * (1 + Number(l.tax_rate || 0) / 100) * 100) / 100
+  }
+  return { amt: Math.round(amt * 100) / 100, incl: Math.round(incl * 100) / 100 }
+})
 // 即时校验：字段有 validate 时返回警告文案（模板里 :status 标黄 + 下方 ⚠ 提示），undefined 即通过。
 // 非阻断式（不拦保存），与 ProfitView 百分比兜底一致；真正非法值仍由后端拒绝。
 function fieldWarn(f: FieldConfig): string | undefined {
@@ -213,6 +225,7 @@ function openCreate() {
   // 工作台跳转带 ?project_id= 时预填项目字段
   const qpid = route.query.project_id as string
   if (qpid && props.config.fields.some((f) => f.key === 'project_id')) form.project_id = qpid
+  lineItems.value = []  // 缺陷#8：新建清空明细行
   showModal.value = true
 }
 function openEdit(row: any) {
@@ -230,6 +243,11 @@ function openEdit(row: any) {
     form[f.key] = v ?? ((f.type === 'number' || f.type === 'select') ? null : '')
   })
   suppressCalc = false
+  // 缺陷#8：回填明细行（税率显示百分数）
+  lineItems.value = (row.line_items || []).map((li: any) => ({
+    name: li.name, qty: Number(li.qty), unit_price: Number(li.unit_price),
+    tax_rate: Math.round(Number(li.tax_rate) * 10000) / 100, notes: li.notes || '',
+  }))
   showModal.value = true
 }
 async function openDetail(row: any) {
@@ -290,6 +308,19 @@ async function submit() {
     if (f.percent && v !== null && v !== undefined && v !== '') v = Number(v) / 100
     payload[f.key] = v
   })
+  // 缺陷#8：明细行（行级税率）——填了至少一行且行名齐全才提交；后端由行合计覆盖合同金额
+  if (props.config.lineItems) {
+    const valid = lineItems.value.filter((l) => l.name && l.name.trim())
+    if (lineItems.value.length && valid.length !== lineItems.value.length) {
+      msg.warning('明细行有未填「内容名称」的行：请补全或删除空行'); return
+    }
+    if (valid.length) {
+      payload.line_items = valid.map((l) => ({
+        name: l.name.trim(), qty: Number(l.qty || 1), unit_price: Number(l.unit_price || 0),
+        tax_rate: Number(l.tax_rate || 0) / 100, notes: l.notes || null,
+      }))
+    }
+  }
   try {
     if (editing.value) {
       const updated = await R.updateRes(props.config.apiPath, editing.value.id, payload)
@@ -346,6 +377,16 @@ function onUploadFinish({ event }: any) {
     msg.success(`上传成功: ${resp.filename || ''}`)
     refresh()
   } catch { msg.success('上传成功') }
+}
+// S4（缺陷#1）：上传失败必须有可见反馈（此前失败完全静默）
+function onUploadError({ file }: any) {
+  let reason = '上传失败'
+  try {
+    const resp = JSON.parse(file?.xhr?.response || '{}')
+    if (typeof resp?.detail === 'string') reason = resp.detail
+    else if (resp?.detail?.message) reason = resp.detail.message
+  } catch { /* 保持默认文案 */ }
+  msg.error(`${reason}（支持 PDF/DOC/DOCX/JPG/PNG/GIF，≤20MB）`)
 }
 async function downloadFile() {
   if (!detailRow.value?.id) return
@@ -547,6 +588,26 @@ const tableColumns = computed(() => {
       <n-alert v-else-if="config.revenueJudge && form.type === 'PURCHASE'" type="default" :bordered="false" style="margin-top:4px" data-testid="judge-preview">
         采购合同属成本侧，不参与收入核算路径判定
       </n-alert>
+
+      <!-- 缺陷#8：合同多行明细（行级税率）。一行一个税率，合同金额=行合计自动算 -->
+      <div v-if="config.lineItems" style="margin-top:12px">
+        <div style="font-weight:600;margin-bottom:6px">多行明细（一行一个税率，可混合 6% / 13%）</div>
+        <div v-for="(l, i) in lineItems" :key="i" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+          <n-input v-model:value="l.name" placeholder="内容名称（如：算力服务费）" style="width:180px" size="small" />
+          <n-input-number v-model:value="l.qty" :min="0.0001" size="small" style="width:90px" placeholder="数量" />
+          <n-input-number v-model:value="l.unit_price" :min="0" size="small" style="width:120px" placeholder="单价(不含税)" />
+          <n-input-number v-model:value="l.tax_rate" :min="0" :max="100" size="small" style="width:90px" placeholder="税率%">
+            <template #suffix>%</template>
+          </n-input-number>
+          <n-button size="tiny" quaternary type="error" @click="removeLine(i)">删</n-button>
+        </div>
+        <n-space align="center" size="small">
+          <n-button size="small" dashed @click="addLine">＋ 加一行</n-button>
+          <span v-if="lineItems.length" class="tiny" style="color:var(--c-text-3,#999)">
+            不含税合计 {{ lineSummary.amt }} · 价税合计 <b>{{ lineSummary.incl }}</b>（保存后自动覆盖合同金额）
+          </span>
+        </n-space>
+      </div>
       <template #footer><n-space justify="end"><n-button @click="showModal = false">取消</n-button><n-button type="primary" @click="submit">保存</n-button></n-space></template>
     </n-modal>
 
@@ -593,7 +654,7 @@ const tableColumns = computed(() => {
           </div>
           <div v-else class="muted tiny" style="margin-bottom:8px">暂无附件</div>
           <n-upload :action="uploadUrl" :headers="uploadHeaders" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif"
-            :max="1" :show-file-list="false" @finish="onUploadFinish">
+            :max="1" :show-file-list="false" @finish="onUploadFinish" @error="onUploadError">
             <n-button size="small" dashed>上传附件（PDF/DOC/图片）</n-button>
           </n-upload>
         </div>

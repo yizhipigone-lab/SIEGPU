@@ -1,10 +1,13 @@
 """计费服务（§5.3）：为已点亮订单的销售合同按期生成 billings。复用 utils/billing。"""
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
 from app.models.billing import Billing
 from app.models.delivery import DeliveryStage
+from app.models.device import Device
 from app.models.project import Contract
 from app.models.delivery import Order
 from app.utils.billing import billing_amount, days_in_month, split_tax
@@ -89,6 +92,94 @@ def list_billings(db: Session, contract_id=None, order_id=None, device_id=None):
     if device_id:
         stmt = stmt.where(Billing.device_id == device_id)
     return db.execute(stmt).scalars().all()
+
+
+# ============================ S5：按销售订单出计费单（缺陷#14/#15/#17） ============================
+
+def generate_billing_sales_order(db: Session, *, sales_order_id, period_index: int,
+                                 billing_date, created_by, idempotency_key: str | None = None) -> Billing:
+    """按销售订单出一张汇总计费单（K4 三分支）：
+
+    - 批次销售订单：取 SalesBatchDevice 设备逐台校验点亮（未点亮报错引导），
+      跳过该期已按台计费的设备（防双计），金额 = Σ billing_amount(device.monthly_price, period, light_i)
+    - 非批次销售订单：金额 = billing_amount(total_monthly_rent, period, start_date)（start_date 作计费起点）
+    - dup-check：服务层 (sales_order_id, period_index)（K1，不建 DB 索引——H-1 测试锁定）
+    """
+    from app.models.sales_order import SalesBatchDevice, SalesOrder
+
+    so = db.get(SalesOrder, sales_order_id)
+    if not so or so.deleted_at is not None:
+        raise BusinessError("NOT_FOUND", "销售订单不存在", 404)
+    c = db.get(Contract, so.contract_id)
+    if not c or c.type != "SALES":
+        raise BusinessError("BAD_REQUEST", "按销售订单计费需销售合同", 400)
+
+    existing = db.execute(
+        select(Billing.id).where(
+            Billing.sales_order_id == sales_order_id, Billing.period_index == period_index,
+            Billing.deleted_at.is_(None),
+        ).limit(1)
+    ).scalar_one_or_none()
+    if existing:
+        raise BusinessError("DUPLICATE", f"销售订单第 {period_index} 期已计费", 409)
+
+    if so.is_batch:
+        dev_ids = [bd.device_id for bd in db.execute(
+            select(SalesBatchDevice).where(
+                SalesBatchDevice.sales_batch_id == so.id,
+                SalesBatchDevice.active.is_(True),
+                SalesBatchDevice.deleted_at.is_(None),
+            )
+        ).scalars().all()]
+        if not dev_ids:
+            raise BusinessError("BAD_REQUEST", "销售批次未挂设备，无法按单计费（请先销售批次组合）", 400)
+        total = Decimal(0)
+        first_light = None
+        skipped = 0
+        for did in dev_ids:
+            d = db.get(Device, did)
+            if d is None or d.deleted_at is not None or d.monthly_price is None:
+                continue
+            already = db.execute(
+                select(Billing.id).where(
+                    Billing.device_id == did, Billing.period_index == period_index,
+                    Billing.status != "已红冲", Billing.deleted_at.is_(None),
+                ).limit(1)
+            ).scalar_one_or_none()
+            if already:
+                skipped += 1
+                continue
+            light = _device_light_on_date(db, did)  # 未点亮 → BAD_REQUEST 引导
+            total += billing_amount(d.monthly_price, period_index, light)
+            if first_light is None or light < first_light:
+                first_light = light
+        if skipped and skipped >= len(dev_ids):
+            raise BusinessError("DUPLICATE", "批内设备该期均已按台计费，无需按单汇总", 409)
+        if total <= 0:
+            raise BusinessError("BAD_REQUEST", "无有效计费设备（未设 monthly_price 或已全部计费）", 400)
+        light = first_light or billing_date
+    else:
+        if so.start_date is None:
+            raise BusinessError("BAD_REQUEST", "非批次销售订单缺 start_date（计费起点），无法按单计费", 400)
+        total = billing_amount(so.total_monthly_rent, period_index, so.start_date)
+        light = so.start_date
+
+    if period_index == 1:
+        days = days_in_month(light) - light.day + 1  # 含起点当日
+    else:
+        days = days_in_month(billing_date)
+    ex, tax = split_tax(total, c.tax_rate)
+    b = Billing(
+        project_id=so.project_id, contract_id=c.id, sales_order_id=so.id,
+        order_id=None, device_id=None,
+        period_index=period_index, period_label=f"{billing_date.year}-{billing_date.month:02d}",
+        billing_date=billing_date, days_in_period=days, amount=total, amount_ex_tax=ex,
+        tax_amount=tax, tax_rate=c.tax_rate, idempotency_key=idempotency_key,
+        **_fx_inherit(db, c, billing_date),
+    )
+    db.add(b)
+    db.flush()
+    return b
 
 
 # ============================ 一期 W5-6：按台计费（device 维度） ============================

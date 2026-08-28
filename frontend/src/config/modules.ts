@@ -42,6 +42,7 @@ export interface CrudConfig {
   fileUpload?: boolean     // 支持文件上传（合同/发票）
   uploadEntity?: string    // 上传实体名（对应后端 /api/files/{entity}/...）
   importable?: boolean     // 支持 Excel 导入
+  lineItems?: boolean      // 缺陷#8：表单启用多行明细编辑器（行级税率，合同模块用）
   detailActions?: DetailAction[]
   detailTabs?: DetailTab[]
   stageFlow?: boolean       // 详情抽屉展示交付阶段列表 + 推进按钮（GET {apiPath}/{id}.stages，PATCH {apiPath}/delivery-stages/{stageId}）
@@ -81,6 +82,8 @@ const EQ_CAT = [{ label: '大卡', value: '大卡' }, { label: '小卡', value: 
 const CONTRACT_TYPE = [{ label: '销售 SALES', value: 'SALES' }, { label: '采购 PURCHASE', value: 'PURCHASE' }]
 // 四期 W4：合同业务类型（与后端 contracts.biz_type CHECK 一致）
 const BIZ_TYPE = ['算力租赁', '转售', '服务'].map((v) => ({ label: v, value: v }))
+// 缺陷#7：采购侧业务类型（与销售侧分开）
+const PURCHASE_BIZ_TYPE = ['设备采购', '服务采购', '金租融资'].map((v) => ({ label: v, value: v }))
 // 二期 W3-4：收入核算路径判定枚举（与后端 contracts CHECK / revenue_rules 一致）
 const PRICING_AUTHORITY = ['自主定价', '客户定价', '上游定价'].map((v) => ({ label: v, value: v }))
 const INVENTORY_RISK = ['我方', '客户', '上游'].map((v) => ({ label: v, value: v }))
@@ -90,8 +93,8 @@ const REVENUE_METHOD = ['总额法', '净额法', '经营租赁', '服务费', '
 export const MODULES: Record<string, CrudConfig> = {
   suppliers: {
     title: '供应商', apiPath: '/suppliers',
-    columns: ['name', 'type', 'contact_person', 'contact_phone'],
-    labels: { name: '名称', type: '类型', contact_person: '联系人', contact_phone: '电话' },
+    columns: ['name', 'type', 'contact_person', 'contact_phone', 'invoice_title'],
+    labels: { name: '名称', type: '类型', contact_person: '联系人', contact_phone: '电话', invoice_title: '开票抬头' },
     tagKeys: ['type'],
     importable: true,
     fields: [
@@ -99,7 +102,12 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'type', label: '类型', type: 'select', options: SUP_TYPE },
       { key: 'contact_person', label: '联系人' },
       { key: 'contact_phone', label: '电话' },
-      { key: 'bank_account', label: '银行账户' },
+      // 缺陷#22：开票信息 + 银行账号结构化
+      { key: 'tax_no', label: '税号' },
+      { key: 'invoice_title', label: '开票抬头' },
+      { key: 'bank_name', label: '开户行' },
+      { key: 'bank_account', label: '银行账号' },
+      { key: 'address', label: '地址' },
       { key: 'notes', label: '备注' },
     ],
   },
@@ -115,6 +123,11 @@ export const MODULES: Record<string, CrudConfig> = {
       { key: 'contact_person', label: '联系人' },
       { key: 'contact_phone', label: '电话' },
       { key: 'credit_rating', label: '信用评级' },
+      // 缺陷#22：客户开票信息 + 银行账号
+      { key: 'tax_no', label: '税号' },
+      { key: 'invoice_title', label: '开票抬头' },
+      { key: 'bank_name', label: '开户行' },
+      { key: 'bank_account', label: '银行账号' },
     ],
   },
   equipment: {
@@ -133,9 +146,9 @@ export const MODULES: Record<string, CrudConfig> = {
   },
   banks: {
     title: '银行', apiPath: '/banks',
-    columns: ['name', 'credit_line', 'annual_rate'],
-    labels: { name: '银行', credit_line: '授信额度', annual_rate: '年利率' },
-    numKeys: ['credit_line', 'annual_rate'],
+    columns: ['name', 'credit_line', 'credit_used', 'credit_remaining', 'annual_rate'],
+    labels: { name: '银行', credit_line: '授信额度', credit_used: '已用授信', credit_remaining: '剩余授信', annual_rate: '年利率' },
+    numKeys: ['credit_line', 'credit_used', 'credit_remaining', 'annual_rate'],
     fields: [
       { key: 'name', label: '银行名称' },
       { key: 'contact_person', label: '联系人' },
@@ -165,10 +178,10 @@ export const MODULES: Record<string, CrudConfig> = {
   },
   contracts: {
     title: '合同', apiPath: '/contracts',
-    columns: ['contract_no', 'type', 'biz_type', 'direction', 'amount_incl_tax', 'amount', 'status', 'revenue_method'],
-    labels: { contract_no: '合同号', type: '类型', biz_type: '合同类型', direction: '方向', amount_incl_tax: '金额(含税)', amount: '金额(不含税)', status: '状态', revenue_method: '核算路径' },
-    tagKeys: ['type', 'biz_type', 'direction', 'status', 'revenue_method'], numKeys: ['amount_incl_tax', 'amount'],
-    fileUpload: true, uploadEntity: 'contracts', pdfExport: true,
+    columns: ['contract_no', 'type', 'biz_type', 'purchase_biz_type', 'direction', 'amount_incl_tax', 'amount', 'status', 'revenue_method'],
+    labels: { contract_no: '合同号', type: '类型', biz_type: '合同类型', purchase_biz_type: '采购类型', direction: '方向', amount_incl_tax: '金额(含税)', amount: '金额(不含税)', status: '状态', revenue_method: '核算路径' },
+    tagKeys: ['type', 'biz_type', 'purchase_biz_type', 'direction', 'status', 'revenue_method'], numKeys: ['amount_incl_tax', 'amount'],
+    fileUpload: true, uploadEntity: 'contracts', pdfExport: true, lineItems: true,
     listTabs: [{ label: '全部', value: '' }, { label: '销售合同', value: 'SALES' }, { label: '采购合同', value: 'PURCHASE' }],
     listParamKey: 'type',
     revenueJudge: true, auditEntity: 'contract',
@@ -212,7 +225,8 @@ export const MODULES: Record<string, CrudConfig> = {
     fields: [
       { key: 'project_id', label: '项目', required: true, remoteOptions: { endpoint: '/projects', label: 'name', value: 'id' } },
       { key: 'type', label: '类型', type: 'select', options: CONTRACT_TYPE, required: true },
-      { key: 'biz_type', label: '合同类型', type: 'select', options: BIZ_TYPE, hint: '业务性质：算力租赁（出租算力收租金）/ 转售（买断转卖）/ 服务（收服务费）' },
+      { key: 'biz_type', label: '合同类型(销售)', type: 'select', options: BIZ_TYPE, showWhen: (form) => form.type !== 'PURCHASE', hint: '销售业务性质：算力租赁（出租算力收租金）/ 转售（买断转卖）/ 服务（收服务费）' },
+      { key: 'purchase_biz_type', label: '合同类型(采购)', type: 'select', options: PURCHASE_BIZ_TYPE, showWhen: (form) => form.type === 'PURCHASE', hint: '采购业务性质：设备采购（买设备）/ 服务采购（买服务）/ 金租融资（金租本金+利息，不占采购额度）' },
       { key: 'party_id', label: '对方(客户/供应商)', required: true, remoteOptions: { endpoint: ['/customers', '/suppliers'], label: 'name', value: 'id', tags: ['客户', '供应商'] } },
       { key: 'parent_contract_id', label: '参照销售合同', type: 'select', required: true,
         showWhen: (form) => form.type === 'PURCHASE',

@@ -156,3 +156,14 @@ def test_generate_billing_blocked_for_device_order(db):
     with pytest.raises(BusinessError):
         bsvc.generate_billing(db, order_id=o.id, contract_id=c.id, period_index=1,
                               billing_date=date(2026, 9, 30), created_by=uuid.uuid4())
+
+
+# ---------- S12（缺陷#19b）：发票空串日期容忍 ----------
+
+def test_invoice_create_empty_string_dates(db):
+    """缺陷#19b：前端不填日期提交空串不再 422（'' → None）。"""
+    from app.schemas.invoice import InvoiceCreate
+    m = InvoiceCreate(contract_id=uuid.uuid4(), amount=Decimal("100"), due_date="", issue_date="")
+    assert m.due_date is None and m.issue_date is None
+    m2 = InvoiceCreate(contract_id=uuid.uuid4(), amount=Decimal("100"), due_date="2026-08-01", issue_date=None)
+    assert m2.due_date is not None and m2.issue_date is None

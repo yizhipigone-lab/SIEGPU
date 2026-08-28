@@ -16,6 +16,8 @@ const approvals = ref<any[]>([])
 const settlements = ref<any[]>([])
 const projects = ref<any[]>([])
 const invoices = ref<any[]>([])
+// S7（缺陷#7）：审批中心按业务类型过滤
+const apprFilter = ref<'全部' | '付款申请' | '收入确认'>('全部')
 
 async function refresh() {
   try {
@@ -145,6 +147,12 @@ const apprStatusType = (s: string) => ({ 已通过: 'success', 已驳回: 'error
     </div>
 
     <n-card title="审批中心" size="small" style="margin-bottom:14px">
+      <!-- S7（缺陷#7）：按业务类型分组，收入确认审批不再混在付款审批里 -->
+      <n-space style="margin-bottom:8px" wrap>
+        <n-button size="tiny" :type="apprFilter === '全部' ? 'primary' : 'default'" @click="apprFilter = '全部'">全部</n-button>
+        <n-button size="tiny" :type="apprFilter === '付款申请' ? 'primary' : 'default'" @click="apprFilter = '付款申请'">付款申请</n-button>
+        <n-button size="tiny" :type="apprFilter === '收入确认' ? 'primary' : 'default'" @click="apprFilter = '收入确认'">收入确认</n-button>
+      </n-space>
       <n-data-table size="small" :bordered="false" striped :pagination="{ pageSize: 8 }"
         :columns="[
           { title: '类型', key: 'biz_type', width: 100 },
@@ -153,12 +161,12 @@ const apprStatusType = (s: string) => ({ 已通过: 'success', 已驳回: 'error
           { title: '驳回原因', key: 'reject_reason', render: (r: any) => r.reject_reason || '—' },
           { title: '操作', key: '__op', width: 150 },
         ]"
-        :data="approvals">
+        :data="approvals.filter((a: any) => apprFilter === '全部' || a.biz_type === apprFilter)">
         <template #empty>暂无审批单</template>
       </n-data-table>
       <!-- 操作列用行渲染太绕，待审批的操作放下面列表 -->
       <n-space style="margin-top:8px" wrap>
-        <n-tag v-for="a in approvals.filter((x: any) => x.status === '待审批')" :key="a.id" size="medium" :bordered="false" type="warning">
+        <n-tag v-for="a in approvals.filter((x: any) => x.status === '待审批' && (apprFilter === '全部' || x.biz_type === apprFilter))" :key="a.id" size="medium" :bordered="false" type="warning">
           {{ a.title }}
           <n-button size="tiny" type="success" style="margin-left:6px" @click="doApprove(a)">通过</n-button>
           <n-button size="tiny" type="error" style="margin-left:4px" @click="rejectTarget = a">驳回</n-button>

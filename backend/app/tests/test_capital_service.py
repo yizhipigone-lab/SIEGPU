@@ -152,9 +152,18 @@ def test_prepayment_pool_flow(db):
     u = _user(db); p = _project(db)
     svc.record_bank_loan(db, project_id=p.id, amount=Decimal("1000000"),
                          transaction_date=date(2026, 1, 1), created_by=u.id)
+    # S3（缺陷#9）：预付必带供应商与采购合同
+    from app.models.master import Supplier
+    from app.models.project import Contract
+    sup = Supplier(name="供应商A", type="设备供应商")
+    db.add(sup); db.flush()
+    con = Contract(project_id=p.id, type="PURCHASE", party_type="supplier", party_id=sup.id,
+                   direction="PAYABLE", amount=Decimal("500000"), contract_no="CG-P")
+    db.add(con); db.flush()
     # 预付 40 万：银行池 100→60，挂账池 0→40
     svc.record_prepayment(db, project_id=p.id, amount=Decimal("400000"),
-                          transaction_date=date(2026, 1, 5), created_by=u.id, from_pool="BANK")
+                          transaction_date=date(2026, 1, 5), created_by=u.id, from_pool="BANK",
+                          supplier_id=sup.id, contract_id=con.id)
     assert svc.pool_balance(db, p.id, "BANK") == Decimal("600000")
     assert svc.pool_balance(db, p.id, "PREPAY") == Decimal("400000")
     # 供应商退回 15 万（金租放款后）：挂账池 40→25，银行池 60→75
@@ -186,8 +195,16 @@ def test_pools_by_project_and_summary(db):
     u = _user(db); p = _project(db)
     svc.record_bank_loan(db, project_id=p.id, amount=Decimal("1000000"),
                          transaction_date=date(2026, 1, 1), created_by=u.id)
+    from app.models.master import Supplier
+    from app.models.project import Contract
+    sup = Supplier(name="供应商A", type="设备供应商")
+    db.add(sup); db.flush()
+    con = Contract(project_id=p.id, type="PURCHASE", party_type="supplier", party_id=sup.id,
+                   direction="PAYABLE", amount=Decimal("500000"), contract_no="CG-P")
+    db.add(con); db.flush()
     svc.record_prepayment(db, project_id=p.id, amount=Decimal("300000"),
-                          transaction_date=date(2026, 1, 2), created_by=u.id, from_pool="BANK")
+                          transaction_date=date(2026, 1, 2), created_by=u.id, from_pool="BANK",
+                          supplier_id=sup.id, contract_id=con.id)
     pools = svc.pools_by_project(db, p.id)
     assert pools["BANK"] == Decimal("700000")
     assert pools["PREPAY"] == Decimal("300000")
@@ -195,6 +212,34 @@ def test_pools_by_project_and_summary(db):
     s = svc.pool_summary(db)
     assert s["by_pool"]["BANK"]["net"] == Decimal("700000")
     assert s["by_pool"]["PREPAY"]["net"] == Decimal("300000")
+
+
+def test_prepayment_creates_ledger_row(db):
+    """S3 缺陷#6/#9：手工预付同事务落台账行（含日期/供应商/采购合同，与流水共享幂等前缀）。"""
+    from sqlalchemy import select
+    from app.models.master import Supplier
+    from app.models.prepayment import Prepayment
+    from app.models.project import Contract
+    u = _user(db); p = _project(db)
+    svc.record_bank_loan(db, project_id=p.id, amount=Decimal("1000000"),
+                         transaction_date=date(2026, 1, 1), created_by=u.id)
+    sup = Supplier(name="供应商A", type="设备供应商")
+    db.add(sup); db.flush()
+    con = Contract(project_id=p.id, type="PURCHASE", party_type="supplier", party_id=sup.id,
+                   direction="PAYABLE", amount=Decimal("500000"), contract_no="CG-P")
+    db.add(con); db.flush()
+    svc.record_prepayment(db, project_id=p.id, amount=Decimal("400000"),
+                          transaction_date=date(2026, 1, 5), created_by=u.id, from_pool="BANK",
+                          supplier_id=sup.id, contract_id=con.id)
+    row = db.execute(select(Prepayment).where(Prepayment.deleted_at.is_(None))).scalars().first()
+    assert row is not None
+    assert row.payment_date == date(2026, 1, 5)
+    assert row.supplier_id == sup.id
+    assert row.contract_id == con.id
+    assert row.amount == Decimal("400000")
+    assert row.settled_amount == Decimal("0")
+    # 幂等键与流水共享前缀（与 /capital/prepayment 双流水一致）
+    assert row.idempotency_key.startswith("prepay:") and row.idempotency_key.endswith(":ledger")
 
 
 def test_leasing_disburse_lands_in_leasing_pool(db):
@@ -221,3 +266,52 @@ def test_reverse_stays_in_same_pool(db):
     assert svc.pool_balance(db, p.id, "BANK") == Decimal("1000")
     svc.reverse_transaction(db, txn_id=t.id, reversed_by=u.id)
     assert svc.pool_balance(db, p.id, "BANK") == Decimal("0")
+
+
+# ---- S11（缺陷#23）：银行授信使用情况 ----
+
+def test_bank_credit_usage_and_limit(db):
+    """已用授信 = 借款 − 偿还；超额借款被拦（银行授信不足）。"""
+    from app.models.master import Bank
+    u = _user(db); p = _project(db)
+    bank = Bank(name="工行", credit_line=Decimal("5000000"), annual_rate=Decimal("0.04"))
+    db.add(bank); db.flush()
+    svc.record_bank_loan(db, project_id=p.id, amount=Decimal("3000000"),
+                         transaction_date=date(2026, 1, 1), created_by=u.id, bank_id=bank.id)
+    assert svc.bank_credit_usage(db)[str(bank.id)] == Decimal("3000000")
+    # 还 100 万 → 已用 200 万
+    svc.repay_bank(db, project_id=p.id, amount=Decimal("1000000"),
+                   transaction_date=date(2026, 2, 1), created_by=u.id, bank_id=bank.id)
+    assert svc.bank_credit_usage(db)[str(bank.id)] == Decimal("2000000")
+    # 恰好等于剩余 → 允许；超出 → 拦
+    svc.assert_bank_credit_available(db, bank.id, Decimal("3000000"))
+    with pytest.raises(BusinessError) as exc:
+        svc.assert_bank_credit_available(db, bank.id, Decimal("4000000"))
+    assert "授信" in str(exc.value.detail)
+
+
+def test_replacement_backfills_bank_id(db):
+    """K6：置换归还流水回填原付款 bank_id → 授信已用正确抵减。"""
+    from app.models.master import Bank, Supplier
+    from app.services import funding_service as fs
+    from app.services import leasing_service as lsvc
+    u = _user(db); p = _project(db)
+    bank = Bank(name="工行", credit_line=Decimal("5000000"), annual_rate=Decimal("0.04"))
+    db.add(bank); db.flush()
+    svc.record_bank_loan(db, project_id=p.id, amount=Decimal("3000000"),
+                         transaction_date=date(2026, 1, 1), created_by=u.id, bank_id=bank.id)
+    # 垫资付款（银行流贷 OUT，带 bank_id）
+    svc.record_transaction(db, created_by=u.id, project_id=p.id, source_type="银行流贷",
+                           direction="OUT", amount=Decimal("1000000"),
+                           transaction_date=date(2026, 1, 15), bank_id=bank.id)
+    assert svc.bank_credit_usage(db)[str(bank.id)] == Decimal("3000000")  # 垫资不改已用
+    # 金租放款置换 100 万 → 归还流贷 IN 回填 bank_id → 已用 200 万
+    sup = Supplier(name="金租A", type="资金供应商")
+    db.add(sup); db.flush()
+    proc = lsvc.create_process(db, project_id=p.id, supplier_id=sup.id, total_amount=Decimal("1000000"),
+                               annual_rate=Decimal("0.05"), term_periods=3, payment_freq="月",
+                               repayment_method="等额本息")
+    fs.execute_replacement(db, project_id=p.id, leasing_process_id=proc.id,
+                           disbursement_amount=Decimal("1000000"), disbursement_date=date(2026, 2, 1),
+                           created_by=u.id)
+    assert svc.bank_credit_usage(db)[str(bank.id)] == Decimal("2000000")

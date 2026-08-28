@@ -9,6 +9,7 @@ from app.models.capital import CapitalAllocation, CapitalTransaction
 from app.models.delivery import DeliveryStage, Order
 from app.models.contract_ext import (ContractAmendment, ContractTermination,
                                      DocNumberRule, LeasingRuleConfig)
+from app.models.contract_line import ContractLineItem
 from app.models.currency import Currency, ExchangeGainLossRule, ExchangeRate
 from app.models.device import BatchDevice, Device, DeviceStage, OffBalanceRegister
 from app.models.ebs import EbsFieldMapping, EbsSyncLog
@@ -19,6 +20,7 @@ from app.models.long_term_payable import LongTermPayable
 from app.models.master import Bank, Customer, EquipmentModel, Supplier
 from app.models.notification import Notification
 from app.models.payment import Approval, PaymentRequest, PaymentSettlement
+from app.models.prepayment import Prepayment
 from app.models.profit_scenario import ProfitScenario
 from app.models.project import Contract, Project
 from app.models.project_workflow import ProjectWorkflow
@@ -44,7 +46,8 @@ __all__ = [
     "Currency", "ExchangeRate", "ExchangeGainLossRule",
     "InsurancePolicy", "InsurancePolicyDevice", "InsuranceConfig",
     "ContractAmendment", "ContractTermination", "DocNumberRule", "LeasingRuleConfig",
-    "Approval", "PaymentRequest", "PaymentSettlement",
+    "ContractLineItem",
+    "Approval", "PaymentRequest", "PaymentSettlement", "Prepayment",
     "RevenueRecognition", "GlAccountMapping",
     "ReturnOrder", "ReturnOrderDevice",
     "FundingReplacement",

@@ -23,6 +23,7 @@ class DeviceCreate(BaseModel):
     leasing_mode: LeasingMode | None = None  # 缺省快照自项目
     purchase_value: Decimal | None = Field(None, ge=0)
     prepayment_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    prepayment_date: date | None = None  # S3（缺陷#5/#6）：预付款登记时间（台账待补）
     ownership: Ownership | None = None
 
 
@@ -38,6 +39,7 @@ class DeviceUpdate(BaseModel):
     leasing_mode: LeasingMode | None = None
     purchase_value: Decimal | None = Field(None, ge=0)
     prepayment_amount: Decimal | None = Field(None, ge=0)
+    prepayment_date: date | None = None  # S3（缺陷#5/#6）：预付款登记时间
     ownership: Ownership | None = None
 
 
@@ -55,6 +57,7 @@ class DeviceOut(BaseModel):
     leasing_mode: str | None
     purchase_value: Decimal | None
     prepayment_amount: Decimal
+    prepayment_date: date | None = None  # S3（缺陷#5/#6）：预付款登记时间
     status: str
     ownership: str | None
     prepayment_settled: bool = False  # W7-8：回租出售后置位（决策 3，仅标记）
@@ -115,6 +118,13 @@ class DeviceStageAdvance(BaseModel):
 class BatchAdvanceRequest(DeviceStageAdvance):
     """批量推进：批内所有 active 设备推进同一节点。"""
     batch_id: UUID
+
+
+class DeviceStageCatchup(BaseModel):
+    """缺陷#15 补录模式：一键把目标节点及全部前序节点补齐为已完成。"""
+    target_stage: DeviceStageName
+    actual_date: date | None = None
+    notes: str | None = None
 
 
 class DeviceStageOut(BaseModel):

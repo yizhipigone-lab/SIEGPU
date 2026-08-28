@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 三期 §4.2：收入确认管理。计费自动出草稿 → 审批中心通过（/payments 页）→ 已确认+Mock 凭证 → 已同步EBS。
 // 本页：确认单列表（凭证详情）+ 科目映射配置 + 存量补草稿。
-import { onMounted, reactive, ref } from 'vue'
+import { h, onMounted, reactive, ref } from 'vue'
 import {
   NButton, NCard, NDataTable, NForm, NFormItem, NInput, NModal, NSelect, NSpace, NTag, useMessage,
 } from 'naive-ui'
@@ -45,6 +45,27 @@ async function submitMap() {
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
+// S7（缺陷#7）：本页行内审批（草稿 → 通过/驳回），不再只能去付款管控页
+async function approveRow(row: any) {
+  if (!row.approval_id) { msg.warning('该草稿无关联审批单'); return }
+  try {
+    await api.post(`/approvals/${row.approval_id}/approve`)
+    msg.success('已通过（状态→已确认，凭证+同步EBS）')
+    await refresh()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+const rejectTarget = ref<any | null>(null)
+const rejectReason = ref('')
+async function doRejectRow() {
+  if (!rejectTarget.value || !rejectReason.value.trim()) { msg.warning('驳回必须填原因'); return }
+  try {
+    await api.post(`/approvals/${rejectTarget.value.approval_id}/reject`, { reason: rejectReason.value })
+    msg.success('已驳回')
+    rejectTarget.value = null; rejectReason.value = ''
+    await refresh()
+  } catch (e: any) { msg.error(errMsg(e)) }
+}
+
 // 凭证展开
 const voucherOf = ref<any | null>(null)
 const statusType = (s: string) => ({ 草稿: 'warning', 已确认: 'info', 已同步EBS: 'success' }[s] || 'default')
@@ -60,7 +81,7 @@ const statusType = (s: string) => ({ 草稿: 'warning', 已确认: 'info', 已�
       </n-space>
     </div>
 
-    <n-card title="收入确认单（计费自动出草稿；审批中心通过后出凭证并同步 EBS）" size="small" style="margin-bottom:14px">
+    <n-card title="收入确认单（开票成功即自动生成草稿；审批通过后出凭证并同步 EBS）" size="small" style="margin-bottom:14px">
       <n-data-table size="small" :bordered="false" striped :pagination="{ pageSize: 10 }"
         :columns="[
           { title: '项目', key: 'project_name', width: 140, render: (r: any) => r.project_name || '—' },
@@ -70,10 +91,17 @@ const statusType = (s: string) => ({ 草稿: 'warning', 已确认: 'info', 已�
           { title: '核算路径', key: 'revenue_method', width: 100, render: (r: any) => r.revenue_method || '—' },
           { title: '状态', key: 'status', width: 110 },
           { title: '凭证', key: '__v', width: 90 },
+          { title: '审批', key: '__a', width: 150, render: (r: any) =>
+              r.status === '草稿' && r.approval_id
+                ? h(NSpace, { size: 2 }, () => [
+                    h(NButton, { size: 'tiny', type: 'success', quaternary: true, onClick: () => approveRow(r) }, () => '通过'),
+                    h(NButton, { size: 'tiny', type: 'error', quaternary: true, onClick: () => rejectTarget = r }, () => '驳回'),
+                  ])
+                : null },
         ]"
         :data="items"
         :row-props="(row: any) => ({ style: 'cursor:pointer', onClick: () => row.voucher_json && (voucherOf = row) })">
-        <template #empty>暂无确认单。设备点亮按台计费后自动出草稿；历史计费点右上角「存量补草稿」。</template>
+        <template #empty>暂无确认单。销售发票开票成功即自动生成草稿；历史计费点右上角「存量补草稿」。</template>
       </n-data-table>
       <n-space style="margin-top:8px" wrap>
         <n-tag v-for="r in items.filter((x: any) => x.status !== '草稿')" :key="r.id" size="small"
@@ -82,7 +110,7 @@ const statusType = (s: string) => ({ 草稿: 'warning', 已确认: 'info', 已�
           {{ r.period_label }} {{ r.status }}{{ r.voucher_json ? ' · 看凭证' : '' }}
         </n-tag>
       </n-space>
-      <div class="muted tiny" style="margin-top:8px">草稿的审核在「付款管控 → 审批中心」通过/驳回（通用审批）。点凭证列可查看 Mock 凭证借贷科目。</div>
+      <div class="muted tiny" style="margin-top:8px">草稿也可在「付款管控 → 审批中心」按类型筛选后通过/驳回（通用审批）。点凭证列可查看 Mock 凭证借贷科目。</div>
     </n-card>
 
     <n-card title="科目映射（业务事件 + 核算路径 → EBS 借贷科目；核算路径空=通用兜底）" size="small">
@@ -123,6 +151,14 @@ const statusType = (s: string) => ({ 草稿: 'warning', 已确认: 'info', 已�
         <n-form-item label="摘要模板"><n-input v-model:value="mapForm.description_template" placeholder="支持 {period} 占位，如：确认{period}经营租赁收入" /></n-form-item>
       </n-form>
       <template #footer><n-space justify="end"><n-button @click="showMap = false">取消</n-button><n-button type="primary" @click="submitMap">保存</n-button></n-space></template>
+    </n-modal>
+    <!-- 驳回原因（S7 行内审批） -->
+    <n-modal :show="rejectTarget !== null" preset="card" title="驳回收入确认草稿" style="width:380px"
+      @update:show="(v: boolean) => !v && (rejectTarget = null)">
+      <n-form-item label="驳回原因" required>
+        <n-input v-model:value="rejectReason" type="textarea" :rows="2" placeholder="必填" />
+      </n-form-item>
+      <template #footer><n-space justify="end"><n-button @click="rejectTarget = null">取消</n-button><n-button type="error" @click="doRejectRow">确认驳回</n-button></n-space></template>
     </n-modal>
   </div>
 </template>

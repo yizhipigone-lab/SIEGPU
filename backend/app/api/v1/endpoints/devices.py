@@ -14,6 +14,7 @@ from app.schemas.device import (
     DeviceCreate,
     DeviceOut,
     DeviceStageAdvance,
+    DeviceStageCatchup,
     DeviceStageOut,
     DeviceUpdate,
     OffBalanceRegisterCreate,
@@ -109,6 +110,18 @@ def batch_advance(payload: BatchAdvanceRequest, db: Session = Depends(get_db),
     )
     db.commit()
     return result
+
+
+@router.post("/{device_id}/stage-catchup", response_model=DeviceOut)
+def stage_catchup(device_id: UUID, payload: DeviceStageCatchup, db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    """缺陷#15 补录模式：目标节点及全部前序节点一键补齐为已完成（跳过顺序校验）。"""
+    d, touched = svc.catchup_device_stages(
+        db, device_id=device_id, target_stage=payload.target_stage,
+        actual_date=payload.actual_date, operator_id=user.id, notes=payload.notes,
+    )
+    db.commit()
+    return DeviceOut.model_validate(d)
 
 
 @router.get("/{device_id}", response_model=DeviceOut)

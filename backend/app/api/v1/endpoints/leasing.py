@@ -61,6 +61,23 @@ def get_process(process_id: UUID, db: Session = Depends(get_db), user: User = De
     return _detail(proc, nodes, proj, sup)
 
 
+@router.patch("/processes/{process_id}", response_model=LeasingProcessOut)
+def update_process(process_id: UUID, payload: dict, db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    """缺陷#10：编辑金租申请（仅进行中未放款：金额/利率/期数/频率/方式等）。"""
+    proc = svc.update_process(db, process_id=process_id, operator_id=user.id, **payload)
+    db.commit()
+    return LeasingProcessOut.model_validate(proc)
+
+
+@router.post("/processes/{process_id}/void", response_model=LeasingProcessOut)
+def void_process(process_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """缺陷#10：作废金租申请（仅未放款）。"""
+    proc = svc.void_process(db, process_id=process_id, operator_id=user.id)
+    db.commit()
+    return LeasingProcessOut.model_validate(proc)
+
+
 @router.patch("/nodes/{node_id}")
 def advance_node(node_id: UUID, payload: NodeAdvance, db: Session = Depends(get_db),
                  user: User = Depends(get_current_user)):
@@ -102,6 +119,7 @@ def add_disbursement(process_id: UUID, payload: DisbursementCreate, db: Session 
     try:
         d, _, _ = svc.add_disbursement(db, process_id=process_id, acceptance_id=payload.acceptance_id,
                                        amount=payload.amount, disbursement_date=payload.disbursement_date,
+                                       mode=payload.mode, replacement_date=payload.replacement_date,
                                        note=payload.note, created_by=user.id)
         db.commit()
     except IntegrityError:

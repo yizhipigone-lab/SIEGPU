@@ -55,6 +55,7 @@ from app.services.device_stage_machine import (
     _derive_device_status,
     _ensure_device_stages,
     advance_device_stage,
+    catchup_device_stages,
     complete_device_stage,
     DEVICE_STAGE_TRANSITIONS,
     DEVICE_STAGES,

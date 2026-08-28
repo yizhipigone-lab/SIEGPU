@@ -13,6 +13,11 @@ class SupplierCreate(BaseModel):
     contact_phone: str | None = None
     bank_account: str | None = None
     notes: str | None = None
+    # 缺陷#22：开票信息 + 银行账号结构化
+    tax_no: str | None = None
+    invoice_title: str | None = None
+    bank_name: str | None = None
+    address: str | None = None
     is_leasing_org: bool = False
     leasing_coop_modes: list[str] | None = None  # 合作模式：直租/回租
 
@@ -23,6 +28,11 @@ class SupplierOut(BaseModel):
     type: str
     contact_person: str | None
     contact_phone: str | None
+    bank_account: str | None = None
+    tax_no: str | None = None
+    invoice_title: str | None = None
+    bank_name: str | None = None
+    address: str | None = None
     is_leasing_org: bool = False
     leasing_coop_modes: list[str] | None = None
     model_config = {"from_attributes": True}
@@ -36,6 +46,11 @@ class CustomerCreate(BaseModel):
     contact_phone: str | None = None
     credit_rating: str | None = None
     notes: str | None = None
+    # 缺陷#22：开票信息 + 银行账号
+    tax_no: str | None = None
+    invoice_title: str | None = None
+    bank_name: str | None = None
+    bank_account: str | None = None
 
 
 class CustomerOut(BaseModel):
@@ -44,6 +59,10 @@ class CustomerOut(BaseModel):
     industry: str | None
     contact_person: str | None
     credit_rating: str | None
+    tax_no: str | None = None
+    invoice_title: str | None = None
+    bank_name: str | None = None
+    bank_account: str | None = None
     model_config = {"from_attributes": True}
 
 

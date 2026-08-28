@@ -2,7 +2,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true as sql_true
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessError
@@ -134,32 +134,53 @@ def project_comparison(db: Session) -> list[dict]:
 # 刻意绕开 receivables_aging（其依赖从未写入的「已收款」状态，是隐性 bug）。
 # 维度从「合同」改为「客户」：取该客户所有 SALES 合同聚合。
 
-def _customer_contract_totals(db: Session, contract_ids: list) -> dict:
-    """对一组合同 id 聚合计费/开票/回款三流金额。
+def _month_bounds(period: str | None):
+    """'YYYY-MM' → (当月首日, 下月首日) 或 None（累计口径，缺陷#18）。"""
+    if not period:
+        return None
+    try:
+        y, m = int(period[:4]), int(period[5:7])
+        if not (1 <= m <= 12):
+            return None
+        return date(y, m, 1), date(y + (m // 12), (m % 12) + 1, 1)
+    except (ValueError, IndexError):
+        return None
+
+
+def _customer_contract_totals(db: Session, contract_ids: list, period: str | None = None) -> dict:
+    """对一组合同 id 聚合计费/开票/回款三流金额（缺陷#18：period 给定则只算当期）。
+
     全部用不含税口径（amount_ex_tax），让 gap 可直接相减——客户对账单要内部自洽。
     （与 invoice_service.reconciliation 的 billed/invoiced 同口径；received 改用 ex_tax 以保持一致。）
     """
     if not contract_ids:
         return {"billed": Decimal(0), "invoiced": Decimal(0), "received": Decimal(0)}
+    bounds = _month_bounds(period)
+    billed_q = (Billing.period_label == period) if bounds else sql_true()
+    invoiced_q = (Invoice.issue_date >= bounds[0], Invoice.issue_date < bounds[1]) if bounds else (sql_true(),)
+    received_q = (Invoice.paid_date >= bounds[0], Invoice.paid_date < bounds[1]) if bounds else (sql_true(),)
     billed = db.execute(
         select(func.coalesce(func.sum(Billing.amount_ex_tax), 0)).where(
-            Billing.contract_id.in_(contract_ids), Billing.status != "已红冲")
+            Billing.contract_id.in_(contract_ids), Billing.status != "已红冲", billed_q)
     ).scalar() or Decimal(0)
     invoiced = db.execute(
         select(func.coalesce(func.sum(Invoice.amount_ex_tax), 0)).where(
             Invoice.contract_id.in_(contract_ids), Invoice.direction == "RECEIVABLE",
-            Invoice.status != "已红冲")
+            Invoice.status != "已红冲", *invoiced_q)
     ).scalar() or Decimal(0)
     received = db.execute(
         select(func.coalesce(func.sum(Invoice.amount_ex_tax), 0)).where(
             Invoice.contract_id.in_(contract_ids), Invoice.direction == "RECEIVABLE",
-            Invoice.paid_date.isnot(None), Invoice.status != "已红冲")
+            Invoice.paid_date.isnot(None), Invoice.status != "已红冲", *received_q)
     ).scalar() or Decimal(0)
     return {"billed": billed, "invoiced": invoiced, "received": received}
 
 
-def customer_statement(db: Session, customer_id) -> dict:
-    """单个客户对账单：四 KPI（合同额/已计费/已开票/已回款）+ 每合同明细 + 流水明细。"""
+def customer_statement(db: Session, customer_id, period: str | None = None) -> dict:
+    """单个客户对账单：四 KPI（合同额/已计费/已开票/已回款）+ 每合同明细 + 流水明细。
+
+    缺陷#18：period='YYYY-MM' 时为「当期」口径（只含该月计费/开票/回款）；缺省=累计（现状）。
+    """
     customer = db.get(Customer, customer_id)
     if not customer or customer.deleted_at is not None:
         raise BusinessError("NOT_FOUND", "客户不存在", 404)
@@ -170,13 +191,14 @@ def customer_statement(db: Session, customer_id) -> dict:
             Contract.party_id == customer_id)
     ).scalars().all()
     cids = [c.id for c in contracts]
-    totals = _customer_contract_totals(db, cids)
+    totals = _customer_contract_totals(db, cids, period)
     contract_amount = sum((c.amount for c in contracts), Decimal(0))
+    bounds = _month_bounds(period)
 
     # 每合同明细
     contract_items = []
     for c in contracts:
-        ct = _customer_contract_totals(db, [c.id])
+        ct = _customer_contract_totals(db, [c.id], period)
         contract_items.append({
             "contract_id": str(c.id), "contract_no": c.contract_no or "—",
             "contract_amount": q2(c.amount),
@@ -186,10 +208,12 @@ def customer_statement(db: Session, customer_id) -> dict:
             "status": c.status,
         })
 
-    # 流水明细：该客户合同下的计费单 + 发票，按日期倒序合并
+    # 流水明细：该客户合同下的计费单 + 发票，按日期倒序合并（当期口径只留该月）
     line_items = []
+    billing_filter = (Billing.period_label == period) if bounds else sql_true()
     for b in db.execute(
-        select(Billing).where(Billing.contract_id.in_(cids)).order_by(Billing.billing_date.desc())
+        select(Billing).where(Billing.contract_id.in_(cids), billing_filter)
+        .order_by(Billing.billing_date.desc())
     ).scalars().all():
         line_items.append({
             "date": b.billing_date.isoformat() if b.billing_date else None,
@@ -197,8 +221,9 @@ def customer_statement(db: Session, customer_id) -> dict:
             "type": "计费", "amount_ex_tax": q2(b.amount_ex_tax),
             "status": b.status,
         })
+    inv_filter = (Invoice.issue_date >= bounds[0], Invoice.issue_date < bounds[1]) if bounds else (sql_true(),)
     for inv in db.execute(
-        select(Invoice).where(Invoice.contract_id.in_(cids), Invoice.direction == "RECEIVABLE")
+        select(Invoice).where(Invoice.contract_id.in_(cids), Invoice.direction == "RECEIVABLE", *inv_filter)
         .order_by(Invoice.issue_date.desc())
     ).scalars().all():
         line_items.append({
@@ -212,6 +237,7 @@ def customer_statement(db: Session, customer_id) -> dict:
 
     return {
         "customer_id": str(customer_id), "customer_name": customer.name,
+        "period": period,
         "contract_amount": q2(contract_amount),
         "billed": q2(totals["billed"]), "invoiced": q2(totals["invoiced"]),
         "received": q2(totals["received"]),

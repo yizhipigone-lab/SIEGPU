@@ -19,11 +19,11 @@ const recon = ref<any[]>([])
 // 工作台跳转带 ?project_id= 时，合同下拉只列该项目合同（预填消费）
 const queryProjectId = (route.query.project_id as string) || ''
 
-// 创建表单
+// 创建表单（缺陷#19b：移除业务上不存在的「到期日」字段）
 const showCreate = ref(false)
 const form = ref({
   contract_id: '' as string, amount: null as number | null,
-  invoice_no: '', issue_date: '', due_date: '',
+  invoice_no: '', issue_date: '',
 })
 
 async function refresh() {
@@ -65,9 +65,9 @@ const ocrHeaders = { Authorization: `Bearer ${localStorage.getItem('token') || '
 async function createInvoice() {
   if (!form.value.contract_id || !form.value.amount) { msg.warning('请选合同 + 填金额'); return }
   try {
-    await api.post('/invoices', form.value)
+    await api.post('/invoices', { ...form.value, issue_date: form.value.issue_date || null })
     msg.success('发票已创建'); showCreate.value = false; await refresh()
-    form.value = { contract_id: '', amount: null, invoice_no: '', issue_date: '', due_date: '' }
+    form.value = { contract_id: '', amount: null, invoice_no: '', issue_date: '' }
   } catch (e: any) { msg.error(errMsg(e)) }
 }
 
@@ -222,17 +222,18 @@ const reconCols = [
       <!-- 创建弹窗（含 OCR） -->
       <n-modal v-model:show="showCreate" preset="card" title="新增发票" style="width:480px;max-width:94vw">
         <n-space vertical :size="12">
-          <!-- OCR 识别 -->
+          <!-- OCR 识别（缺陷#19a：仅图片；失败有明确提示） -->
           <n-upload
             action="/api/ocr/invoice"
             :headers="ocrHeaders"
-            accept="image/*,.pdf"
+            accept="image/*"
             :show-file-list="false"
             @finish="onOcrFinish"
+            @error="() => { msg.error('OCR 识别失败：上传/服务异常（仅支持 JPG/PNG 图片）') }"
           >
-            <n-button dashed block>📷 OCR 识别发票（上传图片/PDF 自动填表）</n-button>
+            <n-button dashed block>📷 OCR 识别发票（上传图片自动填表）</n-button>
           </n-upload>
-          <div class="muted tiny">支持拍照/扫描的增值税发票图片（JPG/PNG/PDF）。识别后请人工校验。</div>
+          <div class="muted tiny">支持拍照/扫描的增值税发票图片（JPG/PNG）。识别后请人工校验。</div>
 
           <n-form-item label="关联合同">
             <n-select v-model:value="form.contract_id" :options="contractOpts()" placeholder="选合同" filterable />
@@ -247,10 +248,6 @@ const reconCols = [
             <n-form-item label="开票日期">
               <n-date-picker type="date" :value="ymdToTs(form.issue_date)"
                 @update:value="(ts: number | null) => form.issue_date = tsToYmd(ts)" style="width:160px" />
-            </n-form-item>
-            <n-form-item label="到期日">
-              <n-date-picker type="date" :value="ymdToTs(form.due_date)"
-                @update:value="(ts: number | null) => form.due_date = tsToYmd(ts)" style="width:160px" />
             </n-form-item>
           </n-space>
         </n-space>

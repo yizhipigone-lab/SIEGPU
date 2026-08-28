@@ -10,8 +10,34 @@ PricingAuthority = Literal["自主定价", "客户定价", "上游定价"]
 InventoryRiskBearer = Literal["我方", "客户", "上游"]
 PrincipalRole = Literal["主要责任人", "代理人"]
 RevenueMethod = Literal["总额法", "净额法", "经营租赁", "服务费", "待判定"]
-# 四期 W4：合同业务类型（算力租赁/转售/服务）
+# 四期 W4：合同业务类型——销售侧（算力租赁/转售/服务）
 BizType = Literal["算力租赁", "转售", "服务"]
+# 缺陷#7：采购侧业务类型独立枚举——与销售口径分开（设备/服务/金租融资）
+PurchaseBizType = Literal["设备采购", "服务采购", "金租融资"]
+
+
+class LineItemIn(BaseModel):
+    """缺陷#8：合同明细行入参（行级税率）。"""
+    name: str = Field(min_length=1, max_length=200)
+    qty: Decimal = Field(default=Decimal("1"), gt=0)
+    unit_price: Decimal = Field(ge=0)  # 单价（不含税）
+    tax_rate: Decimal = Field(default=Decimal("0.13"), ge=0, lt=1)
+    notes: str | None = None
+
+
+class ContractLineItemOut(BaseModel):
+    id: UUID
+    contract_id: UUID
+    seq: int
+    name: str
+    qty: Decimal
+    unit_price: Decimal
+    tax_rate: Decimal
+    line_amount: Decimal
+    line_tax: Decimal
+    line_amount_incl: Decimal
+    notes: str | None
+    model_config = {"from_attributes": True}
 
 
 class ContractCreate(BaseModel):
@@ -43,8 +69,12 @@ class ContractCreate(BaseModel):
     collection_account_type: Literal["监管户", "一般户"] | None = None
     # 四期 W4：合同类型 / 含税总额 / 算力租赁租期（全可选；amount 仍为不含税）
     biz_type: BizType | None = None
+    # 缺陷#7：PURCHASE 侧业务类型（设备采购/服务采购/金租融资），与销售侧分开
+    purchase_biz_type: PurchaseBizType | None = None
     amount_incl_tax: Decimal | None = Field(None, ge=0)  # 合同金额（含税）
     lease_months: int | None = Field(None, ge=1)  # 租期(月)，仅算力租赁
+    # 缺陷#8：多行明细（行级税率）。有明细行时金额/税率由行合计派生，忽略手填值
+    line_items: list[LineItemIn] | None = None
 
 
 class ContractUpdate(BaseModel):
@@ -68,10 +98,15 @@ class ContractUpdate(BaseModel):
     collection_account_type: Literal["监管户", "一般户"] | None = None
     # 四期 W4：分类/条款/税率/金额可改（不含税随含税联动或直接改；合同变更仍走 Amendment 留痕渠道）
     biz_type: BizType | None = None
+    purchase_biz_type: PurchaseBizType | None = None
     tax_rate: Decimal | None = Field(None, ge=0, lt=1)  # 税率（小数，0~1）
     amount_incl_tax: Decimal | None = Field(None, ge=0)
     amount: Decimal | None = Field(None, ge=0)  # 不含税金额（前端由含税自动算/可手改）
     lease_months: int | None = Field(None, ge=1)
+    # 缺陷#9：修改对方主体（服务层守门：主体须存在 + 无发票/计费下游才允许改）
+    party_id: UUID | None = None
+    # 缺陷#8：明细行整组替换（服务层守门：已开票合同禁改行）
+    line_items: list[LineItemIn] | None = None
 
 
 class MethodConfirmIn(BaseModel):
@@ -162,7 +197,10 @@ class ContractOut(BaseModel):
     collection_account_type: str | None = None
     # 四期 W4：合同类型 / 含税总额 / 算力租赁租期
     biz_type: str | None = None
+    purchase_biz_type: str | None = None
     amount_incl_tax: Decimal | None = None
     lease_months: int | None = None
+    # 缺陷#8：多行明细（行级税率）；无明细行时为空列表
+    line_items: list["ContractLineItemOut"] = Field(default_factory=list, exclude=False)
     referenced_purchase_count: int | None = None
     model_config = {"from_attributes": True}

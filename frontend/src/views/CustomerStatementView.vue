@@ -17,6 +17,16 @@ const msg = useMessage()
 const customers = ref<any[]>([])
 const selectedId = ref<string | null>(null)
 const stmt = ref<any | null>(null)
+// S9（缺陷#18）：当期/累计口径切换
+const period = ref<string | null>(null)
+const periodOptions = [
+  { label: '累计（全生命周期）', value: '' },
+  ...Array.from({ length: 12 }, (_, i) => {
+    const d = new Date()
+    d.setDate(1); d.setMonth(d.getMonth() - i)
+    return { label: `当期 ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+  }),
+]
 
 async function loadCustomers() {
   try {
@@ -33,21 +43,22 @@ async function loadStatement() {
   const id = selectedId.value
   if (!id) { stmt.value = null; return }
   try {
-    const { data } = await api.get('/reports/customer-statement', { params: { customer_id: id } })
+    const { data } = await api.get('/reports/customer-statement', { params: { customer_id: id, period: period.value || undefined } })
     // 防乱序覆盖：挂载自动选第一名 + 手动点选会连发两请求，慢的旧响应不得盖掉新选择的明细
     // （2026-08-12 全套并发下实测踩中：别人的对账单晚到 0.x 秒覆盖了我的，revenue-chain 断言错数据）
     if (selectedId.value === id) stmt.value = data
   } catch (e: any) { if (selectedId.value === id) { msg.error(errMsg(e)); stmt.value = null } }
 }
 
+watch(selectedId, loadStatement)
+watch(period, loadStatement)
+onMounted(async () => { await loadCustomers(); await loadStatement() })
+
 const customerOpts = () => customers.value.map((c: any) => ({
   // label 带未回款额，方便财务一眼定位最该跟的客户
   label: `${c.customer_name}（${c.contract_count} 份合同，未回款 ${money(c.gap_uncollected)}）`,
   value: c.customer_id,
 }))
-
-watch(selectedId, loadStatement)
-onMounted(async () => { await loadCustomers(); await loadStatement() })
 
 const contractCols = [
   { title: '合同号', key: 'contract_no', width: 160, render: (r: any) => r.contract_no || '—' },
@@ -77,13 +88,17 @@ const lineCols = [
   <div>
     <div class="cs-header">
       <h3>客户对账单</h3>
-      <n-select
-        v-model:value="selectedId"
-        :options="customerOpts()"
-        placeholder="选择客户查看对账单"
-        filterable
-        class="cs-picker"
-      />
+      <n-space :size="8">
+        <!-- S9（缺陷#18）：当期/累计切换 -->
+        <n-select v-model:value="period" :options="periodOptions" style="width:200px" size="small" />
+        <n-select
+          v-model:value="selectedId"
+          :options="customerOpts()"
+          placeholder="选择客户查看对账单"
+          filterable
+          class="cs-picker"
+        />
+      </n-space>
     </div>
 
     <EmptyState v-if="!customers.length"

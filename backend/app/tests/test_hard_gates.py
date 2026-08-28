@@ -97,10 +97,10 @@ def _sales_batch_with_device(db, p, c, e, device_status, lit=False):
     so_svc.add_to_sales_batch(db, device_id=d.id, sales_batch_id=so.id)
     d.status = device_status
     if lit:
-        # 按台计费需设备点亮（读点亮阶段 actual_date）：直接置 status + 补点亮验收完成节点行
+        # 按台计费需设备点亮（读点亮阶段 actual_date）：置自动建的点亮行完成
         from app.models.device import DeviceStage
-        db.add(DeviceStage(device_id=d.id, stage="点亮验收", seq=7, status="已完成",
-                           actual_date=date(2026, 8, 1)))
+        _st = db.query(DeviceStage).filter_by(device_id=d.id, stage="点亮验收").one()
+        _st.status = "已完成"; _st.actual_date = date(2026, 8, 1)
     db.flush()
     return so, d
 

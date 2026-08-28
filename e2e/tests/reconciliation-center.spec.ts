@@ -73,27 +73,35 @@ test('对账中心：7 维渲染 + 差异标红 + 业财注入管道 + 差异明
   })).json()
   await post(request, headers, `/approvals/${recs.items[0].approval_id}/approve`, {}, '确认审批')
 
-  // ---- 维度 8 备数：PREPAY 池挂账 5000（资金台账轨）而设备无预付（运营轨 0）→ 双轨差异 ----
+  // ---- 维度 8 备数：PREPAY 池挂账 5000（S3 口径：手工预付同事务落台账 → 池=台账恒等；
+  //      单独造「池有挂账无台账行」→ 资金流水缺台账）----
+  const sup8 = await post(request, headers, '/suppliers', { name: `E2E-供应商-${RUN}`, type: '设备供应商' }, '供应商')
   await post(request, headers, '/capital/bank-loan', {
     project_id: proj.id, amount: 5000, transaction_date: '2026-09-01',
   }, '记银行借款（备预付资金）')
   await post(request, headers, '/capital/prepayment', {
     project_id: proj.id, amount: 5000, transaction_date: '2026-09-02', from_pool: 'BANK',
-  }, '预付挂账（池轨 +5000，设备轨 0）')
+    supplier_id: sup8.id, contract_id: contract.id,
+  }, '预付挂账（池轨 +5000，台账轨 +5000 恒等）')
+  // 再记一笔纯池流水（不经预付端点）→ 池 10000 / 台账 5000 → 「资金流水缺台账」
+  await post(request, headers, '/capital/transactions', {
+    project_id: proj.id, source_type: '预付', direction: 'IN', amount: 5000,
+    transaction_date: '2026-09-03', pool: 'PREPAY', idempotency_key: `dim8x-${RUN}`,
+  }, '纯池流水（台账缺）')
 
   // ---- UI：八维卡渲染 ----
   await uiLogin(page)
   await page.goto('/reconciliation-center')
   await expect(page.getByRole('heading', { name: '对账中心' })).toBeVisible()
-  for (const t of ['销售全链路', '采购四单', '资产交付', '监管账户', '汇兑损益', '业财一致性', '三流差异明细', '预付款双轨勾稽']) {
+  for (const t of ['销售全链路', '采购四单', '资产交付', '监管账户', '汇兑损益', '业财一致性', '三流差异明细', '预付款勾稽']) {
     await expect(page.locator('.n-card', { hasText: t }).first()).toBeVisible()
   }
 
-  // ---- 维度 8：本项目双轨差异行标红 ----
-  const d8Card = page.locator('.n-card', { hasText: '预付款双轨勾稽' })
+  // ---- 维度 8：本项目「资金流水缺台账」行标红（S3 新口径）----
+  const d8Card = page.locator('.n-card', { hasText: '预付款勾稽' })
   const d8Row = d8Card.locator('.n-data-table-tr', { hasText: `E2E-对账-${RUN}` })
   await expect(d8Row).toBeVisible({ timeout: 8000 })
-  await expect(d8Row).toContainText('双轨差异')
+  await expect(d8Row).toContainText('资金流水缺台账')
   await expect(d8Row).toHaveClass(/diff-row/)
 
   // ---- 维度 1：本合同行 flags 正确且整行标红 ----

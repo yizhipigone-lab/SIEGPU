@@ -102,3 +102,37 @@ def test_statement_summary_lists_customers_sorted(db):
 def test_statement_not_found(db):
     with pytest.raises(BusinessError, match="客户不存在"):
         rsvc.customer_statement(db, uuid.uuid4())
+
+
+def test_statement_period_filter(db):
+    """缺陷#18：对账单支持「当期」口径——只含该月计费/开票/回款（累计口径不变）。"""
+    cust = Customer(name="对账客户C"); db.add(cust); db.flush()
+    c = _contract(db, cust.id, Decimal("10000"))
+    _billing(db, c, Decimal("1000"))                              # period_label 2026-01
+    b2 = Billing(
+        project_id=c.project_id, contract_id=c.id, period_index=2,
+        period_label="2026-02", billing_date=date(2026, 2, 28), days_in_period=28,
+        amount=Decimal("1130"), amount_ex_tax=Decimal("1000"),
+        tax_amount=Decimal("130"), tax_rate=Decimal("0.13"), status="未开",
+    )
+    db.add(b2); db.flush()
+    _invoice(db, c, Decimal("500"), paid=True)                    # issue 2026-02-01, paid 2026-02-10
+    inv2 = Invoice(
+        contract_id=c.id, direction="RECEIVABLE", amount=Decimal("565"),
+        amount_ex_tax=Decimal("500"), tax_amount=Decimal("65"), tax_rate=Decimal("0.13"),
+        issue_date=date(2026, 3, 5), status="已开", paid_date=None,
+    )
+    db.add(inv2); db.flush()
+
+    # 累计口径（现状）
+    st = rsvc.customer_statement(db, cust.id)
+    assert st["billed"] == Decimal("2000.00") and st["invoiced"] == Decimal("1000.00")
+    # 当期 2026-02：只含 2 月计费 + 2 月开票/回款
+    st2 = rsvc.customer_statement(db, cust.id, period="2026-02")
+    assert st2["billed"] == Decimal("1000.00")        # 仅 period_label=2026-02
+    assert st2["invoiced"] == Decimal("500.00")       # 仅 2 月开票
+    assert st2["received"] == Decimal("500.00")       # 仅 2 月回款
+    assert st2["gap_uncollected"] == Decimal("0.00")  # 当期 500-500
+    # 当期行明细只有 2 条（2月计费 + 2月回款），3月开票被剔除
+    assert len(st2["line_items"]) == 2
+    assert all(li["date"].startswith("2026-02") for li in st2["line_items"])
